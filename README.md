@@ -1,5 +1,7 @@
 # Dispatcharr Manager
 
+[![Build and Push Docker Images](https://github.com/MotWakorb/dispatcharr-backup-sync/actions/workflows/docker-build.yml/badge.svg)](https://github.com/MotWakorb/dispatcharr-backup-sync/actions/workflows/docker-build.yml)
+
 A modern web-based GUI for managing Dispatcharr configurations. Sync channels, groups, profiles, DVR rules, users, and more between Dispatcharr instances.
 
 ## Features
@@ -16,10 +18,57 @@ A modern web-based GUI for managing Dispatcharr configurations. Sync channels, g
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### Using Pre-built Docker Images (Easiest)
 
 ```bash
+# Create docker-compose.yml
+cat > docker-compose.yml <<EOF
+version: '3.8'
+
+services:
+  backend:
+    image: ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest
+    container_name: dispatcharr-manager-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    networks:
+      - dispatcharr-manager
+
+  frontend:
+    image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
+    container_name: dispatcharr-manager-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - dispatcharr-manager
+
+networks:
+  dispatcharr-manager:
+    driver: bridge
+EOF
+
+# Start the application
 docker-compose up -d
+```
+
+Access the application at: http://localhost:3000
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/MotWakorb/dispatcharr-backup-sync.git
+cd dispatcharr-backup-sync
+
+# Build and start with Docker Compose
+docker-compose up -d --build
 ```
 
 Access the application at: http://localhost:3000
@@ -141,7 +190,20 @@ npm run build
 
 ## Docker
 
-### Build Images
+### Pre-built Images
+
+Container images are automatically built and published to GitHub Container Registry on every commit to main:
+
+- **Backend**: `ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest`
+- **Frontend**: `ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest`
+
+Tags available:
+- `latest` - Latest build from main branch
+- `main` - Latest build from main branch
+- `v*` - Semantic version tags (e.g., `v1.0.0`)
+- `main-<sha>` - Specific commit SHA
+
+### Build Images Locally
 ```bash
 docker-compose build
 ```
@@ -160,6 +222,15 @@ docker-compose logs -f
 ```bash
 docker-compose down
 ```
+
+## CI/CD
+
+GitHub Actions automatically builds and publishes Docker images on:
+- Push to `main` branch
+- New version tags (e.g., `v1.0.0`)
+- Pull requests (build only, no push)
+
+The workflow uses Docker BuildKit with layer caching for fast builds.
 
 ## License
 
