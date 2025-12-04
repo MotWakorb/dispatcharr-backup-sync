@@ -3,8 +3,8 @@ version: '3.8'
 services:
   backend:
     build:
-      context: ./backend
-      dockerfile: ../docker/backend.Dockerfile
+      context: .
+      dockerfile: docker/backend.Dockerfile
     container_name: dispatcharr-manager-backend
     restart: unless-stopped
     ports:
@@ -12,17 +12,13 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-    volumes:
-      - ./exports:/app/exports
     networks:
       - dispatcharr-manager
 
   frontend:
     build:
-      context: ./frontend
-      dockerfile: ../docker/frontend.Dockerfile
-      args:
-        - VITE_API_URL=http://localhost:3001
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     container_name: dispatcharr-manager-frontend
     restart: unless-stopped
     ports:
@@ -35,6 +31,3 @@ services:
 networks:
   dispatcharr-manager:
     driver: bridge
-
-volumes:
-  exports:
