@@ -93,7 +93,16 @@ export class SyncService {
   }
 
   private countEnabledOptions(options: SyncOptions): number {
-    return Object.values(options).filter((v) => v === true).length;
+    const supportedKeys = new Set([
+      'syncChannelGroups',
+      'syncChannelProfiles',
+      'syncChannels',
+      'syncUsers',
+      'syncPlugins',
+      'syncDVRRules',
+    ]);
+
+    return Object.entries(options).filter(([key, value]) => value === true && supportedKeys.has(key)).length;
   }
 
   private async syncChannelGroups(

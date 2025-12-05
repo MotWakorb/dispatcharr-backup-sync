@@ -119,6 +119,16 @@ export class ImportService {
         currentProgress += progressPerStep;
       }
 
+      // Import EPG Sources
+      if (configData.data?.epgSources) {
+        jobManager.setProgress(jobId, currentProgress, 'Importing EPG sources...');
+        results.imported.epgSources = await this.importEPGSources(
+          client,
+          configData.data.epgSources
+        );
+        currentProgress += progressPerStep;
+      }
+
       // Import Plugins
       if (configData.data?.plugins) {
         jobManager.setProgress(jobId, currentProgress, 'Importing plugins...');
@@ -209,7 +219,7 @@ export class ImportService {
 
   private countDataSections(configData: any): number {
     if (!configData.data) return 0;
-    return Object.keys(configData.data).length;
+    return Object.keys(configData.data).filter((k) => !k.startsWith('__comment_')).length;
   }
 
   private async importChannelGroups(
@@ -316,7 +326,8 @@ export class ImportService {
 
     for (const source of sources) {
       try {
-        await client.post('/api/channels/m3u-sources/', source);
+        // M3U sources are exposed under /api/m3u/accounts/
+        await client.post('/api/m3u/accounts/', source);
         imported++;
       } catch (error) {
         errors++;
@@ -336,7 +347,8 @@ export class ImportService {
 
     for (const profile of profiles) {
       try {
-        await client.post('/api/channels/stream-profiles/', profile);
+        // Stream profiles endpoint lives under /api/core/streamprofiles/
+        await client.post('/api/core/streamprofiles/', profile);
         imported++;
       } catch (error) {
         errors++;
@@ -356,7 +368,47 @@ export class ImportService {
 
     for (const agent of agents) {
       try {
-        await client.post('/api/channels/user-agents/', agent);
+        // User agents endpoint lives under /api/core/useragents/
+        await client.post('/api/core/useragents/', agent);
+        imported++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { imported, skipped, errors };
+  }
+
+  private async importEPGSources(
+    client: DispatcharrClient,
+    sources: any[]
+  ): Promise<{ imported: number; skipped: number; errors: number }> {
+    const existing = await client.get('/api/epg/sources/');
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const source of sources) {
+      try {
+        const match = existing.find((s: any) => s.name === source.name);
+        const payload = {
+          name: source.name,
+          source_type: source.source_type,
+          url: source.url,
+          api_key: source.api_key,
+          is_active: source.is_active,
+          // include other optional fields if present
+          ...(['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
+            if (source[key] !== undefined) acc[key] = source[key];
+            return acc;
+          }, {})),
+        };
+
+        if (match) {
+          await client.put(`/api/epg/sources/${match.id}/`, payload);
+        } else {
+          await client.post('/api/epg/sources/', payload);
+        }
         imported++;
       } catch (error) {
         errors++;

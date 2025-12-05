@@ -40,3 +40,4 @@ coverage/
 # Temporary files
 temp/
 tmp/
+swagger.json

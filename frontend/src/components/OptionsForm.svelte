@@ -12,6 +12,7 @@
     { key: 'syncStreamProfiles', label: 'Stream Profiles' },
     { key: 'syncUserAgents', label: 'User Agents' },
     { key: 'syncCoreSettings', label: 'Core Settings' },
+    { key: 'syncEPGSources', label: 'EPG Sources' },
     { key: 'syncPlugins', label: 'Plugins' },
     { key: 'syncDVRRules', label: 'DVR Rules' },
     { key: 'syncComskipConfig', label: 'Comskip Config' },

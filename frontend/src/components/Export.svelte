@@ -16,6 +16,7 @@
     syncChannelGroups: true,
     syncChannelProfiles: true,
     syncChannels: true,
+    syncEPGSources: true,
     format: 'yaml',
     compress: 'none',
     downloadLogos: false,

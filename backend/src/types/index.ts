@@ -17,6 +17,7 @@ export interface SyncOptions {
   syncDVRRules?: boolean;
   syncComskipConfig?: boolean;
   syncUsers?: boolean;
+  syncEPGSources?: boolean;
 }
 
 export interface ExportOptions extends SyncOptions {

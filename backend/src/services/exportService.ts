@@ -17,6 +17,32 @@ const rmdir = promisify(fs.rmdir);
 export class ExportService {
   private tempDir = path.join(process.cwd(), 'temp');
 
+  private async getAllPaginated(client: any, endpoint: string): Promise<any[]> {
+    let allResults: any[] = [];
+    let page = 1;
+    const pageSize = 1000;
+
+    while (true) {
+      const response = await client.get(`${endpoint}?page=${page}&page_size=${pageSize}`);
+
+      if (response.results && Array.isArray(response.results)) {
+        allResults = allResults.concat(response.results);
+        if (!response.next) {
+          break;
+        }
+        page++;
+      } else if (Array.isArray(response)) {
+        // Non-paginated response
+        return response;
+      } else {
+        // Single object response
+        return [response];
+      }
+    }
+
+    return allResults;
+  }
+
   async export(request: ExportRequest, jobId: string): Promise<string> {
     try {
       jobManager.startJob(jobId, 'Initializing export...');
@@ -43,7 +69,12 @@ export class ExportService {
       // Export Channel Groups
       if (request.options.syncChannelGroups) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting channel groups...');
-        exportData.data.channelGroups = await client.get('/api/channels/groups/');
+        const allGroups = await client.get('/api/channels/groups/');
+        // Filter out groups created by M3U sources (those with m3u_account_count > 0)
+        const manualGroups = Array.isArray(allGroups)
+          ? allGroups.filter((group: any) => !group.m3u_account_count || group.m3u_account_count === 0)
+          : allGroups;
+        exportData.data.channelGroups = manualGroups;
         currentProgress += progressPerStep;
       }
 
@@ -57,29 +88,55 @@ export class ExportService {
       // Export Channels
       if (request.options.syncChannels) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting channels...');
-        const channels = await client.get('/api/channels/channels/');
-        exportData.data.channels = Array.isArray(channels) ? channels : channels.results || [];
+        const allChannels = await this.getAllPaginated(client, '/api/channels/channels/');
+        // Filter out auto-created channels (those created via M3U auto channel sync)
+        const manualChannels = allChannels
+          .filter((channel: any) => !channel.auto_created)
+          .sort((a: any, b: any) => {
+            const aNum = Number(a.channel_number) || 0;
+            const bNum = Number(b.channel_number) || 0;
+            return aNum - bNum;
+          });
+        exportData.data.channels = manualChannels;
         currentProgress += progressPerStep;
       }
 
       // Export M3U Sources
       if (request.options.syncM3USources) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting M3U sources...');
-        exportData.data.m3uSources = await client.get('/api/channels/m3u-sources/');
+        // Swagger path uses /api/m3u/accounts/ for M3U source definitions
+        const accounts = await this.getAllPaginated(client, '/api/m3u/accounts/');
+        // Ensure credentials (username/password) are included if present on the source
+        exportData.data.m3uSources = accounts.map((acct: any) => {
+          const { username, password, ...rest } = acct;
+          return {
+            ...rest,
+            ...(username ? { username } : {}),
+            ...(password ? { password } : {}),
+          };
+        });
         currentProgress += progressPerStep;
       }
 
       // Export Stream Profiles
       if (request.options.syncStreamProfiles) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting stream profiles...');
-        exportData.data.streamProfiles = await client.get('/api/channels/stream-profiles/');
+        // Stream profiles live under /api/core/streamprofiles/ per swagger
+        exportData.data.streamProfiles = await this.getAllPaginated(
+          client,
+          '/api/core/streamprofiles/'
+        );
         currentProgress += progressPerStep;
       }
 
       // Export User Agents
       if (request.options.syncUserAgents) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting user agents...');
-        exportData.data.userAgents = await client.get('/api/channels/user-agents/');
+        // User agents endpoint is /api/core/useragents/
+        exportData.data.userAgents = await this.getAllPaginated(
+          client,
+          '/api/core/useragents/'
+        );
         currentProgress += progressPerStep;
       }
 
@@ -87,6 +144,13 @@ export class ExportService {
       if (request.options.syncCoreSettings) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting core settings...');
         exportData.data.coreSettings = await client.get('/api/core/settings/');
+        currentProgress += progressPerStep;
+      }
+
+      // Export EPG Sources
+      if (request.options.syncEPGSources) {
+        jobManager.setProgress(jobId, currentProgress, 'Exporting EPG sources...');
+        exportData.data.epgSources = await this.getAllPaginated(client, '/api/epg/sources/');
         currentProgress += progressPerStep;
       }
 
@@ -121,8 +185,11 @@ export class ExportService {
       // Export Users
       if (request.options.syncUsers) {
         jobManager.setProgress(jobId, currentProgress, 'Exporting users...');
-        const users = await client.get('/api/accounts/users/');
-        exportData.data.users = users.filter((u: any) => !u.is_staff && u.user_level !== 0);
+        const allUsers = await this.getAllPaginated(client, '/api/accounts/users/');
+        // Keep all returned users (including admins); sort for stable output
+        exportData.data.users = allUsers.sort((a: any, b: any) =>
+          (a.username || '').localeCompare(b.username || '')
+        );
         currentProgress += progressPerStep;
       }
 
@@ -140,8 +207,7 @@ export class ExportService {
       const configFileName = `dispatcharr-config-${Date.now()}.${format}`;
       const configFilePath = path.join(this.tempDir, configFileName);
 
-      const configContent =
-        format === 'yaml' ? yaml.dump(exportData) : JSON.stringify(exportData, null, 2);
+      const configContent = this.formatExportContent(exportData, format);
 
       await writeFile(configFilePath, configContent, 'utf-8');
 
@@ -288,6 +354,9 @@ export class ExportService {
     if (exportData.data.userAgents) {
       summary.counts.userAgents = exportData.data.userAgents.length;
     }
+    if (exportData.data.epgSources) {
+      summary.counts.epgSources = exportData.data.epgSources.length;
+    }
     if (exportData.data.plugins) {
       summary.counts.plugins = exportData.data.plugins.length;
     }
@@ -302,6 +371,73 @@ export class ExportService {
     }
 
     return summary;
+  }
+
+  private formatExportContent(exportData: any, format: 'yaml' | 'json'): string {
+    const sections: { key: string; label: string }[] = [
+      { key: 'channelGroups', label: 'Channel Groups' },
+      { key: 'channelProfiles', label: 'Channel Profiles' },
+      { key: 'channels', label: 'Channels' },
+      { key: 'm3uSources', label: 'M3U Sources' },
+      { key: 'streamProfiles', label: 'Stream Profiles' },
+      { key: 'userAgents', label: 'User Agents' },
+      { key: 'coreSettings', label: 'Core Settings' },
+      { key: 'epgSources', label: 'EPG Sources' },
+      { key: 'logos', label: 'Logos' },
+      { key: 'plugins', label: 'Plugins' },
+      { key: 'dvrRules', label: 'DVR Rules' },
+      { key: 'comskipConfig', label: 'Comskip Config' },
+      { key: 'users', label: 'Users' },
+    ];
+
+    if (format === 'json') {
+      // Insert marker keys so the JSON stays valid but shows section boundaries
+      const dataWithComments: any = {};
+      for (const section of sections) {
+        const value = exportData.data[section.key];
+        if (value !== undefined) {
+          dataWithComments[`__comment_${section.key}`] = `--- ${section.label} ---`;
+          dataWithComments[section.key] = value;
+        }
+      }
+
+      const exportWithComments = {
+        ...exportData,
+        data: dataWithComments,
+      };
+
+      return JSON.stringify(exportWithComments, null, 2);
+    }
+
+    // YAML: add real comment lines between sections for readability
+    const indentLines = (text: string, spaces = 2) =>
+      text
+        .split('\n')
+        .map((line) => (line ? ' '.repeat(spaces) + line : line))
+        .join('\n');
+
+    const header = yaml.dump(
+      {
+        exported_at: exportData.exported_at,
+        source_url: exportData.source_url,
+      },
+      { lineWidth: -1 }
+    );
+
+    const parts: string[] = [header.trimEnd(), 'data:'];
+
+    for (const section of sections) {
+      const value = exportData.data[section.key];
+      if (value === undefined) continue;
+
+      parts.push(`  # --- ${section.label} ---`);
+      const sectionYaml = yaml
+        .dump({ [section.key]: value }, { lineWidth: -1 })
+        .replace(/\n$/, '');
+      parts.push(indentLines(sectionYaml));
+    }
+
+    return parts.join('\n') + '\n';
   }
 
   async cleanup(filePath: string): Promise<void> {
