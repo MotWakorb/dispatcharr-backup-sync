@@ -30,6 +30,10 @@ class JobManager {
     return this.jobs.get(jobId);
   }
 
+  getAllJobs(): JobStatus[] {
+    return Array.from(this.jobs.values());
+  }
+
   startJob(jobId: string, message?: string): void {
     this.updateJob(jobId, {
       status: 'running',
