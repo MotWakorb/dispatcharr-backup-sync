@@ -60,7 +60,10 @@ export class DispatcharrClient {
         fullError: errorData
       });
 
-      throw new Error(`Authentication failed (${statusCode || 'unknown'}): ${errorMsg}`);
+      const authError: any = new Error(`Authentication failed (${statusCode || 'unknown'}): ${errorMsg}`);
+      authError.status = statusCode;
+      authError.code = statusCode;
+      throw authError;
     }
   }
 
@@ -156,14 +159,18 @@ export class DispatcharrClient {
 
       return {
         success: true,
-        message: 'Connection successful - API access verified',
+        message: 'Connection successful!',
         version: 'Dispatcharr',
       };
     } catch (error: any) {
       console.error('Test connection failed:', error.message);
+      const status = error?.status || error?.code || error?.response?.status;
+      const message = status === 401
+        ? 'Unknown username or password.'
+        : (error.message || error?.response?.data?.detail || 'Connection failed');
       return {
         success: false,
-        message: error.message || 'Connection failed',
+        message,
       };
     }
   }

@@ -4,6 +4,7 @@ import { jobManager } from '../services/jobManager.js';
 import path from 'path';
 import fs from 'fs';
 import type { ExportRequest } from '../types/index.js';
+import type { ApiResponse } from '../types/index.js';
 
 export const exportRouter = Router();
 
@@ -29,7 +30,7 @@ exportRouter.post('/', async (req, res) => {
     }
 
     // Create a new job
-    const jobId = jobManager.createJob();
+    const jobId = jobManager.createJob('export');
 
     // Start export in background
     exportService
@@ -52,6 +53,33 @@ exportRouter.post('/', async (req, res) => {
       success: false,
       error: error.message || 'Failed to start export job',
     });
+  }
+});
+
+// Cancel export job
+exportRouter.post('/cancel/:jobId', (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      } as ApiResponse);
+    }
+
+    jobManager.cancelJob(jobId, 'Cancelled by user');
+
+    res.json({
+      success: true,
+      message: 'Export job cancelled',
+    } as ApiResponse);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to cancel export job',
+    } as ApiResponse);
   }
 });
 
@@ -134,5 +162,55 @@ exportRouter.get('/download/:jobId', async (req, res) => {
       success: false,
       error: error.message || 'Failed to download file',
     });
+  }
+});
+
+// Download logos zip
+exportRouter.get('/download/:jobId/logos', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      } as ApiResponse);
+    }
+
+    if (status.status !== 'completed') {
+      return res.status(400).json({
+        success: false,
+        error: 'Export not completed yet',
+      } as ApiResponse);
+    }
+
+    const filePath = (status as any).result?.logosFilePath;
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Logos archive not found',
+      } as ApiResponse);
+    }
+
+    const fileName = (status as any).result?.logosFileName || path.basename(filePath);
+
+    res.download(filePath, fileName, (err) => {
+      if (err) {
+        console.error('Error sending logos file:', err);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to download logos',
+          } as ApiResponse);
+        }
+      }
+    });
+  } catch (error: any) {
+    console.error('Error downloading logos:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to download logos',
+    } as ApiResponse);
   }
 });

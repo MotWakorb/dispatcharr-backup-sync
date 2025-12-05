@@ -57,7 +57,7 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
     }
 
     // Create a new job
-    const jobId = jobManager.createJob();
+    const jobId = jobManager.createJob('import');
 
     // Start import in background
     importService

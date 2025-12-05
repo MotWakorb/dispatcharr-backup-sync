@@ -1,10 +1,22 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import ConnectionForm from './ConnectionForm.svelte';
   import OptionsForm from './OptionsForm.svelte';
   import JobProgress from './JobProgress.svelte';
-  import { startExport, getExportStatus, getExportDownloadUrl } from '../api';
-  import type { DispatcharrConnection, ExportOptions, JobStatus } from '../types';
+  import {
+    startExport,
+    getExportStatus,
+    getExportDownloadUrl,
+    listSavedConnections,
+    cancelExport,
+    getJobLogs,
+  } from '../api';
+  import type {
+    DispatcharrConnection,
+    ExportOptions,
+    JobStatus,
+    SavedConnection,
+  } from '../types';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -27,14 +39,46 @@
   let currentJob: JobStatus | null = null;
   let error: string | null = null;
   let pollInterval: number | null = null;
+  let savedConnections: SavedConnection[] = [];
+  let loadingSavedConnections = false;
+  let savedConnectionsError: string | null = null;
+  let overlayMessage = 'Export in progress...';
+  let showOverlay = false;
+  let backgroundJobId: string | null = null;
+  let toast: { message: string; action?: () => void } | null = null;
+  let showLogs = false;
+  let logs: { timestamp: string; message: string }[] = [];
+  let logsPoll: number | null = null;
+
+  onMount(loadSavedConnections);
+
+  async function loadSavedConnections() {
+    loadingSavedConnections = true;
+    savedConnectionsError = null;
+    try {
+      savedConnections = await listSavedConnections();
+    } catch (err: any) {
+      savedConnectionsError =
+        err.response?.data?.error || err.message || 'Failed to load saved accounts';
+    } finally {
+      loadingSavedConnections = false;
+    }
+  }
 
   async function handleExport() {
     exporting = true;
     error = null;
     currentJob = null;
+    overlayMessage = 'Export in progress...';
+    showOverlay = true;
+    backgroundJobId = null;
+    logs = [];
+    showLogs = false;
+    stopLogPolling();
 
     try {
       const jobId = await startExport(connection, options, dryRun);
+      startLogPolling(jobId);
       pollJobStatus(jobId);
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to start export';
@@ -46,15 +90,79 @@
     try {
       const job = await getExportStatus(jobId);
       currentJob = job;
+      if (!showOverlay && !backgroundJobId) {
+        backgroundJobId = job.jobId;
+      }
 
       if (job.status === 'running' || job.status === 'pending') {
         pollInterval = window.setTimeout(() => pollJobStatus(jobId), 1000);
       } else {
+        if (pollInterval) {
+          clearTimeout(pollInterval);
+          pollInterval = null;
+        }
         exporting = false;
+        if (job.status === 'cancelled') {
+          overlayMessage = 'Export cancelled';
+        }
+        if (job.status === 'failed') {
+          error = job.error || job.message || 'Export failed';
+        }
+        if (job.status === 'completed' && backgroundJobId === job.jobId && !toast) {
+          toast = {
+            message: 'Export completed',
+            action: () => handleDownloadFromId(job.jobId),
+          };
+        }
+        if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+          stopLogPolling();
+          await loadLogs(job.jobId);
+        }
       }
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to get job status';
       exporting = false;
+    }
+  }
+
+  async function handleCancel() {
+    if (!currentJob?.jobId) return;
+    overlayMessage = 'Cancelling export...';
+    if (pollInterval) {
+      clearTimeout(pollInterval);
+      pollInterval = null;
+    }
+    stopLogPolling();
+    try {
+      await cancelExport(currentJob.jobId);
+      currentJob = { ...currentJob, status: 'cancelled', message: 'Cancelled by user' };
+      overlayMessage = 'Export cancelled';
+      await loadLogs(currentJob.jobId);
+    } catch (err: any) {
+      error = err.response?.data?.error || err.message || 'Failed to cancel export';
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function loadLogs(jobId: string) {
+    try {
+      logs = await getJobLogs(jobId);
+    } catch (err: any) {
+      // ignore log load errors for now
+    }
+  }
+
+  function startLogPolling(jobId: string) {
+    stopLogPolling();
+    loadLogs(jobId);
+    logsPoll = window.setInterval(() => loadLogs(jobId), 1000);
+  }
+
+  function stopLogPolling() {
+    if (logsPoll) {
+      clearInterval(logsPoll);
+      logsPoll = null;
     }
   }
 
@@ -65,24 +173,42 @@
     }
   }
 
+  function handleDownloadFromId(id: string) {
+    const url = getExportDownloadUrl(id);
+    window.location.href = url;
+  }
+
   onDestroy(() => {
     if (pollInterval) {
       clearTimeout(pollInterval);
     }
+    stopLogPolling();
   });
 
   $: isValid = connection.url && connection.username && connection.password;
   $: canDownload = currentJob?.status === 'completed' && !dryRun;
+  $: overlayVisible =
+    showOverlay && (exporting || (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending')));
 </script>
 
 <div>
-  <div class="card">
+  <div class="card export-card">
     <div class="card-header">
       <h2 class="card-title">Export Configuration</h2>
       <p class="text-sm text-gray">Export Dispatcharr configuration to a file</p>
     </div>
 
-    <ConnectionForm bind:connection label="Source Instance" />
+    <ConnectionForm
+      bind:connection
+      label="Source Instance"
+      {savedConnections}
+      allowManualEntry={false}
+      allowSave={false}
+      showSelectedSummary={false}
+      testable={false}
+      loadingSaved={loadingSavedConnections}
+      savedError={savedConnectionsError}
+    />
 
     <div class="mt-3">
       <OptionsForm bind:options />
@@ -135,7 +261,7 @@
       </div>
     {/if}
 
-    <div class="flex justify-between items-center mt-3">
+    <div class="actions-row">
       <button
         class="btn btn-primary"
         on:click={handleExport}
@@ -157,12 +283,181 @@
     </div>
   </div>
 
-  {#if currentJob}
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Export Progress</h3>
+  {#if overlayVisible}
+    <div class="overlay">
+      <div class="overlay-card">
+          <div class="flex justify-between items-center mb-2">
+            <div>
+              <p class="text-sm text-gray">{overlayMessage}</p>
+              {#if currentJob}
+                <p class="text-xs text-gray">Job ID: {currentJob.jobId}</p>
+              {/if}
+            </div>
+            <div class="flex gap-2">
+              {#if currentJob}
+                <button class="btn btn-secondary btn-sm" on:click={() => showLogs = true}>
+                  View logs
+                </button>
+              {/if}
+              <button class="btn btn-secondary btn-sm" on:click={() => { showOverlay = false; backgroundJobId = currentJob?.jobId || backgroundJobId; }}>
+                Run in background
+              </button>
+              <button class="btn btn-secondary btn-sm" on:click={handleCancel} disabled={!currentJob}>
+                Cancel
+              </button>
+          </div>
+        </div>
+        {#if currentJob}
+          <JobProgress job={currentJob} />
+        {:else}
+          <div class="flex items-center gap-2">
+            <span class="spinner"></span>
+            <span>Preparing export...</span>
+          </div>
+        {/if}
       </div>
-      <JobProgress job={currentJob} />
+    </div>
+  {/if}
+
+  {#if toast}
+    <div class="toast">
+      <span>{toast.message}</span>
+      {#if toast.action}
+        <button class="btn btn-success btn-sm" on:click={() => toast?.action?.()}>Download</button>
+      {/if}
+      <button class="btn btn-secondary btn-sm" on:click={() => toast = null}>Dismiss</button>
+    </div>
+  {/if}
+
+  {#if showLogs}
+    <div class="logs-overlay" role="presentation">
+      <button class="sr-only" on:click={() => showLogs = false}>Close logs</button>
+      <div
+        class="logs-modal"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div class="flex justify-between items-center mb-2">
+          <h3>Job Logs</h3>
+          <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
+        </div>
+        <div class="logs-body">
+          {#if logs.length === 0}
+            <p class="text-sm text-gray">No logs yet.</p>
+          {:else}
+            {#each logs as log (log.timestamp + log.message)}
+              <div class="log-line">
+                <span class="log-time">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                <span class="log-msg">{log.message}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
 </div>
+
+<style>
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .overlay-card {
+    width: min(700px, 100%);
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    padding: 1rem;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: #111827;
+    color: #fff;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    z-index: 1001;
+  }
+
+  .logs-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1002;
+    padding: 1rem;
+  }
+
+  .logs-modal {
+    width: min(800px, 100%);
+    max-height: 80vh;
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .logs-body {
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    overflow-y: auto;
+    max-height: 60vh;
+    font-family: Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--gray-200);
+  }
+
+  .log-line:last-child {
+    border-bottom: none;
+  }
+
+  .log-time {
+    color: var(--gray-500);
+    min-width: 4.5rem;
+  }
+
+  .log-msg {
+    color: var(--gray-800);
+  }
+
+  .export-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .actions-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+</style>

@@ -41,3 +41,6 @@ coverage/
 temp/
 tmp/
 swagger.json
+
+# Local saved credentials
+backend/data/savedConnections.json

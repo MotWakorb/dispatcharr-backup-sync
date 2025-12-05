@@ -1,18 +1,22 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { JobStatus } from '../types/index.js';
+import type { JobStatus, JobLogEntry } from '../types/index.js';
 
 class JobManager {
   private jobs: Map<string, JobStatus> = new Map();
+  private logs: Map<string, JobLogEntry[]> = new Map();
+  private history: JobStatus[] = [];
 
-  createJob(): string {
+  createJob(jobType?: JobStatus['jobType']): string {
     const jobId = uuidv4();
     const job: JobStatus = {
       jobId,
       status: 'pending',
       progress: 0,
       startedAt: new Date(),
+      ...(jobType ? { jobType } : {}),
     };
     this.jobs.set(jobId, job);
+    this.logs.set(jobId, []);
     return jobId;
   }
 
@@ -20,8 +24,13 @@ class JobManager {
     const job = this.jobs.get(jobId);
     if (job) {
       Object.assign(job, updates);
-      if (updates.status === 'completed' || updates.status === 'failed') {
+      if (
+        updates.status === 'completed' ||
+        updates.status === 'failed' ||
+        updates.status === 'cancelled'
+      ) {
         job.completedAt = new Date();
+        this.recordHistory(job);
       }
     }
   }
@@ -31,7 +40,18 @@ class JobManager {
   }
 
   getAllJobs(): JobStatus[] {
-    return Array.from(this.jobs.values());
+    // Only return active jobs (pending/running) for the live jobs list
+    return Array.from(this.jobs.values()).filter(
+      (job) => job.status === 'pending' || job.status === 'running'
+    );
+  }
+
+  cancelJob(jobId: string, message?: string): void {
+    this.updateJob(jobId, {
+      status: 'cancelled',
+      message: message || 'Cancelled by user',
+      completedAt: new Date(),
+    } as any);
   }
 
   startJob(jobId: string, message?: string): void {
@@ -40,14 +60,17 @@ class JobManager {
       progress: 0,
       message,
     });
+    this.addLog(jobId, message || 'Job started');
   }
 
   completeJob(jobId: string, result?: any): void {
     this.updateJob(jobId, {
       status: 'completed',
       progress: 100,
+      message: 'Completed',
       result,
     });
+    this.addLog(jobId, 'Job completed');
   }
 
   failJob(jobId: string, error: string): void {
@@ -55,6 +78,7 @@ class JobManager {
       status: 'failed',
       error,
     });
+    this.addLog(jobId, `Job failed: ${error}`);
   }
 
   setProgress(jobId: string, progress: number, message?: string): void {
@@ -62,6 +86,9 @@ class JobManager {
       progress,
       message,
     });
+    if (message) {
+      this.addLog(jobId, `${message} (${Math.round(progress)}%)`);
+    }
   }
 
   // Clean up old jobs (completed > 1 hour ago)
@@ -70,8 +97,37 @@ class JobManager {
     for (const [jobId, job] of this.jobs.entries()) {
       if (job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
+        this.logs.delete(jobId);
       }
     }
+  }
+
+  addLog(jobId: string, message: string): void {
+    const log = this.logs.get(jobId);
+    if (!log) return;
+    log.push({
+      timestamp: new Date().toISOString(),
+      message,
+    });
+  }
+
+  getLogs(jobId: string): JobLogEntry[] {
+    return this.logs.get(jobId) || [];
+  }
+
+  private recordHistory(job: JobStatus): void {
+    // store a shallow copy to preserve snapshot
+    const snapshot: JobStatus = { ...job };
+    this.history = this.history.filter((j) => j.jobId !== job.jobId);
+    this.history.push(snapshot);
+    // keep latest 100
+    if (this.history.length > 100) {
+      this.history = this.history.slice(this.history.length - 100);
+    }
+  }
+
+  getHistory(): JobStatus[] {
+    return [...this.history];
   }
 }
 

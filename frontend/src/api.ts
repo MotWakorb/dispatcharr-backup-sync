@@ -6,6 +6,10 @@ import type {
   JobStatus,
   TestConnectionResponse,
   ApiResponse,
+  SavedConnection,
+  SavedConnectionInput,
+  JobStatus,
+  JobLogEntry,
 } from './types';
 
 const api = axios.create({
@@ -31,6 +35,34 @@ export async function getInstanceInfo(
 ): Promise<any> {
   const response = await api.post<ApiResponse>('/connections/info', connection);
   return response.data.data;
+}
+
+// Saved connection APIs
+export async function listSavedConnections(): Promise<SavedConnection[]> {
+  const response = await api.get<ApiResponse<SavedConnection[]>>('/saved-connections');
+  return response.data.data || [];
+}
+
+export async function createSavedConnection(
+  input: SavedConnectionInput
+): Promise<SavedConnection> {
+  const response = await api.post<ApiResponse<SavedConnection>>('/saved-connections', input);
+  return response.data.data!;
+}
+
+export async function updateSavedConnection(
+  id: string,
+  input: SavedConnectionInput
+): Promise<SavedConnection> {
+  const response = await api.put<ApiResponse<SavedConnection>>(
+    `/saved-connections/${id}`,
+    input
+  );
+  return response.data.data!;
+}
+
+export async function deleteSavedConnection(id: string): Promise<void> {
+  await api.delete<ApiResponse>(`/saved-connections/${id}`);
 }
 
 // Sync APIs
@@ -86,6 +118,30 @@ export async function getExportStatus(jobId: string): Promise<JobStatus> {
 
 export function getExportDownloadUrl(jobId: string): string {
   return `/api/export/download/${jobId}`;
+}
+
+export function getExportLogosDownloadUrl(jobId: string): string {
+  return `/api/export/download/${jobId}/logos`;
+}
+
+export async function cancelExport(jobId: string): Promise<void> {
+  await api.post<ApiResponse>(`/export/cancel/${jobId}`);
+}
+
+// Jobs
+export async function listJobs(): Promise<JobStatus[]> {
+  const response = await api.get<ApiResponse<JobStatus[]>>('/jobs');
+  return response.data.data || [];
+}
+
+export async function getJobLogs(jobId: string): Promise<JobLogEntry[]> {
+  const response = await api.get<ApiResponse<JobLogEntry[]>>(`/jobs/${jobId}/logs`);
+  return response.data.data || [];
+}
+
+export async function getJobHistory(): Promise<JobStatus[]> {
+  const response = await api.get<ApiResponse<JobStatus[]>>('/jobs/history/list');
+  return response.data.data || [];
 }
 
 // Import APIs

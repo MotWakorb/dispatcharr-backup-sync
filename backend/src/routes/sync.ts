@@ -38,7 +38,7 @@ syncRouter.post('/', async (req, res) => {
     }
 
     // Create a new job
-    const jobId = jobManager.createJob();
+    const jobId = jobManager.createJob('sync');
 
     // Start sync in background
     syncService

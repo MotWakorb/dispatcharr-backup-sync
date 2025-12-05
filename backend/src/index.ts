@@ -4,6 +4,8 @@ import { syncRouter } from './routes/sync.js';
 import { exportRouter } from './routes/export.js';
 import { importRouter } from './routes/import.js';
 import { connectionsRouter } from './routes/connections.js';
+import { savedConnectionsRouter } from './routes/savedConnections.js';
+import { jobsRouter } from './routes/jobs.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,6 +25,8 @@ app.use('/api/sync', syncRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/import', importRouter);
 app.use('/api/connections', connectionsRouter);
+app.use('/api/saved-connections', savedConnectionsRouter);
+app.use('/api/jobs', jobsRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import ConnectionForm from './ConnectionForm.svelte';
   import OptionsForm from './OptionsForm.svelte';
   import JobProgress from './JobProgress.svelte';
-  import { startSync, getSyncStatus } from '../api';
-  import type { DispatcharrConnection, SyncOptions, JobStatus } from '../types';
+  import { startSync, getSyncStatus, listSavedConnections } from '../api';
+  import type { DispatcharrConnection, SyncOptions, JobStatus, SavedConnection } from '../types';
 
   let sourceConnection: DispatcharrConnection = {
     url: '',
@@ -29,6 +29,24 @@
   let currentJob: JobStatus | null = null;
   let error: string | null = null;
   let pollInterval: number | null = null;
+  let savedConnections: SavedConnection[] = [];
+  let loadingSavedConnections = false;
+  let savedConnectionsError: string | null = null;
+
+  onMount(loadSavedConnections);
+
+  async function loadSavedConnections() {
+    loadingSavedConnections = true;
+    savedConnectionsError = null;
+    try {
+      savedConnections = await listSavedConnections();
+    } catch (err: any) {
+      savedConnectionsError =
+        err.response?.data?.error || err.message || 'Failed to load saved accounts';
+    } finally {
+      loadingSavedConnections = false;
+    }
+  }
 
   async function handleSync() {
     syncing = true;
@@ -71,15 +89,35 @@
 </script>
 
 <div>
-  <div class="card">
+  <div class="card export-card">
     <div class="card-header">
       <h2 class="card-title">Sync Between Instances</h2>
       <p class="text-sm text-gray">Synchronize configuration between two Dispatcharr instances</p>
     </div>
 
     <div class="grid grid-2 mb-3">
-      <ConnectionForm bind:connection={sourceConnection} label="Source Instance" />
-      <ConnectionForm bind:connection={destConnection} label="Destination Instance" />
+      <ConnectionForm
+        bind:connection={sourceConnection}
+        label="Source Instance"
+        {savedConnections}
+        allowManualEntry={false}
+        allowSave={false}
+        showSelectedSummary={false}
+        testable={false}
+        loadingSaved={loadingSavedConnections}
+        savedError={savedConnectionsError}
+      />
+      <ConnectionForm
+        bind:connection={destConnection}
+        label="Destination Instance"
+        {savedConnections}
+        allowManualEntry={false}
+        allowSave={false}
+        showSelectedSummary={false}
+        testable={false}
+        loadingSaved={loadingSavedConnections}
+        savedError={savedConnectionsError}
+      />
     </div>
 
     <OptionsForm bind:options />
@@ -102,7 +140,7 @@
       </div>
     {/if}
 
-    <div class="flex justify-between items-center mt-3">
+    <div class="actions-row">
       <button
         class="btn btn-primary"
         on:click={handleSync}
@@ -127,3 +165,19 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .export-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .actions-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+</style>

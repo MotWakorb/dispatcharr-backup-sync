@@ -2,7 +2,6 @@
   import type { SyncOptions } from '../types';
 
   export let options: SyncOptions = {};
-  export let showAll: boolean = true;
 
   const allOptions = [
     { key: 'syncChannelGroups', label: 'Channel Groups' },

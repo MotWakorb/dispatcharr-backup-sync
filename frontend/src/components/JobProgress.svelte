@@ -2,6 +2,10 @@
   import type { JobStatus } from '../types';
 
   export let job: JobStatus;
+
+  $: progressDisplay = job.progress !== undefined
+    ? Math.round(job.progress)
+    : undefined;
 </script>
 
 <div class="job-progress">
@@ -14,18 +18,19 @@
         class:status-running={job.status === 'running'}
         class:status-completed={job.status === 'completed'}
         class:status-failed={job.status === 'failed'}
+        class:status-cancelled={job.status === 'cancelled'}
       >
         {job.status}
       </span>
     </div>
-    {#if job.progress !== undefined}
-      <span class="text-sm text-gray">{job.progress}%</span>
+    {#if progressDisplay !== undefined}
+      <span class="text-sm text-gray">{progressDisplay}%</span>
     {/if}
   </div>
 
-  {#if job.progress !== undefined}
+  {#if progressDisplay !== undefined}
     <div class="progress-bar mb-2">
-      <div class="progress-fill" style="width: {job.progress}%"></div>
+      <div class="progress-fill" style="width: {progressDisplay}%"></div>
     </div>
   {/if}
 
@@ -132,6 +137,11 @@
   .status-failed {
     background: #fee2e2;
     color: var(--danger);
+  }
+
+  .status-cancelled {
+    background: #e5e7eb;
+    color: #6b7280;
   }
 
   .result-summary {

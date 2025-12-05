@@ -4,6 +4,19 @@ export interface DispatcharrConnection {
   password: string;
 }
 
+export interface SavedConnectionInput {
+  name: string;
+  instanceUrl: string;
+  username: string;
+  password: string;
+}
+
+export interface SavedConnection extends SavedConnectionInput {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SyncOptions {
   syncChannelGroups?: boolean;
   syncChannelProfiles?: boolean;
@@ -48,13 +61,19 @@ export interface ImportRequest {
 
 export interface JobStatus {
   jobId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  jobType?: 'export' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
   result?: any;
   error?: string;
   startedAt: Date;
   completedAt?: Date;
+}
+
+export interface JobLogEntry {
+  timestamp: string;
+  message: string;
 }
 
 export interface TestConnectionResponse {

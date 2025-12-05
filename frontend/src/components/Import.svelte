@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import ConnectionForm from './ConnectionForm.svelte';
   import JobProgress from './JobProgress.svelte';
-  import { startImport, getImportStatus } from '../api';
-  import type { DispatcharrConnection, JobStatus } from '../types';
+  import { startImport, getImportStatus, listSavedConnections } from '../api';
+  import type { DispatcharrConnection, JobStatus, SavedConnection } from '../types';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -17,6 +17,24 @@
   let currentJob: JobStatus | null = null;
   let error: string | null = null;
   let pollInterval: number | null = null;
+  let savedConnections: SavedConnection[] = [];
+  let loadingSavedConnections = false;
+  let savedConnectionsError: string | null = null;
+
+  onMount(loadSavedConnections);
+
+  async function loadSavedConnections() {
+    loadingSavedConnections = true;
+    savedConnectionsError = null;
+    try {
+      savedConnections = await listSavedConnections();
+    } catch (err: any) {
+      savedConnectionsError =
+        err.response?.data?.error || err.message || 'Failed to load saved accounts';
+    } finally {
+      loadingSavedConnections = false;
+    }
+  }
 
   function handleFileSelect(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -70,13 +88,23 @@
 </script>
 
 <div>
-  <div class="card">
+  <div class="card export-card">
     <div class="card-header">
       <h2 class="card-title">Import Configuration</h2>
       <p class="text-sm text-gray">Import configuration from a backup file</p>
     </div>
 
-    <ConnectionForm bind:connection label="Destination Instance" />
+    <ConnectionForm
+      bind:connection
+      label="Destination Instance"
+      {savedConnections}
+      allowManualEntry={false}
+      allowSave={false}
+      showSelectedSummary={false}
+      testable={false}
+      loadingSaved={loadingSavedConnections}
+      savedError={savedConnectionsError}
+    />
 
     <div class="mt-3">
       <div class="form-group">
@@ -108,7 +136,7 @@
       </div>
     {/if}
 
-    <div class="flex justify-between items-center mt-3">
+    <div class="actions-row">
       <button
         class="btn btn-primary"
         on:click={handleImport}
@@ -133,3 +161,19 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .export-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .actions-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+  }
+</style>
