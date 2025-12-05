@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { listJobs, getExportDownloadUrl, cancelExport, getJobHistory } from '../api';
+  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory } from '../api';
   import type { JobStatus } from '../types';
 
   let jobs: JobStatus[] = [];
@@ -241,17 +241,18 @@
 </div>
 
 {#if toast}
+  {@const toastJob = toast?.job}
   <div class="toast">
     <span>{toast.message}</span>
-    {#if toast.job && toast.job.jobType === 'export'}
+    {#if toastJob && toastJob.jobType === 'export'}
       <div class="toast-actions">
-        {#if toast.job.result?.fileName}
-          <button class="btn btn-success btn-sm" on:click={() => toast.job && download(toast.job)}>
+        {#if toastJob.result?.fileName}
+          <button class="btn btn-success btn-sm" on:click={() => toastJob && download(toastJob)}>
             Download
           </button>
         {/if}
-        {#if toast.job.result?.logosFileName}
-          <button class="btn btn-secondary btn-sm" on:click={() => toast.job && downloadLogos(toast.job)}>
+        {#if toastJob.result?.logosFileName}
+          <button class="btn btn-secondary btn-sm" on:click={() => toastJob && downloadLogos(toastJob)}>
             Logos
           </button>
         {/if}

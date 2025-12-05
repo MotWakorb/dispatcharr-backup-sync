@@ -34,9 +34,7 @@ export interface SyncOptions {
 }
 
 export interface ExportOptions extends SyncOptions {
-  format?: 'yaml' | 'json';
-  compress?: 'none' | 'zip' | 'targz';
-  downloadLogos?: boolean;
+  compress?: 'zip' | 'targz';
 }
 
 export interface SyncRequest {
@@ -52,11 +50,14 @@ export interface ExportRequest {
   dryRun?: boolean;
 }
 
+export type ImportOptions = SyncOptions;
+
 export interface ImportRequest {
   destination: DispatcharrConnection;
   fileData: string; // base64 encoded file
   fileName: string;
   format?: 'yaml' | 'json';
+  options?: ImportOptions;
 }
 
 export interface JobStatus {

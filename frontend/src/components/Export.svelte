@@ -28,10 +28,17 @@
     syncChannelGroups: true,
     syncChannelProfiles: true,
     syncChannels: true,
+    syncM3USources: true,
+    syncStreamProfiles: true,
+    syncUserAgents: true,
+    syncCoreSettings: true,
     syncEPGSources: true,
-    format: 'yaml',
-    compress: 'none',
-    downloadLogos: false,
+    syncPlugins: true,
+    syncDVRRules: true,
+    syncComskipConfig: true,
+    syncUsers: true,
+    syncLogos: true,
+    compress: 'zip',
   };
 
   let dryRun = false;
@@ -211,39 +218,21 @@
     />
 
     <div class="mt-3">
-      <OptionsForm bind:options />
+      <OptionsForm bind:options title="Export Options" />
     </div>
 
-    <div class="grid grid-2 mt-3">
+    <div class="grid grid-1 mt-3">
       <div class="form-group">
-        <label class="form-label" for="format">Export Format</label>
-        <select id="format" class="form-select" bind:value={options.format}>
-          <option value="yaml">YAML</option>
-          <option value="json">JSON</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="compress">Compression</label>
+        <label class="form-label" for="compress">Archive Format</label>
         <select id="compress" class="form-select" bind:value={options.compress}>
-          <option value="none">None</option>
-          <option value="zip">ZIP</option>
+          <option value="zip">ZIP (default)</option>
           <option value="targz">TAR.GZ</option>
         </select>
+        <p class="text-sm text-gray mt-1">Export always includes both YAML and JSON plus logos when enabled.</p>
       </div>
     </div>
 
     <div class="flex items-center gap-2 mt-2">
-      <div class="checkbox-group">
-        <input
-          type="checkbox"
-          id="downloadLogos"
-          class="form-checkbox"
-          bind:checked={options.downloadLogos}
-        />
-        <label for="downloadLogos">Download Logos</label>
-      </div>
-
       <div class="checkbox-group">
         <input
           type="checkbox"

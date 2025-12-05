@@ -1,8 +1,10 @@
 import './app.css';
 import App from './App.svelte';
+import { mount } from 'svelte';
 
-const app = new App({
-  target: document.getElementById('app')!,
-});
+const target = document.getElementById('app');
+console.log('Mounting App', { targetExists: !!target });
 
-export default app;
+if (target) {
+  mount(App, { target });
+}

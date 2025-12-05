@@ -22,6 +22,16 @@
     syncChannelGroups: true,
     syncChannelProfiles: true,
     syncChannels: true,
+    syncM3USources: true,
+    syncStreamProfiles: true,
+    syncUserAgents: true,
+    syncCoreSettings: true,
+    syncEPGSources: true,
+    syncPlugins: true,
+    syncDVRRules: true,
+    syncComskipConfig: true,
+    syncUsers: true,
+    syncLogos: false,
   };
 
   let dryRun = false;

@@ -24,7 +24,7 @@ export class SyncService {
       };
 
       let currentProgress = 15;
-      const totalSteps = this.countEnabledOptions(request.options);
+      const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
       const progressPerStep = 80 / totalSteps; // 80% for sync steps, 20% for auth/complete
 
       // Sync Channel Groups
@@ -60,6 +60,56 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
+      if (request.options.syncM3USources) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing M3U sources...');
+        results.synced.m3uSources = await this.syncM3USources(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (request.options.syncStreamProfiles) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing stream profiles...');
+        results.synced.streamProfiles = await this.syncStreamProfiles(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (request.options.syncUserAgents) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing user agents...');
+        results.synced.userAgents = await this.syncUserAgents(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (request.options.syncCoreSettings) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing core settings...');
+        results.synced.coreSettings = await this.syncCoreSettings(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (request.options.syncEPGSources) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing EPG sources...');
+        results.synced.epgSources = await this.syncEPGSources(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
       // Sync Users
       if (request.options.syncUsers) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
@@ -85,6 +135,26 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
+      if (request.options.syncComskipConfig) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing comskip config...');
+        results.synced.comskipConfig = await this.syncComskipConfig(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (request.options.syncLogos) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
+        results.synced.logos = await this.syncLogos(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
       jobManager.completeJob(jobId, results);
     } catch (error: any) {
       jobManager.failJob(jobId, error.message);
@@ -97,9 +167,16 @@ export class SyncService {
       'syncChannelGroups',
       'syncChannelProfiles',
       'syncChannels',
+      'syncM3USources',
+      'syncStreamProfiles',
+      'syncUserAgents',
+      'syncCoreSettings',
+      'syncEPGSources',
       'syncUsers',
       'syncPlugins',
       'syncDVRRules',
+      'syncComskipConfig',
+      'syncLogos',
     ]);
 
     return Object.entries(options).filter(([key, value]) => value === true && supportedKeys.has(key)).length;
@@ -370,6 +447,260 @@ export class SyncService {
         } else {
           await dest.post('/api/channels/recurring-rules/', ruleData);
         }
+        synced++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { synced, skipped, errors };
+  }
+
+  private async syncM3USources(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    const sourceAccounts = await source.get('/api/m3u/accounts/');
+    const destAccounts = await dest.get('/api/m3u/accounts/');
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    const sourceList = Array.isArray(sourceAccounts) ? sourceAccounts : sourceAccounts.results || [];
+    const destList = Array.isArray(destAccounts) ? destAccounts : destAccounts.results || [];
+
+    for (const account of sourceList) {
+      try {
+        const existing = destList.find((a: any) => a.name === account.name);
+
+        if (dryRun) {
+          synced++;
+          continue;
+        }
+
+        const { id, created_at, updated_at, ...payload } = account;
+
+        if (existing) {
+          await dest.put(`/api/m3u/accounts/${existing.id}/`, payload);
+        } else {
+          await dest.post('/api/m3u/accounts/', payload);
+        }
+        synced++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { synced, skipped, errors };
+  }
+
+  private async syncStreamProfiles(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    const sourceProfiles = await source.get('/api/core/streamprofiles/');
+    const destProfiles = await dest.get('/api/core/streamprofiles/');
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    const sourceList = Array.isArray(sourceProfiles) ? sourceProfiles : sourceProfiles.results || [];
+    const destList = Array.isArray(destProfiles) ? destProfiles : destProfiles.results || [];
+
+    for (const profile of sourceList) {
+      try {
+        const existing = destList.find((p: any) => p.name === profile.name);
+
+        if (dryRun) {
+          synced++;
+          continue;
+        }
+
+        const { id, ...payload } = profile;
+
+        if (existing) {
+          await dest.put(`/api/core/streamprofiles/${existing.id}/`, payload);
+        } else {
+          await dest.post('/api/core/streamprofiles/', payload);
+        }
+        synced++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { synced, skipped, errors };
+  }
+
+  private async syncUserAgents(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    const sourceAgents = await source.get('/api/core/useragents/');
+    const destAgents = await dest.get('/api/core/useragents/');
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    const sourceList = Array.isArray(sourceAgents) ? sourceAgents : sourceAgents.results || [];
+    const destList = Array.isArray(destAgents) ? destAgents : destAgents.results || [];
+
+    for (const agent of sourceList) {
+      try {
+        const existing = destList.find((a: any) => a.name === agent.name);
+
+        if (dryRun) {
+          synced++;
+          continue;
+        }
+
+        const { id, ...payload } = agent;
+
+        if (existing) {
+          await dest.put(`/api/core/useragents/${existing.id}/`, payload);
+        } else {
+          await dest.post('/api/core/useragents/', payload);
+        }
+        synced++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { synced, skipped, errors };
+  }
+
+  private async syncCoreSettings(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    try {
+      const settings = await source.get('/api/core/settings/');
+      if (dryRun) {
+        return { synced: 1, skipped: 0, errors: 0 };
+      }
+
+      const destSettings = await dest.get('/api/core/settings/').catch(() => null);
+      const targetId = destSettings?.id ?? settings?.id;
+
+      if (targetId) {
+        await dest.put(`/api/core/settings/${targetId}/`, settings);
+      } else {
+        await dest.post('/api/core/settings/', settings);
+      }
+
+      return { synced: 1, skipped: 0, errors: 0 };
+    } catch (error) {
+      return { synced: 0, skipped: 0, errors: 1 };
+    }
+  }
+
+  private async syncEPGSources(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    const sourceSources = await source.get('/api/epg/sources/');
+    const destSources = await dest.get('/api/epg/sources/');
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    const sourceList = Array.isArray(sourceSources) ? sourceSources : sourceSources.results || [];
+    const destList = Array.isArray(destSources) ? destSources : destSources.results || [];
+
+    for (const sourceItem of sourceList) {
+      try {
+        const match = destList.find((s: any) => s.name === sourceItem.name);
+        if (dryRun) {
+          synced++;
+          continue;
+        }
+
+        const payload = {
+          name: sourceItem.name,
+          source_type: sourceItem.source_type,
+          url: sourceItem.url,
+          api_key: sourceItem.api_key,
+          is_active: sourceItem.is_active,
+          ...(['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
+            if (sourceItem[key] !== undefined) acc[key] = sourceItem[key];
+            return acc;
+          }, {})),
+        };
+
+        if (match) {
+          await dest.put(`/api/epg/sources/${match.id}/`, payload);
+        } else {
+          await dest.post('/api/epg/sources/', payload);
+        }
+        synced++;
+      } catch (error) {
+        errors++;
+      }
+    }
+
+    return { synced, skipped, errors };
+  }
+
+  private async syncComskipConfig(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    try {
+      const config = await source.get('/api/channels/dvr/comskip-config/');
+      if (dryRun) {
+        return { synced: 1, skipped: 0, errors: 0 };
+      }
+      const payload = typeof config === 'string' ? { config } : config;
+      await dest.post('/api/channels/dvr/comskip-config/', payload);
+      return { synced: 1, skipped: 0, errors: 0 };
+    } catch (error) {
+      return { synced: 0, skipped: 0, errors: 1 };
+    }
+  }
+
+  private async syncLogos(
+    source: DispatcharrClient,
+    dest: DispatcharrClient,
+    dryRun?: boolean
+  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    const logos = await source.get('/api/channels/logos/');
+    const logoList = Array.isArray(logos) ? logos : logos.results || [];
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (let i = 0; i < logoList.length; i++) {
+      const logo = logoList[i];
+      if (!logo?.url) {
+        skipped++;
+        continue;
+      }
+
+      if (dryRun) {
+        synced++;
+        continue;
+      }
+
+      try {
+        const response = await source.get(logo.url, { responseType: 'arraybuffer' });
+        const buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
+        const name = logo.name || logo.id || `logo-${i}`;
+        await dest.post('/api/channels/logos/upload/', {
+          name,
+          url: `data:image/png;base64,${buffer.toString('base64')}`,
+        });
         synced++;
       } catch (error) {
         errors++;

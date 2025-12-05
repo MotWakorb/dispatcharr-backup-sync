@@ -5,6 +5,8 @@
   import Connections from './components/Connections.svelte';
   import Jobs from './components/Jobs.svelte';
 
+  console.log('App component init');
+
   let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' = 'sync';
 </script>
 

@@ -205,7 +205,7 @@
           <option value="">Select a saved account</option>
           {#each savedConnections as saved}
             <option value={saved.id}>
-              {saved.name} — {saved.instanceUrl}
+              {saved.name} - {saved.instanceUrl}
             </option>
           {/each}
         </select>
@@ -283,3 +283,5 @@
     padding: 0.75rem;
   }
 </style>
+
+

@@ -84,6 +84,7 @@ export class ExportService {
   }> {
     let totalUnits = 0;
     let logoCount = 0;
+    const wantLogos = options.syncLogos !== false;
 
     if (options.syncChannelGroups) totalUnits += await this.getCount(client, '/api/channels/groups/');
     if (options.syncChannelProfiles) totalUnits += await this.getCount(client, '/api/channels/profiles/');
@@ -96,7 +97,7 @@ export class ExportService {
     if (options.syncDVRRules) totalUnits += await this.getCount(client, '/api/channels/recurring-rules/');
     if (options.syncComskipConfig) totalUnits += 1;
     if (options.syncUsers) totalUnits += await this.getCount(client, '/api/accounts/users/');
-    if (options.downloadLogos) {
+    if (wantLogos) {
       logoCount = await this.getCount(client, '/api/channels/logos/');
       totalUnits += logoCount;
     }
@@ -131,6 +132,7 @@ export class ExportService {
         `Estimated work: ${totalUnits} items${logoCount ? `, ${logoCount} logos` : ''}`
       );
       let processedUnits = 0;
+      const wantLogos = request.options.syncLogos !== false;
 
       const bumpProgress = (units: number, message?: string) => {
         processedUnits += units;
@@ -245,14 +247,22 @@ export class ExportService {
       }
 
       // Export Logos
-      let logosResult: { zipPath: string; fileName: string; count: number } | null = null;
+      let logosResult: {
+        zipPath: string;
+        fileName: string;
+        count: number;
+        logos?: { id?: string | number; name?: string; data: string }[];
+      } | null = null;
 
-      if (request.options.downloadLogos && !request.dryRun) {
+      if (wantLogos && !request.dryRun) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Downloading logos...');
         logosResult = await this.downloadLogos(client, jobId, logoCount, (processed) => {
           const percent = this.calcProgress(processedUnits + processed, totalUnits);
           jobManager.setProgress(jobId, percent, 'Downloading logos...');
-        });
+        }, true);
+        if (logosResult.logos) {
+          exportData.data.logos = logosResult.logos;
+        }
         bumpProgress(logosResult.count || logoCount, 'Downloading logos...');
         jobManager.addLog(jobId, `Downloaded ${logosResult.count || 0} logos`);
       }
@@ -278,7 +288,7 @@ export class ExportService {
       // Export Comskip Config
       if (request.options.syncComskipConfig) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting comskip config...');
-        exportData.data.comskipConfig = await client.get('/api/channels/comskip-config/');
+        exportData.data.comskipConfig = await client.get('/api/channels/dvr/comskip-config/');
         bumpProgress(1, 'Exporting comskip config...');
         jobManager.addLog(jobId, 'Exported comskip config');
       }
@@ -303,33 +313,43 @@ export class ExportService {
         return '';
       }
 
-      // Write config file
-      jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Writing configuration file...');
+      // Write config files (YAML + JSON) and pack into archive
+      jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Writing configuration files...');
       this.throwIfCancelled(jobId);
-      const format = request.options.format || 'yaml';
-      const configFileName = `dispatcharr-config-${Date.now()}.${format}`;
-      const configFilePath = path.join(this.tempDir, configFileName);
 
-      const configContent = this.formatExportContent(exportData, format);
+      const workDir = path.join(this.tempDir, `export-${jobId}`);
+      await mkdir(workDir, { recursive: true });
 
-      await writeFile(configFilePath, configContent, 'utf-8');
+      const yamlPath = path.join(workDir, 'config.yaml');
+      const jsonPath = path.join(workDir, 'config.json');
+      await writeFile(yamlPath, this.formatExportContent(exportData, 'yaml'), 'utf-8');
+      await writeFile(jsonPath, this.formatExportContent(exportData, 'json'), 'utf-8');
 
-      // Handle compression
-      const compress = request.options.compress || 'none';
-      let finalFilePath = configFilePath;
-
-      if (compress !== 'none') {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Compressing...');
-        finalFilePath = await this.compressFile(configFilePath, compress, exportData.data.logos);
+      if (logosResult?.logos && Array.isArray(logosResult.logos)) {
+        const logosDir = path.join(workDir, 'logos');
+        await mkdir(logosDir, { recursive: true });
+        logosResult.logos.forEach((logo, idx) => {
+          const buffer = Buffer.from(logo.data, 'base64');
+          const name = (logo.name || logo.id || `logo-${idx}`).toString();
+          const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          fs.writeFileSync(path.join(logosDir, `${safe}.png`), buffer);
+        });
       }
+
+      const compress = request.options.compress || 'zip';
+      jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Compressing...');
+      const finalFilePath = await this.compressDirectory(workDir, compress);
 
       jobManager.completeJob(jobId, {
         filePath: finalFilePath,
         fileName: path.basename(finalFilePath),
-        logosFilePath: logosResult?.zipPath,
-        logosFileName: logosResult?.fileName,
         summary: this.generateSummary(exportData, logosResult?.count),
       });
+
+      if (logosResult?.zipPath) {
+        await this.cleanup(logosResult.zipPath);
+      }
+      await this.cleanupDirectory(workDir);
 
       return finalFilePath;
     } catch (error: any) {
@@ -342,27 +362,17 @@ export class ExportService {
     }
   }
 
-  private countEnabledOptions(options: ExportOptions): number {
-    return Object.entries(options)
-      .filter(([key, value]) => {
-        return (
-          value === true &&
-          key !== 'format' &&
-          key !== 'compress' &&
-          key !== 'downloadLogos'
-        );
-      }).length;
-  }
-
   private async downloadLogos(
     client: DispatcharrClient,
     jobId: string,
     expectedCount: number,
-    onProgress?: (downloaded: number) => void
-  ): Promise<{ zipPath: string; fileName: string; count: number }> {
+    onProgress?: (downloaded: number) => void,
+    collectForConfig: boolean = false
+  ): Promise<{ zipPath: string; fileName: string; count: number; logos?: { id?: string | number; name?: string; data: string }[] }> {
     try {
       const logoList = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
       let downloaded = 0;
+      const logosForConfig: { id?: string | number; name?: string; data: string }[] = [];
 
       const fileName = `dispatcharr-logos-${Date.now()}.zip`;
       const zipPath = path.join(this.tempDir, fileName);
@@ -384,9 +394,17 @@ export class ExportService {
         if (logo.url) {
           try {
             const response = await client.get(logo.url, { responseType: 'arraybuffer' });
-            const buffer = Buffer.from(response);
+            const buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
             const safeName = `${logo.id || `logo-${i}`}.png`;
             archive.append(buffer, { name: safeName });
+
+            if (collectForConfig) {
+              logosForConfig.push({
+                id: logo.id,
+                name: logo.name,
+                data: buffer.toString('base64'),
+              });
+            }
           } catch (error) {
             console.error(`Failed to download logo ${logo.id}:`, error);
           }
@@ -401,20 +419,20 @@ export class ExportService {
       await archive.finalize();
       await zipPromise;
 
-      return { zipPath, fileName, count: downloaded };
+      return {
+        zipPath,
+        fileName,
+        count: downloaded,
+        logos: collectForConfig ? logosForConfig : undefined,
+      };
     } catch (error) {
       console.error('Error downloading logos:', error);
       throw error;
     }
   }
 
-  private async compressFile(
-    configFilePath: string,
-    format: string,
-    logos?: any
-  ): Promise<string> {
-    const baseName = path.basename(configFilePath, path.extname(configFilePath));
-
+  private async compressDirectory(workDir: string, format: 'zip' | 'targz'): Promise<string> {
+    const baseName = path.basename(workDir);
     if (format === 'zip') {
       const zipPath = path.join(this.tempDir, `${baseName}.zip`);
       const output = fs.createWriteStream(zipPath);
@@ -425,35 +443,21 @@ export class ExportService {
         archive.on('error', reject);
 
         archive.pipe(output);
-        archive.file(configFilePath, { name: path.basename(configFilePath) });
-
-        if (logos) {
-          // Add logos as separate files
-          Object.entries(logos).forEach(([id, base64Data]: [string, any]) => {
-            const buffer = Buffer.from(base64Data, 'base64');
-            archive.append(buffer, { name: `logos/${id}.png` });
-          });
-        }
-
+        archive.directory(workDir, false);
         archive.finalize();
       });
-    } else if (format === 'targz') {
-      const tarPath = path.join(this.tempDir, `${baseName}.tar.gz`);
-
-      // Create tar.gz using tar library
-      await tar.create(
-        {
-          gzip: true,
-          file: tarPath,
-          cwd: path.dirname(configFilePath),
-        },
-        [path.basename(configFilePath)]
-      );
-
-      return tarPath;
     }
 
-    return configFilePath;
+    const tarPath = path.join(this.tempDir, `${baseName}.tar.gz`);
+    await tar.create(
+      {
+        gzip: true,
+        file: tarPath,
+        cwd: workDir,
+      },
+      ['.']
+    );
+    return tarPath;
   }
 
   private generateSummary(exportData: any, logosCount?: number): any {
@@ -495,6 +499,8 @@ export class ExportService {
     }
     if (logosCount !== undefined) {
       summary.counts.logos = logosCount;
+    } else if (exportData.data.logos) {
+      summary.counts.logos = exportData.data.logos.length || 0;
     }
 
     return summary;
@@ -514,6 +520,7 @@ export class ExportService {
       { key: 'dvrRules', label: 'DVR Rules' },
       { key: 'comskipConfig', label: 'Comskip Config' },
       { key: 'users', label: 'Users' },
+      { key: 'logos', label: 'Logos' },
     ];
 
     if (format === 'json') {
@@ -571,6 +578,14 @@ export class ExportService {
       await unlink(filePath);
     } catch (error) {
       console.error('Failed to cleanup file:', error);
+    }
+  }
+
+  async cleanupDirectory(dirPath: string): Promise<void> {
+    try {
+      await fs.promises.rm(dirPath, { recursive: true, force: true });
+    } catch (error) {
+      console.error('Failed to cleanup directory:', error);
     }
   }
 }

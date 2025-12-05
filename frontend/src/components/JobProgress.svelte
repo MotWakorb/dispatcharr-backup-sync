@@ -6,6 +6,13 @@
   $: progressDisplay = job.progress !== undefined
     ? Math.round(job.progress)
     : undefined;
+
+  const statValue = (value: unknown, key: string) => {
+    if (value && typeof value === 'object' && key in (value as any)) {
+      return (value as any)[key];
+    }
+    return undefined;
+  };
 </script>
 
 <div class="job-progress">
@@ -67,9 +74,9 @@
               <div class="stat-label">{key}</div>
               <div class="stat-value">
                 {#if typeof stats === 'object' && stats !== null}
-                  <span class="text-success">{stats.synced || 0} synced</span>
-                  {#if stats.errors > 0}
-                    <span class="text-danger">{stats.errors} errors</span>
+                  <span class="text-success">{statValue(stats, 'synced') || 0} synced</span>
+                  {#if (statValue(stats, 'errors') || 0) > 0}
+                    <span class="text-danger">{statValue(stats, 'errors')} errors</span>
                   {/if}
                 {:else}
                   {stats}
@@ -85,9 +92,9 @@
               <div class="stat-label">{key}</div>
               <div class="stat-value">
                 {#if typeof stats === 'object' && stats !== null}
-                  <span class="text-success">{stats.imported || 0} imported</span>
-                  {#if stats.errors > 0}
-                    <span class="text-danger">{stats.errors} errors</span>
+                  <span class="text-success">{statValue(stats, 'imported') || 0} imported</span>
+                  {#if (statValue(stats, 'errors') || 0) > 0}
+                    <span class="text-danger">{statValue(stats, 'errors')} errors</span>
                   {/if}
                 {:else}
                   {stats}

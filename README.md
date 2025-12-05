@@ -1,241 +1,77 @@
-# Dispatcharr Manager
+# Dispatcharr Backup Sync
 
-[![Build and Push Docker Images](https://github.com/MotWakorb/dispatcharr-backup-sync/actions/workflows/docker-build.yml/badge.svg)](https://github.com/MotWakorb/dispatcharr-backup-sync/actions/workflows/docker-build.yml)
+Svelte + Express toolkit for backing up, syncing, and restoring Dispatcharr configuration between instances. Jobs run through the backend API with live progress and download links in the UI.
 
-A modern web-based GUI for managing Dispatcharr configurations. Sync channels, groups, profiles, DVR rules, users, and more between Dispatcharr instances.
+## What it does
+- Test connections to Dispatcharr and pull instance info.
+- Export config (JSON or YAML) with optional logo bundle (zip or tar.gz).
+- Import previously exported bundles.
+- Two-way sync between instances with per-area toggles (channels, profiles, M3U sources, stream profiles, user agents, core settings, EPG sources, plugins, DVR rules, comskip config, users, logos).
+- Saved connection vault plus job history and logs.
 
-## Features
-
-- 🚀 **Modern Web UI** - Reactive interface built with Svelte
-- 🔄 **Live Sync** - Real-time configuration synchronization
-- 📦 **Export/Import** - Save configurations to YAML/JSON files
-- 🗜️ **Compression** - Archive exports as ZIP or TAR.GZ
-- 👥 **User Management** - Sync users (excluding admins) with XC credentials
-- 📺 **DVR Support** - Sync recording rules and comskip config
-- 🔌 **Plugin Sync** - Synchronize plugin settings
-- 🖼️ **Logo Management** - Sync and download channel logos
-- 🐳 **Docker Ready** - Easy deployment with Docker Compose
-
-## Quick Start
-
-### Using Pre-built Docker Images (Easiest)
+## Quick start (Docker)
+Ports: frontend `3002`, backend `3001`.
 
 ```bash
-# Create docker-compose.yml
-cat > docker-compose.yml <<EOF
-version: '3.8'
+docker compose up -d
 
-services:
-  backend:
-    image: ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest
-    container_name: dispatcharr-manager-backend
-    restart: unless-stopped
-    ports:
-      - "3001:3001"
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-    networks:
-      - dispatcharr-manager
-
-  frontend:
-    image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
-    container_name: dispatcharr-manager-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-    networks:
-      - dispatcharr-manager
-
-networks:
-  dispatcharr-manager:
-    driver: bridge
-EOF
-
-# Start the application
-docker-compose up -d
+# health check
+curl http://localhost:3001/health
 ```
 
-Access the application at: http://localhost:3000
+Open http://localhost:3002 to use the app.
 
-### Building from Source
-
+## Build the images locally
 ```bash
-# Clone the repository
-git clone https://github.com/MotWakorb/dispatcharr-backup-sync.git
-cd dispatcharr-backup-sync
+# from repo root
+docker build -t ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest -f docker/backend.Dockerfile .
+docker build -t ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest -f docker/frontend.Dockerfile .
 
-# Build and start with Docker Compose
-docker-compose up -d --build
+docker compose down && docker compose up -d
 ```
 
-Access the application at: http://localhost:3000
+Both Dockerfiles run `npm install` inside the build stage (no host installs needed). The frontend build includes a small runtime patch executed during `npm postinstall` to initialize Svelte DOM operations.
 
-### Manual Setup
-
-#### Backend
+## Local development (containerized npm)
+Run commands in disposable Node containers to avoid installing on the host:
 ```bash
-cd backend
-npm install
-npm run dev
+# backend dev server (port 3001)
+docker run --rm -it -v %cd%/backend:/app -w /app -p 3001:3001 node:20-alpine sh -c "npm install && npm run dev"
+
+# frontend dev server (port 3002)
+docker run --rm -it -v %cd%/frontend:/app -w /app -p 3002:3000 node:20-alpine sh -c "npm install && npm run dev -- --host --port 3000"
 ```
 
-#### Frontend
+## API surface
+- `GET /health` - backend status.
+- `POST /api/connections/test` and `/api/connections/info`
+- `POST /api/sync`, `GET /api/sync/status/:jobId`, `GET /api/sync/jobs`
+- `POST /api/export`, `GET /api/export/status/:jobId`, `GET /api/export/download/:jobId`, `GET /api/export/download/:jobId/logos`
+- `POST /api/import`, `GET /api/import/status/:jobId`
+- Jobs: `GET /api/jobs`, `GET /api/jobs/history/list`, `GET /api/jobs/:jobId/logs`
+- Saved connections CRUD: `/api/saved-connections`
+
+## Notes
+- Job state is in-memory; restarting the backend clears active/history data.
+- Logo upload/download can take time with large sets.
+- The frontend build is non-minified with sourcemaps enabled for easier debugging.
+
+## Tests
+Run the Playwright smoke test against the running docker-compose stack (uses disposable Node container and installs Playwright/browsers inside it):
 ```bash
-cd frontend
-npm install
-npm run dev
+# PowerShell
+docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager -v ${PWD}/tests:/work -w /work node:20 sh -c "\
+  npm install playwright@1.48.2 --no-save --no-package-lock && \
+  npx playwright install --with-deps chromium && \
+  node smoke.playwright.mjs"
+
+# bash
+docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager -v $(pwd)/tests:/work -w /work node:20 sh -c "\
+  npm install playwright@1.48.2 --no-save --no-package-lock && \
+  npx playwright install --with-deps chromium && \
+  node smoke.playwright.mjs"
 ```
-
-## Architecture
-
-```
-dispatcharr-manager/
-├── backend/          # Node.js + Express API
-│   ├── src/
-│   │   ├── routes/   # API endpoints
-│   │   ├── services/ # Business logic
-│   │   └── types/    # TypeScript types
-│   └── package.json
-├── frontend/         # Svelte frontend
-│   ├── src/
-│   │   ├── routes/   # Pages
-│   │   ├── lib/      # Components
-│   │   └── stores/   # State management
-│   └── package.json
-└── docker/           # Docker configurations
-    ├── backend.Dockerfile
-    └── frontend.Dockerfile
-```
-
-## Configuration Options
-
-### Sync Options
-- Channel Groups
-- Channel Profiles
-- Channels
-- M3U Sources
-- Stream Profiles
-- User Agents
-- Core Settings
-- Logos
-- Plugins
-- DVR Rules
-- Comskip Config
-- Users (non-admin)
-
-### Export Options
-- Format: YAML or JSON
-- Compression: None, ZIP, or TAR.GZ
-- Include logo files
-
-## API Endpoints
-
-### Sync
-- `POST /api/sync` - Direct sync between instances
-- `GET /api/sync/status/:jobId` - Get sync job status
-
-### Export
-- `POST /api/export` - Export configuration to file
-- `GET /api/export/:jobId` - Download exported file
-
-### Import
-- `POST /api/import` - Import configuration from file
-
-### Connections
-- `POST /api/connections/test` - Test Dispatcharr connection
-- `GET /api/connections/info` - Get instance information
-
-## Environment Variables
-
-```env
-# Backend
-PORT=3001
-NODE_ENV=production
-
-# Frontend
-VITE_API_URL=http://localhost:3001
-```
-
-## Development
-
-### Requirements
-- Node.js 18+
-- npm or pnpm
-
-### Backend Development
-```bash
-cd backend
-npm run dev
-```
-
-### Frontend Development
-```bash
-cd frontend
-npm run dev
-```
-
-### Build for Production
-```bash
-# Backend
-cd backend
-npm run build
-
-# Frontend
-cd frontend
-npm run build
-```
-
-## Docker
-
-### Pre-built Images
-
-Container images are automatically built and published to GitHub Container Registry on every commit to main:
-
-- **Backend**: `ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest`
-- **Frontend**: `ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest`
-
-Tags available:
-- `latest` - Latest build from main branch
-- `main` - Latest build from main branch
-- `v*` - Semantic version tags (e.g., `v1.0.0`)
-- `main-<sha>` - Specific commit SHA
-
-### Build Images Locally
-```bash
-docker-compose build
-```
-
-### Run Services
-```bash
-docker-compose up -d
-```
-
-### View Logs
-```bash
-docker-compose logs -f
-```
-
-### Stop Services
-```bash
-docker-compose down
-```
-
-## CI/CD
-
-GitHub Actions automatically builds and publishes Docker images on:
-- Push to `main` branch
-- New version tags (e.g., `v1.0.0`)
-- Pull requests (build only, no push)
-
-The workflow uses Docker BuildKit with layer caching for fast builds.
+Set `TARGET_URL`/`BACKEND_HEALTH` env vars to override defaults (`http://frontend:80`, `http://backend:3001/health`).
 
 ## License
-
 MIT
-
-## Contributing
-
-Contributions are welcome! Please open an issue or PR.

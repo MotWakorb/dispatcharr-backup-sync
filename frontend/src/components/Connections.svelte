@@ -23,6 +23,7 @@
     string,
     { loading: boolean; result?: { success: boolean; message: string } }
   > = {};
+  let creatingTest = { loading: false, result: null as null | { success: boolean; message: string } };
 
   const formIds = {
     name: 'conn-name',
@@ -49,6 +50,10 @@
     event?.preventDefault();
     error = null;
     success = null;
+    if (!creatingTest.result?.success) {
+      error = 'Please test the connection and ensure it succeeds before saving.';
+      return;
+    }
 
     if (!form.name || !form.instanceUrl || !form.username || !form.password) {
       error = 'Name, instance URL, username, and password are required.';
@@ -67,11 +72,51 @@
       await createSavedConnection(payload);
       success = 'Connection saved.';
       form = { name: '', instanceUrl: '', username: '', password: '' };
+      creatingTest = { loading: false, result: null };
       await loadConnections();
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to save connection';
     } finally {
       saving = false;
+    }
+  }
+
+  function markDirty() {
+    creatingTest = { loading: false, result: null };
+    success = null;
+  }
+
+  async function handleCreateTest(event?: Event) {
+    event?.preventDefault();
+    error = null;
+    success = null;
+    if (!form.instanceUrl || !form.username || !form.password) {
+      error = 'Instance URL, username, and password are required to test.';
+      return;
+    }
+    creatingTest = { loading: true, result: null };
+    try {
+      const result = await testConnection({
+        url: form.instanceUrl.trim(),
+        username: form.username.trim(),
+        password: form.password,
+      });
+      creatingTest = {
+        loading: false,
+        result: { success: result.success, message: result.message },
+      };
+      if (!result.success) {
+        error = result.message || 'Connection test failed.';
+      }
+    } catch (err: any) {
+      creatingTest = {
+        loading: false,
+        result: {
+          success: false,
+          message: err.response?.data?.error || err.message || 'Connection failed',
+        },
+      };
+      error = creatingTest.result.message;
     }
   }
 
@@ -132,6 +177,7 @@
             class="form-input"
             placeholder="Friendly label"
             bind:value={form.name}
+            on:input={markDirty}
           />
         </div>
 
@@ -142,6 +188,7 @@
             class="form-input"
             placeholder="http://localhost:9191"
             bind:value={form.instanceUrl}
+            on:input={markDirty}
           />
         </div>
 
@@ -152,6 +199,7 @@
             class="form-input"
             placeholder="admin"
             bind:value={form.username}
+            on:input={markDirty}
           />
         </div>
 
@@ -163,12 +211,21 @@
             class="form-input"
             placeholder="Password"
             bind:value={form.password}
+            on:input={markDirty}
           />
         </div>
       </div>
 
       <div class="actions-row">
-        <button class="btn btn-primary" type="submit" disabled={saving}>
+        <button class="btn btn-secondary" type="button" on:click={handleCreateTest} disabled={creatingTest.loading}>
+          {#if creatingTest.loading}
+            <span class="spinner"></span>
+            Testing...
+          {:else}
+            Test Connection
+          {/if}
+        </button>
+        <button class="btn btn-primary" type="submit" disabled={saving || !creatingTest.result?.success}>
           {#if saving}
             <span class="spinner"></span>
             Saving...
@@ -178,6 +235,16 @@
         </button>
       </div>
     </form>
+
+    {#if creatingTest.result}
+      <div
+        class="alert mt-2"
+        class:alert-success={creatingTest.result?.success}
+        class:alert-error={!creatingTest.result?.success}
+      >
+        {creatingTest.result.message}
+      </div>
+    {/if}
 
     {#if error}
       <div class="alert alert-error mt-2">{error}</div>

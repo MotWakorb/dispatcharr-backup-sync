@@ -67,16 +67,19 @@ export class DispatcharrClient {
     }
   }
 
-  async get<T = any>(endpoint: string, params?: any): Promise<T> {
+  async get<T = any>(endpoint: string, config?: any): Promise<T> {
     if (!this.authenticated) {
       await this.authenticate();
     }
 
     try {
       console.log(`Making GET request to: ${endpoint}`);
-      const response = await this.client.get(endpoint, { params });
+      const axiosConfig = config
+        ? (config.params || config.responseType || config.headers ? config : { params: config })
+        : undefined;
+      const response = await this.client.get(endpoint, axiosConfig);
       console.log(`GET ${endpoint} response status:`, response.status);
-      return response.data;
+      return response.data ?? response;
     } catch (error: any) {
       console.error(`GET ${endpoint} failed:`, error.response?.status, error.response?.data);
       if (error.response?.status === 401) {
@@ -84,8 +87,11 @@ export class DispatcharrClient {
         this.authenticated = false;
         await this.authenticate();
         // Retry with new token
-        const response = await this.client.get(endpoint, { params });
-        return response.data;
+        const axiosConfig = config
+          ? (config.params || config.responseType || config.headers ? config : { params: config })
+          : undefined;
+        const response = await this.client.get(endpoint, axiosConfig);
+        return response.data ?? response;
       }
       throw error;
     }

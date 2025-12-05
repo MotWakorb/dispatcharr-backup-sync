@@ -20,6 +20,20 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
     // Handle both multipart/form-data and JSON requests
     let request: ImportRequest;
 
+    let options: ImportRequest['options'];
+
+    if (req.body?.options) {
+      try {
+        options =
+          typeof req.body.options === 'string' ? JSON.parse(req.body.options) : req.body.options;
+      } catch (err) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid options payload',
+        });
+      }
+    }
+
     if (req.file) {
       // Multipart upload
       const destination = JSON.parse(req.body.destination || '{}');
@@ -30,10 +44,11 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
         fileData: req.file.buffer.toString('base64'),
         fileName: req.file.originalname,
         format,
+        options,
       };
     } else {
       // JSON body
-      request = req.body;
+      request = { ...(req.body as ImportRequest), options };
     }
 
     // Validate request

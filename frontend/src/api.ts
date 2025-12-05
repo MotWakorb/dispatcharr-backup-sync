@@ -8,8 +8,8 @@ import type {
   ApiResponse,
   SavedConnection,
   SavedConnectionInput,
-  JobStatus,
   JobLogEntry,
+  ImportOptions,
 } from './types';
 
 const api = axios.create({
@@ -147,11 +147,15 @@ export async function getJobHistory(): Promise<JobStatus[]> {
 // Import APIs
 export async function startImport(
   destination: DispatcharrConnection,
-  file: File
+  file: File,
+  options?: ImportOptions
 ): Promise<string> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('destination', JSON.stringify(destination));
+  if (options) {
+    formData.append('options', JSON.stringify(options));
+  }
 
   const response = await api.post<ApiResponse<{ jobId: string; message: string }>>(
     '/import',

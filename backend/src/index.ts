@@ -46,6 +46,6 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Dispatcharr Manager API running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`Dispatcharr Manager API running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
 });

@@ -6,12 +6,28 @@ import path from 'path';
 import { promisify } from 'util';
 import AdmZip from 'adm-zip';
 import tar from 'tar';
-import type { ImportRequest } from '../types/index.js';
+import type { ImportOptions, ImportRequest } from '../types/index.js';
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
 const readFile = promisify(fs.readFile);
 const unlink = promisify(fs.unlink);
+
+const SECTION_OPTION_MAP = {
+  channelGroups: 'syncChannelGroups',
+  channelProfiles: 'syncChannelProfiles',
+  channels: 'syncChannels',
+  m3uSources: 'syncM3USources',
+  streamProfiles: 'syncStreamProfiles',
+  userAgents: 'syncUserAgents',
+  coreSettings: 'syncCoreSettings',
+  epgSources: 'syncEPGSources',
+  plugins: 'syncPlugins',
+  dvrRules: 'syncDVRRules',
+  comskipConfig: 'syncComskipConfig',
+  users: 'syncUsers',
+  logos: 'syncLogos',
+} as const;
 
 export class ImportService {
   private tempDir = path.join(process.cwd(), 'temp');
@@ -51,6 +67,7 @@ export class ImportService {
 
       const format = request.format || this.detectFormat(configFilePath);
       const configData = format === 'yaml' ? yaml.load(configContent) : JSON.parse(configContent);
+      const data = (configData as any)?.data ?? {};
 
       const results: any = {
         imported: {},
@@ -59,94 +76,118 @@ export class ImportService {
       };
 
       let currentProgress = 20;
-      const totalSteps = this.countDataSections(configData);
+      const totalSteps = Math.max(this.countDataSections(data, request.options), 1);
       const progressPerStep = 75 / totalSteps;
 
       // Import Channel Groups
-      if (configData.data?.channelGroups) {
+      if (data.channelGroups && this.isEnabled('channelGroups', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing channel groups...');
         results.imported.channelGroups = await this.importChannelGroups(
           client,
-          configData.data.channelGroups
+          data.channelGroups
         );
         currentProgress += progressPerStep;
       }
 
       // Import Channel Profiles
-      if (configData.data?.channelProfiles) {
+      if (data.channelProfiles && this.isEnabled('channelProfiles', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing channel profiles...');
         results.imported.channelProfiles = await this.importChannelProfiles(
           client,
-          configData.data.channelProfiles
+          data.channelProfiles
         );
         currentProgress += progressPerStep;
       }
 
       // Import Channels
-      if (configData.data?.channels) {
+      if (data.channels && this.isEnabled('channels', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing channels...');
-        results.imported.channels = await this.importChannels(client, configData.data.channels);
+        results.imported.channels = await this.importChannels(client, data.channels);
         currentProgress += progressPerStep;
       }
 
       // Import M3U Sources
-      if (configData.data?.m3uSources) {
+      if (data.m3uSources && this.isEnabled('m3uSources', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing M3U sources...');
         results.imported.m3uSources = await this.importM3USources(
           client,
-          configData.data.m3uSources
+          data.m3uSources
         );
         currentProgress += progressPerStep;
       }
 
       // Import Stream Profiles
-      if (configData.data?.streamProfiles) {
+      if (data.streamProfiles && this.isEnabled('streamProfiles', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing stream profiles...');
         results.imported.streamProfiles = await this.importStreamProfiles(
           client,
-          configData.data.streamProfiles
+          data.streamProfiles
         );
         currentProgress += progressPerStep;
       }
 
       // Import User Agents
-      if (configData.data?.userAgents) {
+      if (data.userAgents && this.isEnabled('userAgents', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing user agents...');
         results.imported.userAgents = await this.importUserAgents(
           client,
-          configData.data.userAgents
+          data.userAgents
+        );
+        currentProgress += progressPerStep;
+      }
+
+      if (data.coreSettings && this.isEnabled('coreSettings', request.options)) {
+        jobManager.setProgress(jobId, currentProgress, 'Importing core settings...');
+        results.imported.coreSettings = await this.importCoreSettings(
+          client,
+          data.coreSettings
         );
         currentProgress += progressPerStep;
       }
 
       // Import EPG Sources
-      if (configData.data?.epgSources) {
+      if (data.epgSources && this.isEnabled('epgSources', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing EPG sources...');
         results.imported.epgSources = await this.importEPGSources(
           client,
-          configData.data.epgSources
+          data.epgSources
         );
         currentProgress += progressPerStep;
       }
 
       // Import Plugins
-      if (configData.data?.plugins) {
+      if (data.plugins && this.isEnabled('plugins', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing plugins...');
-        results.imported.plugins = await this.importPlugins(client, configData.data.plugins);
+        results.imported.plugins = await this.importPlugins(client, data.plugins);
         currentProgress += progressPerStep;
       }
 
       // Import DVR Rules
-      if (configData.data?.dvrRules) {
+      if (data.dvrRules && this.isEnabled('dvrRules', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing DVR rules...');
-        results.imported.dvrRules = await this.importDVRRules(client, configData.data.dvrRules);
+        results.imported.dvrRules = await this.importDVRRules(client, data.dvrRules);
+        currentProgress += progressPerStep;
+      }
+
+      if (data.comskipConfig && this.isEnabled('comskipConfig', request.options)) {
+        jobManager.setProgress(jobId, currentProgress, 'Importing comskip config...');
+        results.imported.comskipConfig = await this.importComskipConfig(
+          client,
+          data.comskipConfig
+        );
         currentProgress += progressPerStep;
       }
 
       // Import Users
-      if (configData.data?.users) {
+      if (data.users && this.isEnabled('users', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing users...');
-        results.imported.users = await this.importUsers(client, configData.data.users);
+        results.imported.users = await this.importUsers(client, data.users);
+        currentProgress += progressPerStep;
+      }
+
+      if (data.logos && this.isEnabled('logos', request.options)) {
+        jobManager.setProgress(jobId, currentProgress, 'Importing logos...');
+        results.imported.logos = await this.importLogos(client, data.logos);
         currentProgress += progressPerStep;
       }
 
@@ -217,9 +258,24 @@ export class ImportService {
     return 'yaml';
   }
 
-  private countDataSections(configData: any): number {
-    if (!configData.data) return 0;
-    return Object.keys(configData.data).filter((k) => !k.startsWith('__comment_')).length;
+  private countDataSections(data: any, options?: ImportOptions): number {
+    if (!data) return 0;
+    const keys = Object.keys(data).filter((k) => !k.startsWith('__comment_'));
+    if (!options) return keys.length;
+    return keys.filter((k) => {
+      const optKey = SECTION_OPTION_MAP[k as keyof typeof SECTION_OPTION_MAP];
+      if (!optKey) return true;
+      const value = (options as any)[optKey];
+      return value !== false;
+    }).length;
+  }
+
+  private isEnabled(section: keyof typeof SECTION_OPTION_MAP, options?: ImportOptions): boolean {
+    const optKey = SECTION_OPTION_MAP[section];
+    if (options && optKey in options) {
+      return Boolean((options as any)[optKey]);
+    }
+    return true;
   }
 
   private async importChannelGroups(
@@ -524,6 +580,76 @@ export class ImportService {
         }
         imported++;
       } catch (error) {
+        errors++;
+      }
+    }
+
+    return { imported, skipped, errors };
+  }
+
+  private async importCoreSettings(
+    client: DispatcharrClient,
+    settings: any
+  ): Promise<{ imported: number; skipped: number; errors: number }> {
+    try {
+      const existing = await client.get('/api/core/settings/').catch(() => null);
+      const targetId = existing?.id ?? settings?.id;
+      if (targetId) {
+        await client.put(`/api/core/settings/${targetId}/`, settings);
+      } else {
+        await client.post('/api/core/settings/', settings);
+      }
+      return { imported: 1, skipped: 0, errors: 0 };
+    } catch (error) {
+      console.error('Failed to import core settings', error);
+      return { imported: 0, skipped: 0, errors: 1 };
+    }
+  }
+
+  private async importComskipConfig(
+    client: DispatcharrClient,
+    config: any
+  ): Promise<{ imported: number; skipped: number; errors: number }> {
+    try {
+      const payload = typeof config === 'string' ? { config } : config;
+      await client.post('/api/channels/dvr/comskip-config/', payload);
+      return { imported: 1, skipped: 0, errors: 0 };
+    } catch (error) {
+      console.error('Failed to import comskip config', error);
+      return { imported: 0, skipped: 0, errors: 1 };
+    }
+  }
+
+  private async importLogos(
+    client: DispatcharrClient,
+    logos: any[]
+  ): Promise<{ imported: number; skipped: number; errors: number }> {
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    if (!Array.isArray(logos)) {
+      return { imported, skipped: logos ? 0 : 1, errors: logos ? 1 : 0 };
+    }
+
+    for (let i = 0; i < logos.length; i++) {
+      const logo = logos[i];
+      const name = logo?.name || logo?.id || `logo-${i}`;
+      const base64 = logo?.data;
+      if (!base64) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const dataUrl = `data:image/png;base64,${base64}`;
+        await client.post('/api/channels/logos/upload/', {
+          name,
+          url: dataUrl,
+        });
+        imported++;
+      } catch (error) {
+        console.error('Failed to import logo', name, error);
         errors++;
       }
     }

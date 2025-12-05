@@ -2,6 +2,20 @@
   import type { SyncOptions } from '../types';
 
   export let options: SyncOptions = {};
+  export let title: string = 'Sync Options';
+
+  const getOptionChecked = (key: string) => {
+    return Boolean((options as Record<string, boolean | undefined>)[key]);
+  };
+
+  const setOptionChecked = (key: string, value: boolean) => {
+    (options as Record<string, boolean | undefined>)[key] = value;
+  };
+
+  const handleOptionChange = (key: string, event: Event) => {
+    const target = event.target as HTMLInputElement;
+    setOptionChecked(key, target.checked);
+  };
 
   const allOptions = [
     { key: 'syncChannelGroups', label: 'Channel Groups' },
@@ -16,6 +30,7 @@
     { key: 'syncDVRRules', label: 'DVR Rules' },
     { key: 'syncComskipConfig', label: 'Comskip Config' },
     { key: 'syncUsers', label: 'Users' },
+    { key: 'syncLogos', label: 'Logos (includes images)' },
   ];
 
   function toggleAll() {
@@ -30,7 +45,7 @@
 
 <div class="options-form">
   <div class="flex items-center justify-between mb-2">
-    <h3>Sync Options</h3>
+    <h3>{title}</h3>
     <button class="btn btn-secondary btn-sm" on:click={toggleAll}>
       {allSelected ? 'Deselect All' : 'Select All'}
     </button>
@@ -43,7 +58,8 @@
           type="checkbox"
           id={option.key}
           class="form-checkbox"
-          bind:checked={options[option.key]}
+          checked={getOptionChecked(option.key)}
+          on:change={(event) => handleOptionChange(option.key, event)}
         />
         <label for={option.key}>{option.label}</label>
       </div>

@@ -34,10 +34,10 @@ export interface SyncOptions {
 }
 
 export interface ExportOptions extends SyncOptions {
-  format?: 'yaml' | 'json';
-  compress?: 'none' | 'zip' | 'targz';
-  downloadLogos?: boolean;
+  compress?: 'zip' | 'targz';
 }
+
+export type ImportOptions = SyncOptions;
 
 export interface JobStatus {
   jobId: string;
