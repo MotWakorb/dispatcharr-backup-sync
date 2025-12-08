@@ -10,8 +10,34 @@ export const importRouter = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB
+    fileSize: 10 * 1024 * 1024 * 1024, // 10GB
   },
+});
+
+// Start a new import job
+importRouter.post('/inspect', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'File is required' });
+    }
+
+    const format = req.body.format as 'yaml' | 'json' | undefined;
+    const request: ImportRequest = {
+      destination: { url: '', username: '', password: '' },
+      fileData: req.file.buffer,
+      fileName: req.file.originalname,
+      format,
+    };
+
+    const result = await importService.inspect(request);
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('Error inspecting import file:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message || 'Failed to inspect file',
+    });
+  }
 });
 
 // Start a new import job
@@ -41,10 +67,22 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
 
       request = {
         destination,
-        fileData: req.file.buffer.toString('base64'),
+        fileData: req.file.buffer,
         fileName: req.file.originalname,
         format,
         options,
+      };
+    } else if (req.body?.uploadId) {
+      // Use cached upload from previous inspect
+      const destination = JSON.parse(req.body.destination || '{}');
+      const cached = await importService.getCachedUpload(req.body.uploadId);
+      request = {
+        destination,
+        fileData: cached.buffer,
+        fileName: cached.fileName,
+        format: req.body.format as 'yaml' | 'json' | undefined,
+        options,
+        uploadId: req.body.uploadId,
       };
     } else {
       // JSON body

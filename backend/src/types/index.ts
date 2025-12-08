@@ -54,10 +54,11 @@ export type ImportOptions = SyncOptions;
 
 export interface ImportRequest {
   destination: DispatcharrConnection;
-  fileData: string; // base64 encoded file
+  fileData: string | Buffer; // base64 encoded file or raw Buffer
   fileName: string;
   format?: 'yaml' | 'json';
   options?: ImportOptions;
+  uploadId?: string;
 }
 
 export interface JobStatus {

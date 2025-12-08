@@ -92,7 +92,11 @@ export class ExportService {
     if (options.syncM3USources) totalUnits += await this.getCount(client, '/api/m3u/accounts/');
     if (options.syncStreamProfiles) totalUnits += await this.getCount(client, '/api/core/streamprofiles/');
     if (options.syncUserAgents) totalUnits += await this.getCount(client, '/api/core/useragents/');
-    if (options.syncEPGSources) totalUnits += await this.getCount(client, '/api/epg/sources/');
+    if (options.syncEPGSources) {
+      totalUnits += await this.getCount(client, '/api/epg/sources/');
+      // Include EPG data rows as part of EPG export
+      totalUnits += await this.getCount(client, '/api/epg/epgdata/');
+    }
     if (options.syncPlugins) totalUnits += await this.getCount(client, '/api/plugins/plugins/');
     if (options.syncDVRRules) totalUnits += await this.getCount(client, '/api/channels/recurring-rules/');
     if (options.syncComskipConfig) totalUnits += 1;
@@ -172,6 +176,24 @@ export class ExportService {
       if (request.options.syncChannels) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting channels...');
         const allChannels = await this.getAllPaginated(client, '/api/channels/channels/', jobId);
+        const allStreams = await this.getAllPaginated(client, '/api/channels/streams/', jobId);
+        const streamMap = new Map<number, any>();
+        allStreams.forEach((s: any) => {
+          if (s?.id != null) {
+            streamMap.set(s.id, {
+              id: s.id,
+              name: s.name,
+              tvg_id: s.tvg_id,
+              stream_hash: s.stream_hash || s.hash,
+              hash: s.hash || s.stream_hash,
+              m3u_account: s.m3u_account,
+              channel_group: s.channel_group,
+              url: s.url,
+              tvc_guide_stationid: (s as any)?.tvc_guide_stationid,
+            });
+          }
+        });
+
         // Filter out auto-created channels (those created via M3U auto channel sync)
         const manualChannels = allChannels
           .filter((channel: any) => !channel.auto_created)
@@ -180,21 +202,64 @@ export class ExportService {
             const bNum = Number(b.channel_number) || 0;
             return aNum - bNum;
           });
-        exportData.data.channels = manualChannels;
+        const channelsWithStreams = manualChannels.map((ch: any) => {
+          if (!Array.isArray(ch?.streams)) return ch;
+          const streams = ch.streams
+            .map((ref: any) => {
+              if (ref && typeof ref === 'object') {
+                return {
+                  id: ref.id,
+                  name: ref.name,
+                  tvg_id: ref.tvg_id || ref.tvgId,
+                  stream_hash: ref.stream_hash || ref.hash,
+                  hash: ref.hash || ref.stream_hash,
+                  m3u_account: ref.m3u_account,
+                  channel_group: ref.channel_group,
+                  url: ref.url,
+                  tvc_guide_stationid: ref.tvc_guide_stationid,
+                };
+              }
+              const mapped = streamMap.get(ref);
+              return mapped || { id: ref };
+            })
+            .filter(Boolean);
+          return { ...ch, streams };
+        });
+        exportData.data.channels = channelsWithStreams;
         bumpProgress(manualChannels.length, 'Exporting channels...');
         jobManager.addLog(jobId, `Exported ${manualChannels.length} channels`);
       }
 
       // Export M3U Sources
+      let channelGroupMap: Record<number, string> = {};
       if (request.options.syncM3USources) {
+        try {
+          const groups = await client.get('/api/channels/groups/');
+          if (Array.isArray(groups)) {
+            channelGroupMap = Object.fromEntries(groups.map((g: any) => [g.id, g.name]));
+          }
+        } catch {
+          channelGroupMap = {};
+        }
+
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting M3U sources...');
         // Swagger path uses /api/m3u/accounts/ for M3U source definitions
         const accounts = await this.getAllPaginated(client, '/api/m3u/accounts/', jobId);
         // Ensure credentials (username/password) are included if present on the source
         exportData.data.m3uSources = accounts.map((acct: any) => {
           const { username, password, ...rest } = acct;
+          const channel_groups = Array.isArray(rest.channel_groups)
+            ? rest.channel_groups.map((cg: any) => ({
+              ...cg,
+              channel_group_name:
+                cg?.channel_group_name ||
+                (cg?.channel_group != null ? channelGroupMap[cg.channel_group] : undefined),
+            }))
+            : rest.channel_groups;
+
           return {
             ...rest,
+            ...(channel_groups ? { channel_groups } : {}),
             ...(username ? { username } : {}),
             ...(password ? { password } : {}),
           };
@@ -232,18 +297,36 @@ export class ExportService {
       // Export Core Settings
       if (request.options.syncCoreSettings) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting core settings...');
-        const coreSettings = await client.get('/api/core/settings/');
+        const coreSettingsResp = await this.getAllPaginated(client, '/api/core/settings/', jobId);
+        const coreSettings = Array.isArray(coreSettingsResp)
+          ? coreSettingsResp
+          : coreSettingsResp
+            ? [coreSettingsResp]
+            : [];
         exportData.data.coreSettings = coreSettings;
-        bumpProgress(1, 'Exporting core settings...');
-        jobManager.addLog(jobId, 'Exported core settings');
+        bumpProgress(coreSettings.length || 1, 'Exporting core settings...');
+        jobManager.addLog(jobId, `Exported ${coreSettings.length || 0} core settings`);
       }
 
       // Export EPG Sources
       if (request.options.syncEPGSources) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting EPG sources...');
         exportData.data.epgSources = await this.getAllPaginated(client, '/api/epg/sources/', jobId);
-        bumpProgress(exportData.data.epgSources.length, 'Exporting EPG sources...');
-        jobManager.addLog(jobId, `Exported ${exportData.data.epgSources.length} EPG sources`);
+        bumpProgress(exportData.data.epgSources.length || 1, 'Exporting EPG sources...');
+        jobManager.addLog(jobId, `Exported ${exportData.data.epgSources.length || 0} EPG sources`);
+
+        // Export EPG data rows so channel mappings stay intact
+        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting EPG data...');
+        exportData.data.epgData = await this.getAllPaginated(client, '/api/epg/epgdata/', jobId);
+        bumpProgress(exportData.data.epgData.length || 1, 'Exporting EPG data...');
+        const epgDataCount = exportData.data.epgData.length || 0;
+        jobManager.addLog(jobId, `Exported ${epgDataCount} EPG data rows`);
+
+        if (epgDataCount === 0) {
+          jobManager.addLog(jobId, 'WARNING: No EPG data found on source instance! EPG sources may not have downloaded/parsed data yet. Channel EPG matching during import will rely on Dispatcharr\'s server-side matcher.');
+        } else {
+          jobManager.addLog(jobId, `EPG data will be included in backup file for accurate channel matching during import`);
+        }
       }
 
       // Export Logos
@@ -260,9 +343,6 @@ export class ExportService {
           const percent = this.calcProgress(processedUnits + processed, totalUnits);
           jobManager.setProgress(jobId, percent, 'Downloading logos...');
         }, true);
-        if (logosResult.logos) {
-          exportData.data.logos = logosResult.logos;
-        }
         bumpProgress(logosResult.count || logoCount, 'Downloading logos...');
         jobManager.addLog(jobId, `Downloaded ${logosResult.count || 0} logos`);
       }
@@ -322,8 +402,15 @@ export class ExportService {
 
       const yamlPath = path.join(workDir, 'config.yaml');
       const jsonPath = path.join(workDir, 'config.json');
-      await writeFile(yamlPath, this.formatExportContent(exportData, 'yaml'), 'utf-8');
-      await writeFile(jsonPath, this.formatExportContent(exportData, 'json'), 'utf-8');
+      const configData = {
+        ...exportData,
+        data: { ...exportData.data },
+      };
+      // Do not embed logo binaries in config files; they are shipped separately
+      delete (configData.data as any).logos;
+
+      await writeFile(yamlPath, this.formatExportContent(configData, 'yaml'), 'utf-8');
+      await writeFile(jsonPath, this.formatExportContent(configData, 'json'), 'utf-8');
 
       if (logosResult?.logos && Array.isArray(logosResult.logos)) {
         const logosDir = path.join(workDir, 'logos');
@@ -516,6 +603,7 @@ export class ExportService {
       { key: 'userAgents', label: 'User Agents' },
       { key: 'coreSettings', label: 'Core Settings' },
       { key: 'epgSources', label: 'EPG Sources' },
+      { key: 'epgData', label: 'EPG Data' },
       { key: 'plugins', label: 'Plugins' },
       { key: 'dvrRules', label: 'DVR Rules' },
       { key: 'comskipConfig', label: 'Comskip Config' },

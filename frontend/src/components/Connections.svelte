@@ -5,6 +5,7 @@
     createSavedConnection,
     deleteSavedConnection,
     testConnection,
+    updateSavedConnection,
   } from '../api';
   import type { SavedConnection, SavedConnectionInput } from '../types';
 
@@ -24,6 +25,16 @@
     { loading: boolean; result?: { success: boolean; message: string } }
   > = {};
   let creatingTest = { loading: false, result: null as null | { success: boolean; message: string } };
+  let editingConnection: SavedConnection | null = null;
+  let editingForm: SavedConnectionInput = {
+    name: '',
+    instanceUrl: '',
+    username: '',
+    password: '',
+  };
+  let editingTest = { loading: false, result: null as null | { success: boolean; message: string } };
+  let editingSaving = false;
+  let editingError: string | null = null;
 
   const formIds = {
     name: 'conn-name',
@@ -117,6 +128,101 @@
         },
       };
       error = creatingTest.result.message;
+    }
+  }
+
+  function startEdit(conn: SavedConnection) {
+    editingConnection = conn;
+    editingForm = {
+      name: conn.name,
+      instanceUrl: conn.instanceUrl,
+      username: conn.username,
+      password: conn.password,
+    };
+    editingTest = { loading: false, result: null };
+    editingError = null;
+    error = null;
+    success = null;
+  }
+
+  function closeEdit() {
+    editingConnection = null;
+    editingForm = { name: '', instanceUrl: '', username: '', password: '' };
+    editingTest = { loading: false, result: null };
+    editingError = null;
+  }
+
+  function markEditDirty() {
+    editingTest = { loading: false, result: null };
+    editingError = null;
+    success = null;
+  }
+
+  async function handleEditTest(event?: Event) {
+    event?.preventDefault();
+    editingError = null;
+    error = null;
+    success = null;
+    if (!editingForm.instanceUrl || !editingForm.username || !editingForm.password) {
+      editingError = 'Instance URL, username, and password are required to test.';
+      return;
+    }
+    editingTest = { loading: true, result: null };
+    try {
+      const result = await testConnection({
+        url: editingForm.instanceUrl.trim(),
+        username: editingForm.username.trim(),
+        password: editingForm.password,
+      });
+      editingTest = {
+        loading: false,
+        result: { success: result.success, message: result.message },
+      };
+      if (!result.success) {
+        editingError = result.message || 'Connection test failed.';
+      }
+    } catch (err: any) {
+      editingTest = {
+        loading: false,
+        result: {
+          success: false,
+          message: err.response?.data?.error || err.message || 'Connection failed',
+        },
+      };
+      editingError = editingTest.result.message;
+    }
+  }
+
+  async function handleUpdate(event?: Event) {
+    event?.preventDefault();
+    if (!editingConnection) return;
+
+    editingError = null;
+    error = null;
+    success = null;
+
+    if (!editingForm.name || !editingForm.instanceUrl || !editingForm.username || !editingForm.password) {
+      editingError = 'Name, instance URL, username, and password are required.';
+      return;
+    }
+
+    const payload: SavedConnectionInput = {
+      name: editingForm.name.trim(),
+      instanceUrl: editingForm.instanceUrl.trim(),
+      username: editingForm.username.trim(),
+      password: editingForm.password,
+    };
+
+    editingSaving = true;
+    try {
+      await updateSavedConnection(editingConnection.id, payload);
+      success = 'Connection updated.';
+      closeEdit();
+      await loadConnections();
+    } catch (err: any) {
+      editingError = err.response?.data?.error || err.message || 'Failed to update connection';
+    } finally {
+      editingSaving = false;
     }
   }
 
@@ -298,6 +404,12 @@
                     {/if}
                   </button>
                   <button
+                    class="btn btn-primary btn-sm"
+                    on:click={() => startEdit(conn)}
+                  >
+                    Edit
+                  </button>
+                  <button
                     class="btn btn-danger btn-sm"
                     on:click={() => handleDelete(conn.id)}
                   >
@@ -324,6 +436,111 @@
       </div>
     {/if}
   </div>
+
+  {#if editingConnection}
+    <div class="overlay" role="presentation">
+      <button class="sr-only" on:click={closeEdit}>Close edit dialog</button>
+      <div class="edit-modal" role="dialog" aria-modal="true">
+        <div class="flex justify-between items-center mb-2">
+          <div>
+            <h3>Edit Connection</h3>
+            <p class="text-sm text-gray">Update settings for {editingConnection.name}</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" type="button" on:click={closeEdit}>Close</button>
+        </div>
+
+        <form on:submit|preventDefault={handleUpdate}>
+          <div class="grid grid-2 gap-3">
+            <div class="form-group">
+              <label class="form-label" for="edit-name">Name</label>
+              <input
+                id="edit-name"
+                class="form-input"
+                placeholder="Friendly label"
+                bind:value={editingForm.name}
+                on:input={markEditDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="edit-instance-url">Instance URL</label>
+              <input
+                id="edit-instance-url"
+                class="form-input"
+                placeholder="http://localhost:9191"
+                bind:value={editingForm.instanceUrl}
+                on:input={markEditDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="edit-username">Username</label>
+              <input
+                id="edit-username"
+                class="form-input"
+                placeholder="admin"
+                bind:value={editingForm.username}
+                on:input={markEditDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="edit-password">Password</label>
+              <input
+                id="edit-password"
+                type="password"
+                class="form-input"
+                placeholder="Password"
+                bind:value={editingForm.password}
+                on:input={markEditDirty}
+              />
+            </div>
+          </div>
+
+          <div class="actions-row modal-actions">
+            <button
+              class="btn btn-secondary btn-sm"
+              type="button"
+              on:click={handleEditTest}
+              disabled={editingTest.loading}
+            >
+              {#if editingTest.loading}
+                <span class="spinner"></span>
+                Testing...
+              {:else}
+                Test changes
+              {/if}
+            </button>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary btn-sm" type="button" on:click={closeEdit}>Cancel</button>
+              <button class="btn btn-primary btn-sm" type="submit" disabled={editingSaving}>
+                {#if editingSaving}
+                  <span class="spinner"></span>
+                  Saving...
+                {:else}
+                  Save changes
+                {/if}
+              </button>
+            </div>
+          </div>
+        </form>
+
+        {#if editingTest.result}
+          <div
+            class="alert mt-2"
+            class:alert-success={editingTest.result?.success}
+            class:alert-error={!editingTest.result?.success}
+          >
+            {editingTest.result.message}
+          </div>
+        {/if}
+
+        {#if editingError}
+          <div class="alert alert-error mt-2">{editingError}</div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -339,6 +556,11 @@
     align-items: center;
     gap: 0.75rem;
     margin-top: 1rem;
+  }
+
+  .modal-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
 
   .table-wrapper {
@@ -360,5 +582,33 @@
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;
+  }
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    z-index: 1000;
+  }
+
+  .edit-modal {
+    width: min(720px, 100%);
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .edit-modal .spinner {
+    width: 1.125rem;
+    height: 1.125rem;
+    border-width: 2px;
   }
 </style>

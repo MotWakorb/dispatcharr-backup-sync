@@ -14,9 +14,10 @@ export class DispatcharrClient {
     this.cookieJar = new CookieJar();
     this.client = wrapper(axios.create({
       baseURL: connection.url,
-      timeout: 30000,
+      timeout: 120000, // allow large imports
+      // Do not force Content-Type globally; set per-request so form uploads work
       headers: {
-        'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
       jar: this.cookieJar,
       withCredentials: true, // Enable cookies for session-based auth
@@ -97,19 +98,24 @@ export class DispatcharrClient {
     }
   }
 
-  async post<T = any>(endpoint: string, data?: any): Promise<T> {
+  async post<T = any>(endpoint: string, data?: any, config?: any): Promise<T> {
     if (!this.authenticated) {
       await this.authenticate();
     }
 
     try {
-      const response = await this.client.post(endpoint, data);
+      console.log(`Making POST request to: ${endpoint}`);
+      console.log(`POST ${endpoint} payload:`, JSON.stringify(data).slice(0, 200));
+      const response = await this.client.post(endpoint, data, config);
+      console.log(`POST ${endpoint} response status:`, response.status);
       return response.data;
     } catch (error: any) {
+      console.error(`POST ${endpoint} failed:`, error.response?.status);
+      console.error(`POST ${endpoint} error data:`, error.response?.data);
       if (error.response?.status === 401) {
         this.authenticated = false;
         await this.authenticate();
-        const response = await this.client.post(endpoint, data);
+        const response = await this.client.post(endpoint, data, config);
         return response.data;
       }
       throw error;
@@ -148,6 +154,25 @@ export class DispatcharrClient {
         this.authenticated = false;
         await this.authenticate();
         const response = await this.client.delete(endpoint);
+        return response.data;
+      }
+      throw error;
+    }
+  }
+
+  async patch<T = any>(endpoint: string, data?: any, config?: any): Promise<T> {
+    if (!this.authenticated) {
+      await this.authenticate();
+    }
+
+    try {
+      const response = await this.client.patch(endpoint, data, config);
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        this.authenticated = false;
+        await this.authenticate();
+        const response = await this.client.patch(endpoint, data, config);
         return response.data;
       }
       throw error;

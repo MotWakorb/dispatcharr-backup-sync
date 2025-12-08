@@ -1,6 +1,8 @@
 services:
   backend:
-    image: ghcr.io/motwakorb/dispatcharr-backup-sync-backend:latest
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
     container_name: dispatcharr-manager-backend
     restart: unless-stopped
     ports:
@@ -12,7 +14,9 @@ services:
       - dispatcharr-manager
 
   frontend:
-    image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
     container_name: dispatcharr-manager-frontend
     restart: unless-stopped
     ports:

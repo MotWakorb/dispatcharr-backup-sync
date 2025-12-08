@@ -147,11 +147,18 @@ export async function getJobHistory(): Promise<JobStatus[]> {
 // Import APIs
 export async function startImport(
   destination: DispatcharrConnection,
-  file: File,
-  options?: ImportOptions
+  file: File | null,
+  options?: ImportOptions,
+  onUploadProgress?: (percent: number) => void,
+  uploadId?: string
 ): Promise<string> {
   const formData = new FormData();
-  formData.append('file', file);
+  if (uploadId) {
+    formData.append('uploadId', uploadId);
+  } else if (file) {
+    formData.append('file', file);
+  }
+
   formData.append('destination', JSON.stringify(destination));
   if (options) {
     formData.append('options', JSON.stringify(options));
@@ -164,6 +171,12 @@ export async function startImport(
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      onUploadProgress: (evt) => {
+        if (evt.total && onUploadProgress) {
+          const percent = Math.round((evt.loaded / evt.total) * 100);
+          onUploadProgress(percent);
+        }
+      },
     }
   );
   return response.data.data!.jobId;
@@ -172,4 +185,30 @@ export async function startImport(
 export async function getImportStatus(jobId: string): Promise<JobStatus> {
   const response = await api.get<ApiResponse<JobStatus>>(`/import/status/${jobId}`);
   return response.data.data!;
+}
+
+export async function inspectImportFile(
+  file: File,
+  onUploadProgress?: (percent: number) => void
+): Promise<{ sections: string[]; uploadId?: string; fileName?: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await api.post<ApiResponse<{ sections: string[]; uploadId?: string; fileName?: string }>>(
+    '/import/inspect',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (evt) => {
+        if (evt.total && onUploadProgress) {
+          const percent = Math.round((evt.loaded / evt.total) * 100);
+          onUploadProgress(percent);
+        }
+      },
+    }
+  );
+
+  return response.data.data || { sections: [] };
 }

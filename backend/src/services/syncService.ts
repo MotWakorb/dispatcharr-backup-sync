@@ -582,21 +582,68 @@ export class SyncService {
     dryRun?: boolean
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     try {
-      const settings = await source.get('/api/core/settings/');
+      const sourceResp = await source.get('/api/core/settings/');
+      const sourceList = Array.isArray(sourceResp)
+        ? sourceResp.filter((s) => s && typeof s === 'object')
+        : sourceResp
+          ? [sourceResp]
+          : [];
+
+      if (!sourceList.length) {
+        return { synced: 0, skipped: 1, errors: 0 };
+      }
+
       if (dryRun) {
-        return { synced: 1, skipped: 0, errors: 0 };
+        return { synced: sourceList.length, skipped: 0, errors: 0 };
       }
 
-      const destSettings = await dest.get('/api/core/settings/').catch(() => null);
-      const targetId = destSettings?.id ?? settings?.id;
+      const destResp = await dest.get('/api/core/settings/').catch(() => []);
+      const destList = Array.isArray(destResp)
+        ? destResp
+        : destResp
+          ? [destResp]
+          : [];
+      const destByKey = new Map<string, any>(
+        destList
+          .filter((s: any) => s?.key)
+          .map((s: any) => [s.key, s])
+      );
 
-      if (targetId) {
-        await dest.put(`/api/core/settings/${targetId}/`, settings);
-      } else {
-        await dest.post('/api/core/settings/', settings);
+      let synced = 0;
+      let errors = 0;
+
+      for (const setting of sourceList) {
+        const key = setting.key;
+        if (!key) continue;
+
+        const payload = { ...setting };
+        delete (payload as any).id;
+
+        try {
+          const match = destByKey.get(key);
+          if (match?.id) {
+            await dest.put(`/api/core/settings/${match.id}/`, payload);
+          } else {
+            await dest.post('/api/core/settings/', payload);
+          }
+          synced++;
+        } catch (error: any) {
+          const status = error?.response?.status;
+          if (status === 404) {
+            try {
+              await dest.post('/api/core/settings/', payload);
+              synced++;
+              continue;
+            } catch {
+              errors++;
+              continue;
+            }
+          }
+          errors++;
+        }
       }
 
-      return { synced: 1, skipped: 0, errors: 0 };
+      return { synced, skipped: 0, errors };
     } catch (error) {
       return { synced: 0, skipped: 0, errors: 1 };
     }
