@@ -19,7 +19,36 @@ async function ensureStorage(): Promise<void> {
   try {
     await fs.access(DATA_FILE);
   } catch {
-    const initial: SavedConnectionFile = { connections: [] };
+    // Initialize with default connections from environment variables (for development only)
+    const now = new Date().toISOString();
+    const connections: SavedConnection[] = [];
+
+    // Only add default connections if environment variables are set
+    if (process.env.DEFAULT_PROD_URL && process.env.DEFAULT_USERNAME && process.env.DEFAULT_PASSWORD) {
+      connections.push({
+        id: uuidv4(),
+        name: 'Prod',
+        instanceUrl: process.env.DEFAULT_PROD_URL,
+        username: process.env.DEFAULT_USERNAME,
+        password: process.env.DEFAULT_PASSWORD,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    if (process.env.DEFAULT_DEV_URL && process.env.DEFAULT_USERNAME && process.env.DEFAULT_PASSWORD) {
+      connections.push({
+        id: uuidv4(),
+        name: 'Dev',
+        instanceUrl: process.env.DEFAULT_DEV_URL,
+        username: process.env.DEFAULT_USERNAME,
+        password: process.env.DEFAULT_PASSWORD,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const initial: SavedConnectionFile = { connections };
     await fs.writeFile(DATA_FILE, JSON.stringify(initial, null, 2), 'utf-8');
   }
 }

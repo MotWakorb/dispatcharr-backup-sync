@@ -3,6 +3,32 @@ import { jobManager } from './jobManager.js';
 import type { SyncRequest, SyncOptions } from '../types/index.js';
 
 export class SyncService {
+  private async getAllPaginated(client: any, endpoint: string): Promise<any[]> {
+    let allResults: any[] = [];
+    let page = 1;
+    const pageSize = 1000;
+
+    while (true) {
+      const response = await client.get(`${endpoint}?page=${page}&page_size=${pageSize}`);
+
+      if (response.results && Array.isArray(response.results)) {
+        allResults = allResults.concat(response.results);
+        if (!response.next) {
+          break;
+        }
+        page++;
+      } else if (Array.isArray(response)) {
+        // Non-paginated response
+        return response;
+      } else {
+        // Single object response
+        return [response];
+      }
+    }
+
+    return allResults;
+  }
+
   async sync(request: SyncRequest, jobId: string): Promise<void> {
     try {
       jobManager.startJob(jobId, 'Initializing sync...');
@@ -231,6 +257,7 @@ export class SyncService {
     let skipped = 0;
     let errors = 0;
 
+    // First, sync the profiles themselves
     for (const profile of sourceProfiles) {
       try {
         const existing = destProfiles.find((p: any) => p.name === profile.name);
@@ -253,7 +280,67 @@ export class SyncService {
       }
     }
 
+    // Then, sync the channel associations for each profile
+    if (!dryRun) {
+      await this.syncChannelProfileAssociations(source, dest);
+    }
+
     return { synced, skipped, errors };
+  }
+
+  private async syncChannelProfileAssociations(
+    source: DispatcharrClient,
+    dest: DispatcharrClient
+  ): Promise<void> {
+    const sourceProfiles = await source.get('/api/channels/profiles/');
+    const destProfiles = await dest.get('/api/channels/profiles/');
+    const sourceChannels = await source.get('/api/channels/channels/').catch(() => ({ results: [] }));
+    const destChannels = await dest.get('/api/channels/channels/').catch(() => ({ results: [] }));
+
+    const sourceChannelsList = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
+    const destChannelsList = Array.isArray(destChannels) ? destChannels : destChannels.results || [];
+
+    // Build channel mapping (source channel -> dest channel)
+    const channelMap: Record<number, number> = {};
+    for (const sourceChannel of sourceChannelsList) {
+      const destChannel = destChannelsList.find(
+        (dc: any) => dc.name === sourceChannel.name && dc.channel_number === sourceChannel.channel_number
+      );
+      if (sourceChannel.id && destChannel?.id) {
+        channelMap[sourceChannel.id] = destChannel.id;
+      }
+    }
+
+    // For each profile, sync the channel associations
+    for (const sourceProfile of sourceProfiles) {
+      try {
+        const destProfile = destProfiles.find((p: any) => p.name === sourceProfile.name);
+        if (!destProfile) continue;
+
+        // Get channel IDs from source profile (already in profile.channels array)
+        const sourceChannelIds = Array.isArray(sourceProfile.channels) ? sourceProfile.channels : [];
+
+        // Map to destination channel IDs
+        const enabledDestChannelIds = sourceChannelIds
+          .map((sid: number) => channelMap[sid])
+          .filter((id: number | undefined) => id != null);
+
+        if (enabledDestChannelIds.length > 0) {
+          // Enable each channel individually using the per-channel endpoint
+          for (const channelId of enabledDestChannelIds) {
+            try {
+              await dest.patch(`/api/channels/profiles/${destProfile.id}/channels/${channelId}/`, {
+                enabled: true
+              });
+            } catch (err) {
+              // Continue with other channels even if one fails
+            }
+          }
+        }
+      } catch (error) {
+        // Continue with other profiles even if one fails
+      }
+    }
   }
 
   private async syncChannels(
@@ -263,6 +350,20 @@ export class SyncService {
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     const sourceChannels = await source.get('/api/channels/channels/');
     const destChannels = await dest.get('/api/channels/channels/');
+
+    // Build stream profile mapping by name
+    const sourceProfiles = await source.get('/api/core/streamprofiles/').catch(() => []);
+    const destProfiles = await dest.get('/api/core/streamprofiles/').catch(() => []);
+    const profileMap: Record<number, number> = {};
+
+    for (const sourceProfile of (Array.isArray(sourceProfiles) ? sourceProfiles : [])) {
+      const destProfile = (Array.isArray(destProfiles) ? destProfiles : []).find(
+        (p: any) => p.name === sourceProfile.name
+      );
+      if (sourceProfile.id && destProfile?.id) {
+        profileMap[sourceProfile.id] = destProfile.id;
+      }
+    }
 
     let synced = 0;
     let skipped = 0;
@@ -290,6 +391,11 @@ export class SyncService {
 
         if (channel.channel_number != null) {
           channelData.channel_number = channel.channel_number;
+        }
+
+        // Map stream profile ID if present
+        if (channel.stream_profile_id && profileMap[channel.stream_profile_id]) {
+          channelData.stream_profile_id = profileMap[channel.stream_profile_id];
         }
 
         if (existing) {

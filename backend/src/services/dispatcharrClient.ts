@@ -166,15 +166,20 @@ export class DispatcharrClient {
     }
 
     try {
+      console.log(`Making PATCH request to: ${endpoint}`);
+      console.log(`PATCH ${endpoint} payload:`, JSON.stringify(data).substring(0, 500));
       const response = await this.client.patch(endpoint, data, config);
+      console.log(`PATCH ${endpoint} response status: ${response.status}`);
       return response.data;
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.authenticated = false;
         await this.authenticate();
         const response = await this.client.patch(endpoint, data, config);
+        console.log(`PATCH ${endpoint} response status: ${response.status}`);
         return response.data;
       }
+      console.log(`PATCH ${endpoint} error:`, error.response?.status, error.response?.data);
       throw error;
     }
   }

@@ -262,6 +262,18 @@ export class ImportService {
           jobId
         );
         currentProgress += progressPerStep;
+
+        // Import VOD Categories (after M3U sources so accounts exist)
+        if (data.vodCategories) {
+          jobManager.setProgress(jobId, currentProgress, 'Importing VOD categories...');
+          results.imported.vodCategories = await this.importVODCategories(
+            client,
+            data.vodCategories,
+            data.m3uSources || [],
+            jobId
+          );
+          jobManager.addLog(jobId, `VOD Categories: imported=${results.imported.vodCategories.imported}, skipped=${results.imported.vodCategories.skipped}, errors=${results.imported.vodCategories.errors}`);
+        }
       }
 
       // Import EPG Sources
@@ -380,6 +392,18 @@ export class ImportService {
         jobManager.setProgress(jobId, currentProgress, 'Assigning EPG data to channels...');
         await this.setEpgForChannels(client, jobId, data.channels, data.epgData);
         await this.matchEpgForChannels(client, jobId);
+      }
+
+      // Apply channel profile associations AFTER channels are imported
+      jobManager.addLog(jobId, `Checking channel profile associations: channelProfiles=${!!data.channelProfiles}, channels=${!!data.channels}, channelProfiles enabled=${this.isEnabled('channelProfiles', request.options)}, channels enabled=${this.isEnabled('channels', request.options)}`);
+
+      if (data.channelProfiles && data.channels &&
+          this.isEnabled('channelProfiles', request.options) &&
+          this.isEnabled('channels', request.options)) {
+        jobManager.setProgress(jobId, currentProgress, 'Applying channel profile associations...');
+        await this.applyChannelProfileAssociations(client, data.channelProfiles, data.channels, jobId);
+      } else {
+        jobManager.addLog(jobId, `Skipping channel profile associations due to unmet conditions`);
       }
 
       // Import User Agents
@@ -708,6 +732,93 @@ export class ImportService {
     return { imported, skipped, errors };
   }
 
+  private async applyChannelProfileAssociations(
+    client: DispatcharrClient,
+    profiles: any[],
+    channels: any[],
+    jobId: string
+  ): Promise<void> {
+    const destProfiles = await client.get('/api/channels/profiles/');
+    const destChannels = await client.get('/api/channels/channels/').catch(() => ({ results: [] }));
+    const destChannelsList = Array.isArray(destChannels) ? destChannels : destChannels.results || [];
+
+    // Build a mapping from backup channel IDs to destination channel IDs
+    const channelIdMap: Record<number, number> = {};
+    for (const backupChannel of channels) {
+      const destChannel = destChannelsList.find(
+        (dc: any) => dc.name === backupChannel.name && dc.channel_number === backupChannel.channel_number
+      );
+      if (backupChannel.id && destChannel?.id) {
+        channelIdMap[backupChannel.id] = destChannel.id;
+      }
+    }
+
+    jobManager.addLog(jobId, `Built channel ID mapping: ${Object.keys(channelIdMap).length} channels mapped`);
+
+    // For each profile, apply the channel associations
+    for (const backupProfile of profiles) {
+      jobManager.addLog(jobId, `Profile "${backupProfile.name}": has ${backupProfile.enabled_channels?.length || 0} enabled channels in backup`);
+
+      if (!backupProfile.enabled_channels || !Array.isArray(backupProfile.enabled_channels)) {
+        continue;
+      }
+
+      const destProfile = destProfiles.find((p: any) => p.name === backupProfile.name);
+      if (!destProfile) {
+        jobManager.addLog(jobId, `Profile "${backupProfile.name}" not found on destination, skipping associations`);
+        continue;
+      }
+
+      // Map backup channel IDs to destination channel IDs
+      const destChannelIds = backupProfile.enabled_channels
+        .map((backupChannelId: number) => channelIdMap[backupChannelId])
+        .filter((id: number | undefined) => id != null);
+
+      jobManager.addLog(jobId, `Profile "${backupProfile.name}": mapped ${destChannelIds.length} channels (from ${backupProfile.enabled_channels.length} in backup)`);
+
+      if (destChannelIds.length === 0) {
+        jobManager.addLog(jobId, `Profile "${backupProfile.name}": no channels to enable after mapping`);
+        continue;
+      }
+
+      try {
+        // Log the payload being sent
+        jobManager.addLog(
+          jobId,
+          `Profile "${backupProfile.name}": enabling ${destChannelIds.length} channels individually...`
+        );
+
+        // Enable each channel individually using the per-channel endpoint
+        // /api/channels/profiles/{profile_id}/channels/{channel_id}/
+        let successCount = 0;
+        for (const channelId of destChannelIds) {
+          try {
+            await client.patch(`/api/channels/profiles/${destProfile.id}/channels/${channelId}/`, {
+              enabled: true
+            });
+            successCount++;
+          } catch (err: any) {
+            jobManager.addLog(
+              jobId,
+              `Failed to enable channel ${channelId} in profile "${backupProfile.name}": ${err.message}`
+            );
+          }
+        }
+
+        jobManager.addLog(
+          jobId,
+          `Profile "${backupProfile.name}": successfully enabled ${successCount}/${destChannelIds.length} channels`
+        );
+      } catch (error: any) {
+        const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+        jobManager.addLog(
+          jobId,
+          `Profile "${backupProfile.name}": failed to apply associations - ${errorDetails}`
+        );
+      }
+    }
+  }
+
   private async importChannels(
     client: DispatcharrClient,
     channels: any[],
@@ -934,8 +1045,16 @@ export class ImportService {
         const mappedProfileId = mapProfileId(channel.stream_profile_id);
         if (mappedProfileId != null) {
           channelData.stream_profile_id = mappedProfileId;
+          if (imported < 5) {
+            jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} -> target_id=${mappedProfileId}`);
+          }
         } else if (channel.stream_profile && profileByName[channel.stream_profile]) {
           channelData.stream_profile_id = profileByName[channel.stream_profile];
+          if (imported < 5) {
+            jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: by_name="${channel.stream_profile}" -> target_id=${profileByName[channel.stream_profile]}`);
+          }
+        } else if (imported < 5) {
+          jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} not mapped (profileMap has ${Object.keys(opts?.streamProfileMap || {}).length} entries)`);
         }
 
         // Attempt to map streams by tvg_id / station / name / stream_hash onto newly refreshed streams
@@ -1204,10 +1323,18 @@ export class ImportService {
           'stale_stream_days',
           'priority',
           'custom_properties',
+          'enable_vod',
+          'auto_enable_new_groups_live',
+          'auto_enable_new_groups_vod',
+          'auto_enable_new_groups_series',
         ];
         for (const key of allowed) {
           if (source[key] !== undefined) payload[key] = source[key];
         }
+
+        // Log VOD settings for debugging
+        jobManager.addLog(jobId, `M3U ${source.name}: VOD settings in backup - enable_vod=${source.enable_vod}, auto_enable_new_groups_vod=${source.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${source.auto_enable_new_groups_series}, auto_enable_new_groups_live=${source.auto_enable_new_groups_live}`);
+        jobManager.addLog(jobId, `M3U ${source.name}: VOD settings in payload - enable_vod=${payload.enable_vod}, auto_enable_new_groups_vod=${payload.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${payload.auto_enable_new_groups_series}, auto_enable_new_groups_live=${payload.auto_enable_new_groups_live}`);
 
         // Basic validation: need either server_url or file_path
         if (!payload.server_url && !payload.file_path) {
@@ -1268,17 +1395,24 @@ export class ImportService {
             if (cg?.channel_sort_order !== undefined) entry.channel_sort_order = cg.channel_sort_order;
             if (cg?.channel_sort_reverse !== undefined) entry.channel_sort_reverse = cg.channel_sort_reverse;
             if (cg?.channel_profile_ids !== undefined) entry.channel_profile_ids = cg.channel_profile_ids;
+
+            // Store the group name for logging
+            entry._groupName = nameCandidate;
+
             channelGroupsPayload.push(entry);
           }
         }
 
         const match = existing?.find((s: any) => s.name === source.name);
         let accountId: any = match?.id;
+        let apiResponse: any;
         if (match?.id) {
-          await client.put(`/api/m3u/accounts/${accountId}/`, payload);
+          apiResponse = await client.put(`/api/m3u/accounts/${accountId}/`, payload);
+          jobManager.addLog(jobId, `M3U ${source.name}: API response after PUT - enable_vod=${apiResponse.enable_vod}, auto_enable_new_groups_vod=${apiResponse.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${apiResponse.auto_enable_new_groups_series}, auto_enable_new_groups_live=${apiResponse.auto_enable_new_groups_live}`);
         } else {
-          const created = await client.post('/api/m3u/accounts/', payload);
-          accountId = created?.id ?? created;
+          apiResponse = await client.post('/api/m3u/accounts/', payload);
+          accountId = apiResponse?.id ?? apiResponse;
+          jobManager.addLog(jobId, `M3U ${source.name}: API response after POST - enable_vod=${apiResponse.enable_vod}, auto_enable_new_groups_vod=${apiResponse.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${apiResponse.auto_enable_new_groups_series}, auto_enable_new_groups_live=${apiResponse.auto_enable_new_groups_live}`);
         }
 
         // Trigger refresh for this account to pull streams/channels
@@ -1302,9 +1436,22 @@ export class ImportService {
             );
 
             // Build complete payload with all discovered groups, setting enabled/disabled based on backup
+            jobManager.addLog(jobId, `M3U ${source?.name}: Discovered ${discoveredGroups.length} groups after refresh, have ${channelGroupsPayload.length} groups from backup`);
+
             const completePayload = discoveredGroups.map((dg: any) => {
               const backupGroup = channelGroupsPayload.find(cg => cg.channel_group === dg.channel_group);
               const shouldBeEnabled = enabledGroupIds.has(dg.channel_group);
+
+              // Get group name for logging - prefer backup name, fall back to discovered name
+              const discoveredName = dg.name || dg.channel_group_name || '';
+              const backupName = backupGroup?._groupName || '';
+              const groupName = backupName || discoveredName || `Group ${dg.channel_group}`;
+
+              if (backupGroup) {
+                jobManager.addLog(jobId, `M3U ${source?.name}: Group "${groupName}" (ID: ${dg.channel_group}, backup name: "${backupName}", discovered name: "${discoveredName}") - backup says enabled=${backupGroup.enabled}, applying enabled=${shouldBeEnabled}`);
+              } else {
+                jobManager.addLog(jobId, `M3U ${source?.name}: Group "${groupName}" (ID: ${dg.channel_group}) - NOT in backup, defaulting to enabled=false`);
+              }
 
               return {
                 ...dg,
@@ -1322,23 +1469,175 @@ export class ImportService {
             });
 
             const enabledCount = completePayload.filter(cg => cg.enabled).length;
-            jobManager.addLog(jobId, `M3U ${source?.name}: Applying ${enabledCount} enabled channel groups`);
+            const disabledCount = completePayload.filter(cg => !cg.enabled).length;
+            jobManager.addLog(jobId, `M3U ${source?.name}: Applying ${enabledCount} enabled and ${disabledCount} disabled channel groups via PATCH`);
 
             // Update with complete payload including enabled/disabled flags
-            await client.patch(`/api/m3u/accounts/${accountId}/`, {
+            const patchResponse = await client.patch(`/api/m3u/accounts/${accountId}/`, {
               channel_groups: completePayload,
             });
 
-            // Trigger refresh to pull streams for enabled groups (don't wait for completion)
+            // Log the response to verify it was accepted
+            const responseGroups = patchResponse?.channel_groups || [];
+            const responseEnabledCount = responseGroups.filter((cg: any) => cg.enabled).length;
+            jobManager.addLog(jobId, `M3U ${source?.name}: API response shows ${responseEnabledCount} enabled groups out of ${responseGroups.length} total`);
+
+            // Trigger refresh to pull streams for enabled groups
             jobManager.addLog(jobId, `M3U ${source?.name}: Triggering stream refresh for enabled groups`);
-            client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
-              // Ignore errors - refresh will happen in background
+            await client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Stream refresh failed (will continue anyway): ${err.message || err}`);
             });
+
+            // Wait for the refresh to complete
+            jobManager.addLog(jobId, `M3U ${source?.name}: Waiting for stream refresh to complete`);
+            await waitForM3UReady(accountId);
+
+            // Re-apply the PATCH after refresh, in case the refresh reset enabled/disabled states
+            jobManager.addLog(jobId, `M3U ${source?.name}: Re-applying ${enabledCount} enabled and ${disabledCount} disabled channel groups to ensure states are preserved`);
+            const finalPatchResponse = await client.patch(`/api/m3u/accounts/${accountId}/`, {
+              channel_groups: completePayload,
+            });
+
+            // Verify the final state
+            const finalResponseGroups = finalPatchResponse?.channel_groups || [];
+            const finalResponseEnabledCount = finalResponseGroups.filter((cg: any) => cg.enabled).length;
+            jobManager.addLog(jobId, `M3U ${source?.name}: Final verification - ${finalResponseEnabledCount} enabled groups out of ${finalResponseGroups.length} total`);
           }
         }
         imported++;
       } catch (error) {
         this.logJobError(jobId, 'M3U import failed', source?.name || source?.id, error);
+        errors++;
+      }
+    }
+
+    return { imported, skipped, errors };
+  }
+
+  private async importVODCategories(
+    client: DispatcharrClient,
+    categories: any[],
+    sourceM3UAccounts: any[],
+    jobId: string
+  ): Promise<{ imported: number; skipped: number; errors: number }> {
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    if (!Array.isArray(categories) || categories.length === 0) {
+      jobManager.addLog(jobId, 'VOD Categories: No categories to import');
+      return { imported, skipped, errors };
+    }
+
+    jobManager.addLog(jobId, `VOD Categories: Processing ${categories.length} categories from backup`);
+
+    // Get existing categories and M3U accounts from destination
+    const existingCategories = await client.get('/api/vod/categories/').catch(() => []);
+    const destM3UAccounts = await client.get('/api/m3u/accounts/').catch(() => []);
+
+    jobManager.addLog(jobId, `VOD Categories: Found ${existingCategories.length} existing categories on destination`);
+    jobManager.addLog(jobId, `VOD Categories: Found ${destM3UAccounts.length} M3U accounts on destination`);
+    jobManager.addLog(jobId, `VOD Categories: Found ${sourceM3UAccounts.length} M3U accounts in backup`);
+
+    // Build category name -> ID map for existing categories
+    const categoryMap: Record<string, number> = {};
+    for (const cat of existingCategories) {
+      if (cat.name && cat.id) {
+        categoryMap[cat.name] = cat.id;
+      }
+    }
+
+    // Build source M3U account ID -> name map
+    const sourceAccountIdToName: Record<number, string> = {};
+    for (const acc of sourceM3UAccounts) {
+      if (acc.id && acc.name) {
+        sourceAccountIdToName[acc.id] = acc.name;
+      }
+    }
+
+    // Build destination M3U account name -> ID map
+    const destAccountNameToId: Record<string, number> = {};
+    for (const acc of destM3UAccounts) {
+      if (acc.name && acc.id) {
+        destAccountNameToId[acc.name] = acc.id;
+      }
+    }
+
+    jobManager.addLog(jobId, `VOD Categories: Mapped ${Object.keys(sourceAccountIdToName).length} source accounts, ${Object.keys(destAccountNameToId).length} destination accounts`);
+
+    for (const category of categories) {
+      try {
+        const existingCat = categoryMap[category.name];
+
+        if (!existingCat) {
+          // Create new category
+          const payload: any = {
+            name: category.name,
+            category_type: category.category_type || 'movie',
+          };
+
+          const created = await client.post('/api/vod/categories/', payload);
+          if (created?.id) {
+            categoryMap[category.name] = created.id;
+            jobManager.addLog(jobId, `VOD Category: Created "${category.name}"`);
+          }
+        }
+
+        // Now apply M3U account relations with enabled states
+        const catId = categoryMap[category.name];
+        if (catId && Array.isArray(category.m3u_accounts)) {
+          for (const relation of category.m3u_accounts) {
+            try {
+              // Find the corresponding M3U account ID in destination
+              const sourceAccountId = relation.m3u_account;
+              const sourceAccountName = sourceAccountIdToName[sourceAccountId];
+
+              if (!sourceAccountName) {
+                jobManager.addLog(jobId, `VOD Category "${category.name}": Could not find source M3U account name for ID ${sourceAccountId}`);
+                continue;
+              }
+
+              const destAccountId = destAccountNameToId[sourceAccountName];
+
+              if (!destAccountId) {
+                jobManager.addLog(jobId, `VOD Category "${category.name}": Could not find destination M3U account ID for "${sourceAccountName}"`);
+                continue;
+              }
+
+              // Update the relation enabled state
+              const enabled = relation.enabled !== false;
+              jobManager.addLog(jobId, `VOD Category "${category.name}": Setting enabled=${enabled} for M3U account "${sourceAccountName}" (ID ${destAccountId})`);
+
+              // We need to get the current category to see all its relations
+              const currentCat = await client.get(`/api/vod/categories/${catId}/`);
+              const updatedRelations = (currentCat.m3u_accounts || []).map((rel: any) => {
+                if (rel.m3u_account === destAccountId) {
+                  return { ...rel, enabled };
+                }
+                return rel;
+              });
+
+              // If the relation doesn't exist, add it
+              if (!updatedRelations.some((rel: any) => rel.m3u_account === destAccountId)) {
+                updatedRelations.push({
+                  category: catId,
+                  m3u_account: destAccountId,
+                  enabled,
+                });
+              }
+
+              await client.patch(`/api/vod/categories/${catId}/`, {
+                m3u_accounts: updatedRelations,
+              });
+            } catch (err) {
+              jobManager.addLog(jobId, `VOD Category "${category.name}": Failed to update M3U account relation: ${err}`);
+            }
+          }
+        }
+
+        imported++;
+      } catch (error) {
+        this.logJobError(jobId, 'VOD category import failed', category?.name, error);
         errors++;
       }
     }

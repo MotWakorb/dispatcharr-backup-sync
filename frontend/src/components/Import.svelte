@@ -215,9 +215,8 @@
 
       if (job.status === 'running' || job.status === 'pending') {
         pollInterval = window.setTimeout(() => pollJobStatus(jobId), 1000);
-      } else {
-        importing = false;
       }
+      // Keep overlay visible when job completes so user can see results and click Close
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to get job status';
       importing = false;
@@ -234,10 +233,6 @@
   $: importOptionsEnabled = availableSections.length > 0;
   $: allImportOptionsSelected =
     importOptionsEnabled && availableSections.every((def) => importOptions[def.optionKey]);
-  $: showUploadPopover = parsing
-    || importing
-    || (detectUploadProgress > 0 && !detectFinished)
-    || importUploadProgress > 0;
 </script>
 
 <div>
@@ -364,42 +359,34 @@
 
   </div>
 
-  {#if showUploadPopover}
-    <div class="progress-popover" role="status">
-      <div class="popover-header">Uploads</div>
-      <div class="popover-row">
-        <div class="popover-label">Detect upload</div>
-        <div class="progress-bar popover-bar">
-          <div class="progress-fill" style={`width: ${Math.min(detectUploadProgress || (parsing ? 100 : 0), 100)}%`}></div>
-        </div>
-        <div class="popover-value">{Math.min(detectUploadProgress || (parsing ? 100 : 0), 100)}%</div>
-      </div>
-      {#if importUploadProgress > 0 || importing}
-        <div class="popover-row">
-          <div class="popover-label">Import upload</div>
-          <div class="progress-bar popover-bar">
-            <div class="progress-fill" style={`width: ${Math.min(importUploadProgress, 100)}%`}></div>
+  {#if currentJob && importing}
+    <div class="overlay">
+      <div class="overlay-card">
+        <div class="flex justify-between items-center mb-2">
+          <div>
+            <p class="text-sm text-gray">Import in progress...</p>
+            <p class="text-xs text-gray">Job ID: {currentJob.jobId}</p>
           </div>
-          <div class="popover-value">{Math.min(importUploadProgress, 100)}%</div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" on:click={openLogs}>
+              View logs
+            </button>
+            {#if currentJob?.status === 'running' || currentJob?.status === 'pending'}
+              <button class="btn btn-secondary btn-sm" on:click={() => importing = false}>
+                Run in background
+              </button>
+              <button class="btn btn-secondary btn-sm" on:click={() => { importing = false; currentJob = null; }}>
+                Cancel
+              </button>
+            {:else}
+              <button class="btn btn-secondary btn-sm" on:click={() => { importing = false; currentJob = null; }}>
+                Close
+              </button>
+            {/if}
+          </div>
         </div>
-      {/if}
-    </div>
-  {/if}
-
-  {#if currentJob}
-    <div class="card">
-      <div class="card-header">
-        <h3 class="card-title">Import Progress</h3>
-        <button
-          class="btn btn-secondary btn-sm"
-          type="button"
-          on:click={openLogs}
-          disabled={!currentJob?.jobId}
-        >
-          View Logs
-        </button>
+        <JobProgress job={currentJob} />
       </div>
-      <JobProgress job={currentJob} />
     </div>
   {/if}
 
@@ -483,6 +470,25 @@
     background: #e0ecff;
   }
 
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+  }
+
+  .overlay-card {
+    width: min(700px, 100%);
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    padding: 1.25rem;
+  }
+
   .logs-overlay {
     position: fixed;
     inset: 0;
@@ -540,47 +546,5 @@
   .log-error .log-msg {
     color: var(--danger);
     font-weight: 600;
-  }
-
-  .progress-popover {
-    position: fixed;
-    right: 1rem;
-    bottom: 1rem;
-    background: #fff;
-    border: 1px solid var(--gray-200);
-    border-radius: 0.5rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    padding: 0.75rem;
-    min-width: 260px;
-    z-index: 1003;
-  }
-
-  .popover-header {
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-  }
-
-  .popover-row {
-    display: grid;
-    grid-template-columns: 1fr 2fr auto;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.35rem;
-  }
-
-  .popover-bar {
-    height: 8px;
-  }
-
-  .popover-label {
-    font-size: 0.8rem;
-    color: var(--gray-600);
-  }
-
-  .popover-value {
-    font-size: 0.8rem;
-    color: var(--gray-800);
-    min-width: 2.5rem;
-    text-align: right;
   }
 </style>

@@ -89,7 +89,10 @@ export class ExportService {
     if (options.syncChannelGroups) totalUnits += await this.getCount(client, '/api/channels/groups/');
     if (options.syncChannelProfiles) totalUnits += await this.getCount(client, '/api/channels/profiles/');
     if (options.syncChannels) totalUnits += await this.getCount(client, '/api/channels/channels/');
-    if (options.syncM3USources) totalUnits += await this.getCount(client, '/api/m3u/accounts/');
+    if (options.syncM3USources) {
+      totalUnits += await this.getCount(client, '/api/m3u/accounts/');
+      totalUnits += await this.getCount(client, '/api/vod/categories/');
+    }
     if (options.syncStreamProfiles) totalUnits += await this.getCount(client, '/api/core/streamprofiles/');
     if (options.syncUserAgents) totalUnits += await this.getCount(client, '/api/core/useragents/');
     if (options.syncEPGSources) {
@@ -167,9 +170,21 @@ export class ExportService {
       if (request.options.syncChannelProfiles) {
         jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting channel profiles...');
         const profiles = await client.get('/api/channels/profiles/');
-        exportData.data.channelProfiles = profiles;
+
+        // The profile objects already contain the channel IDs in the 'channels' array
+        const profilesWithChannels = (Array.isArray(profiles) ? profiles : []).map((profile: any) => {
+          const channelIds = Array.isArray(profile.channels) ? profile.channels : [];
+          jobManager.addLog(jobId, `Profile "${profile.name}" (ID: ${profile.id}): has ${channelIds.length} channels`);
+
+          return {
+            ...profile,
+            enabled_channels: channelIds
+          };
+        });
+
+        exportData.data.channelProfiles = profilesWithChannels;
         bumpProgress(Array.isArray(profiles) ? profiles.length : 1, 'Exporting channel profiles...');
-        jobManager.addLog(jobId, `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles`);
+        jobManager.addLog(jobId, `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles with channel associations`);
       }
 
       // Export Channels
@@ -217,6 +232,7 @@ export class ExportService {
                   channel_group: ref.channel_group,
                   url: ref.url,
                   tvc_guide_stationid: ref.tvc_guide_stationid,
+                  stream_profile_id: ref.stream_profile_id,
                 };
               }
               const mapped = streamMap.get(ref);
@@ -225,6 +241,15 @@ export class ExportService {
             .filter(Boolean);
           return { ...ch, streams };
         });
+
+        // Debug: Log first few channels to see what fields are present
+        if (channelsWithStreams.length > 0) {
+          const firstChannel = channelsWithStreams[0];
+          const channelKeys = Object.keys(firstChannel).filter(k => !k.startsWith('_') && k !== 'streams');
+          jobManager.addLog(jobId, `Sample exported channel fields: ${channelKeys.join(', ')}`);
+          jobManager.addLog(jobId, `First channel stream_profile_id: ${firstChannel.stream_profile_id}`);
+        }
+
         exportData.data.channels = channelsWithStreams;
         bumpProgress(manualChannels.length, 'Exporting channels...');
         jobManager.addLog(jobId, `Exported ${manualChannels.length} channels`);
@@ -266,6 +291,13 @@ export class ExportService {
         });
         bumpProgress(accounts.length, 'Exporting M3U sources...');
         jobManager.addLog(jobId, `Exported ${accounts.length} M3U sources`);
+
+        // Export VOD Categories with M3U account relations
+        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting VOD categories...');
+        const vodCategories = await this.getAllPaginated(client, '/api/vod/categories/', jobId);
+        exportData.data.vodCategories = vodCategories;
+        bumpProgress(vodCategories.length, 'Exporting VOD categories...');
+        jobManager.addLog(jobId, `Exported ${vodCategories.length} VOD categories with M3U account relations`);
       }
 
       // Export Stream Profiles

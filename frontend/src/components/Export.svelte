@@ -108,7 +108,7 @@
           clearTimeout(pollInterval);
           pollInterval = null;
         }
-        exporting = false;
+        // Keep overlay visible when job completes so user can see results and click Close
         if (job.status === 'cancelled') {
           overlayMessage = 'Export cancelled';
         }
@@ -194,8 +194,7 @@
 
   $: isValid = connection.url && connection.username && connection.password;
   $: canDownload = currentJob?.status === 'completed' && !dryRun;
-  $: overlayVisible =
-    showOverlay && (exporting || (currentJob && (currentJob.status === 'running' || currentJob.status === 'pending')));
+  $: overlayVisible = showOverlay && currentJob;
 </script>
 
 <div>
@@ -288,12 +287,18 @@
                   View logs
                 </button>
               {/if}
-              <button class="btn btn-secondary btn-sm" on:click={() => { showOverlay = false; backgroundJobId = currentJob?.jobId || backgroundJobId; }}>
-                Run in background
-              </button>
-              <button class="btn btn-secondary btn-sm" on:click={handleCancel} disabled={!currentJob}>
-                Cancel
-              </button>
+              {#if currentJob?.status === 'running' || currentJob?.status === 'pending'}
+                <button class="btn btn-secondary btn-sm" on:click={() => { showOverlay = false; backgroundJobId = currentJob?.jobId || backgroundJobId; }}>
+                  Run in background
+                </button>
+                <button class="btn btn-secondary btn-sm" on:click={handleCancel} disabled={!currentJob}>
+                  Cancel
+                </button>
+              {:else}
+                <button class="btn btn-secondary btn-sm" on:click={() => showOverlay = false}>
+                  Close
+                </button>
+              {/if}
           </div>
         </div>
         {#if currentJob}
