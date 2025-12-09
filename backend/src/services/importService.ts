@@ -50,7 +50,9 @@ export class ImportService {
     let all: any[] = [];
 
     while (true) {
-      const response = await client.get(`${endpoint}?page=${page}&page_size=${pageSize}`).catch(() => null);
+      // Use & if endpoint already has query params, otherwise use ?
+      const separator = endpoint.includes('?') ? '&' : '?';
+      const response = await client.get(`${endpoint}${separator}page=${page}&page_size=${pageSize}`).catch(() => null);
       if (!response) {
         break;
       }
@@ -262,18 +264,6 @@ export class ImportService {
           jobId
         );
         currentProgress += progressPerStep;
-
-        // Import VOD Categories (after M3U sources so accounts exist)
-        if (data.vodCategories) {
-          jobManager.setProgress(jobId, currentProgress, 'Importing VOD categories...');
-          results.imported.vodCategories = await this.importVODCategories(
-            client,
-            data.vodCategories,
-            data.m3uSources || [],
-            jobId
-          );
-          jobManager.addLog(jobId, `VOD Categories: imported=${results.imported.vodCategories.imported}, skipped=${results.imported.vodCategories.skipped}, errors=${results.imported.vodCategories.errors}`);
-        }
       }
 
       // Import EPG Sources
@@ -388,10 +378,10 @@ export class ImportService {
         });
         currentProgress += progressPerStep;
 
-        // Try direct EPG mapping, then fall back to server-side matcher
+        // Try direct EPG mapping (server-side match-epg disabled as it causes EPG refresh to hang)
         jobManager.setProgress(jobId, currentProgress, 'Assigning EPG data to channels...');
         await this.setEpgForChannels(client, jobId, data.channels, data.epgData);
-        await this.matchEpgForChannels(client, jobId);
+        // Note: matchEpgForChannels removed - was causing Dispatcharr EPG refresh to hang
       }
 
       // Apply channel profile associations AFTER channels are imported
@@ -1301,6 +1291,65 @@ export class ImportService {
       }
       return undefined;
     };
+
+    // Wait for streams to be loaded for an M3U account
+    const waitForStreamsLoaded = async (accountId: any, accountName: string, refreshFailed: boolean = false) => {
+      const maxAttempts = 15; // Up to 30 seconds
+      let lastStreamCount = 0;
+      let stableCount = 0;
+      let pendingSetupCount = 0;
+
+      for (let i = 0; i < maxAttempts; i++) {
+        try {
+          // Check account status
+          const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
+          const status = acct?.status;
+          const message = acct?.last_message || '';
+
+          // Get stream count for this M3U account
+          const streams = await this.getAllPaginated(client, `/api/channels/streams/?m3u_account=${accountId}`).catch(() => []);
+          const streamCount = Array.isArray(streams) ? streams.length : 0;
+
+          // Only log every 3rd poll to reduce noise
+          if (i % 3 === 0 || streamCount > 0) {
+            jobManager.addLog(jobId, `M3U ${accountName}: Polling... status=${status}, streams=${streamCount}`);
+          }
+
+          // If status is pending_setup and refresh failed, don't wait forever
+          if (status === 'pending_setup' && refreshFailed) {
+            pendingSetupCount++;
+            if (pendingSetupCount >= 5) {
+              jobManager.addLog(jobId, `M3U ${accountName}: Still pending_setup after refresh failed, skipping stream wait`);
+              return streamCount;
+            }
+          }
+
+          // Check if stream count is stable
+          if (streamCount > 0 && streamCount === lastStreamCount) {
+            stableCount++;
+            if (stableCount >= 2) {
+              jobManager.addLog(jobId, `M3U ${accountName}: Streams stable at ${streamCount}`);
+              return streamCount;
+            }
+          } else {
+            stableCount = 0;
+          }
+          lastStreamCount = streamCount;
+
+          // If status indicates completion and we have some streams, we're done
+          if (status === 'ready' && streamCount > 0) {
+            jobManager.addLog(jobId, `M3U ${accountName}: Ready with ${streamCount} streams`);
+            return streamCount;
+          }
+        } catch (err) {
+          // ignore and retry
+        }
+        await new Promise((res) => setTimeout(res, 2000));
+      }
+
+      jobManager.addLog(jobId, `M3U ${accountName}: Timeout waiting for streams (got ${lastStreamCount})`);
+      return lastStreamCount;
+    };
     let imported = 0;
     let skipped = 0;
     let errors = 0;
@@ -1417,9 +1466,21 @@ export class ImportService {
 
         // Trigger refresh for this account to pull streams/channels
         if (accountId) {
-          await client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
-            this.logJobError(jobId, 'M3U refresh failed', source?.name || accountId, err);
+          // Try the refresh API first
+          const refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(() => {
+            jobManager.addLog(jobId, `M3U ${source.name}: Refresh API failed (known Dispatcharr bug), will rely on auto-processing`);
+            return null;
           });
+
+          if (refreshResult) {
+            jobManager.addLog(jobId, `M3U ${source.name}: Refresh API succeeded`);
+          } else {
+            // Try toggling is_active as a workaround to trigger processing
+            jobManager.addLog(jobId, `M3U ${source.name}: Trying is_active toggle to trigger processing...`);
+            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: false }).catch(() => null);
+            await new Promise((res) => { const t = globalThis.setTimeout(res, 500); return t; });
+            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: true }).catch(() => null);
+          }
 
           // Wait for refresh to complete before applying group settings
           await waitForM3UReady(accountId);
@@ -1430,22 +1491,46 @@ export class ImportService {
             const currentAccount = await client.get(`/api/m3u/accounts/${accountId}/`);
             const discoveredGroups = currentAccount?.channel_groups || [];
 
-            // Create a map of which groups should be enabled based on backup
-            const enabledGroupIds = new Set(
-              channelGroupsPayload.filter(cg => cg.enabled !== false).map(cg => cg.channel_group)
+            // Fetch all channel groups to get ID -> name mapping
+            // The M3U account's channel_groups only has IDs, not names
+            const allChannelGroups = await client.get('/api/channels/groups/').catch(() => []);
+            const groupIdToName: Record<number, string> = {};
+            if (Array.isArray(allChannelGroups)) {
+              for (const g of allChannelGroups) {
+                if (g?.id != null && g?.name) {
+                  groupIdToName[g.id] = g.name;
+                }
+              }
+            }
+            jobManager.addLog(jobId, `M3U ${source?.name}: Built group ID->name mapping with ${Object.keys(groupIdToName).length} entries`);
+
+            // Create maps for matching by name (IDs differ between backup and target)
+            const backupGroupsByName: Record<string, any> = {};
+            for (const cg of channelGroupsPayload) {
+              const name = cg._groupName?.toLowerCase();
+              if (name) backupGroupsByName[name] = cg;
+            }
+            const enabledGroupNames = new Set(
+              channelGroupsPayload
+                .filter(cg => cg.enabled !== false)
+                .map(cg => cg._groupName?.toLowerCase())
+                .filter(Boolean)
             );
 
             // Build complete payload with all discovered groups, setting enabled/disabled based on backup
             jobManager.addLog(jobId, `M3U ${source?.name}: Discovered ${discoveredGroups.length} groups after refresh, have ${channelGroupsPayload.length} groups from backup`);
 
             const completePayload = discoveredGroups.map((dg: any) => {
-              const backupGroup = channelGroupsPayload.find(cg => cg.channel_group === dg.channel_group);
-              const shouldBeEnabled = enabledGroupIds.has(dg.channel_group);
+              // Look up the actual group name from the channel groups endpoint
+              const groupId = dg.channel_group;
+              const actualGroupName = groupIdToName[groupId] || dg.name || dg.channel_group_name || '';
+              const discoveredName = actualGroupName.toLowerCase();
+              const backupGroup = backupGroupsByName[discoveredName];
+              const shouldBeEnabled = enabledGroupNames.has(discoveredName);
 
-              // Get group name for logging - prefer backup name, fall back to discovered name
-              const discoveredName = dg.name || dg.channel_group_name || '';
+              // Get group name for logging
               const backupName = backupGroup?._groupName || '';
-              const groupName = backupName || discoveredName || `Group ${dg.channel_group}`;
+              const groupName = backupName || actualGroupName || `Group ${groupId}`;
 
               if (backupGroup) {
                 jobManager.addLog(jobId, `M3U ${source?.name}: Group "${groupName}" (ID: ${dg.channel_group}, backup name: "${backupName}", discovered name: "${discoveredName}") - backup says enabled=${backupGroup.enabled}, applying enabled=${shouldBeEnabled}`);
@@ -1482,162 +1567,48 @@ export class ImportService {
             const responseEnabledCount = responseGroups.filter((cg: any) => cg.enabled).length;
             jobManager.addLog(jobId, `M3U ${source?.name}: API response shows ${responseEnabledCount} enabled groups out of ${responseGroups.length} total`);
 
+            // Wait for Dispatcharr to process the group changes before triggering refresh
+            jobManager.addLog(jobId, `M3U ${source?.name}: Waiting 3 seconds for group changes to be processed...`);
+            await new Promise((resolve) => globalThis.setTimeout(resolve, 3000));
+
             // Trigger refresh to pull streams for enabled groups
             jobManager.addLog(jobId, `M3U ${source?.name}: Triggering stream refresh for enabled groups`);
-            await client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Stream refresh failed (will continue anyway): ${err.message || err}`);
+            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Account refresh API error: ${err?.response?.data || err?.message || err}`);
+              return null;
             });
 
-            // Wait for the refresh to complete
-            jobManager.addLog(jobId, `M3U ${source?.name}: Waiting for stream refresh to complete`);
-            await waitForM3UReady(accountId);
+            // If account-specific refresh fails, try global refresh
+            if (!refreshResult) {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Trying global M3U refresh...`);
+              refreshResult = await client.post(`/api/m3u/refresh/`).catch((err) => {
+                jobManager.addLog(jobId, `M3U ${source?.name}: Global refresh error: ${err?.response?.data || err?.message || err}`);
+                return null;
+              });
+            }
+
+            if (refreshResult) {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Refresh initiated successfully, waiting for streams to load...`);
+            } else {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Refresh returned no result, waiting for streams anyway...`);
+            }
+
+            // Wait for streams to actually be loaded (polls stream count)
+            const streamCount = await waitForStreamsLoaded(accountId, source?.name || 'Unknown', !refreshResult);
+            jobManager.addLog(jobId, `M3U ${source?.name}: Found ${streamCount} streams after waiting`);
 
             // Re-apply the PATCH after refresh, in case the refresh reset enabled/disabled states
-            jobManager.addLog(jobId, `M3U ${source?.name}: Re-applying ${enabledCount} enabled and ${disabledCount} disabled channel groups to ensure states are preserved`);
-            const finalPatchResponse = await client.patch(`/api/m3u/accounts/${accountId}/`, {
-              channel_groups: completePayload,
-            });
-
-            // Verify the final state
-            const finalResponseGroups = finalPatchResponse?.channel_groups || [];
-            const finalResponseEnabledCount = finalResponseGroups.filter((cg: any) => cg.enabled).length;
-            jobManager.addLog(jobId, `M3U ${source?.name}: Final verification - ${finalResponseEnabledCount} enabled groups out of ${finalResponseGroups.length} total`);
+            if (streamCount > 0) {
+              jobManager.addLog(jobId, `M3U ${source?.name}: Re-applying group settings after refresh`);
+              await client.patch(`/api/m3u/accounts/${accountId}/`, {
+                channel_groups: completePayload,
+              });
+            }
           }
         }
         imported++;
       } catch (error) {
         this.logJobError(jobId, 'M3U import failed', source?.name || source?.id, error);
-        errors++;
-      }
-    }
-
-    return { imported, skipped, errors };
-  }
-
-  private async importVODCategories(
-    client: DispatcharrClient,
-    categories: any[],
-    sourceM3UAccounts: any[],
-    jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
-    let imported = 0;
-    let skipped = 0;
-    let errors = 0;
-
-    if (!Array.isArray(categories) || categories.length === 0) {
-      jobManager.addLog(jobId, 'VOD Categories: No categories to import');
-      return { imported, skipped, errors };
-    }
-
-    jobManager.addLog(jobId, `VOD Categories: Processing ${categories.length} categories from backup`);
-
-    // Get existing categories and M3U accounts from destination
-    const existingCategories = await client.get('/api/vod/categories/').catch(() => []);
-    const destM3UAccounts = await client.get('/api/m3u/accounts/').catch(() => []);
-
-    jobManager.addLog(jobId, `VOD Categories: Found ${existingCategories.length} existing categories on destination`);
-    jobManager.addLog(jobId, `VOD Categories: Found ${destM3UAccounts.length} M3U accounts on destination`);
-    jobManager.addLog(jobId, `VOD Categories: Found ${sourceM3UAccounts.length} M3U accounts in backup`);
-
-    // Build category name -> ID map for existing categories
-    const categoryMap: Record<string, number> = {};
-    for (const cat of existingCategories) {
-      if (cat.name && cat.id) {
-        categoryMap[cat.name] = cat.id;
-      }
-    }
-
-    // Build source M3U account ID -> name map
-    const sourceAccountIdToName: Record<number, string> = {};
-    for (const acc of sourceM3UAccounts) {
-      if (acc.id && acc.name) {
-        sourceAccountIdToName[acc.id] = acc.name;
-      }
-    }
-
-    // Build destination M3U account name -> ID map
-    const destAccountNameToId: Record<string, number> = {};
-    for (const acc of destM3UAccounts) {
-      if (acc.name && acc.id) {
-        destAccountNameToId[acc.name] = acc.id;
-      }
-    }
-
-    jobManager.addLog(jobId, `VOD Categories: Mapped ${Object.keys(sourceAccountIdToName).length} source accounts, ${Object.keys(destAccountNameToId).length} destination accounts`);
-
-    for (const category of categories) {
-      try {
-        const existingCat = categoryMap[category.name];
-
-        if (!existingCat) {
-          // Create new category
-          const payload: any = {
-            name: category.name,
-            category_type: category.category_type || 'movie',
-          };
-
-          const created = await client.post('/api/vod/categories/', payload);
-          if (created?.id) {
-            categoryMap[category.name] = created.id;
-            jobManager.addLog(jobId, `VOD Category: Created "${category.name}"`);
-          }
-        }
-
-        // Now apply M3U account relations with enabled states
-        const catId = categoryMap[category.name];
-        if (catId && Array.isArray(category.m3u_accounts)) {
-          for (const relation of category.m3u_accounts) {
-            try {
-              // Find the corresponding M3U account ID in destination
-              const sourceAccountId = relation.m3u_account;
-              const sourceAccountName = sourceAccountIdToName[sourceAccountId];
-
-              if (!sourceAccountName) {
-                jobManager.addLog(jobId, `VOD Category "${category.name}": Could not find source M3U account name for ID ${sourceAccountId}`);
-                continue;
-              }
-
-              const destAccountId = destAccountNameToId[sourceAccountName];
-
-              if (!destAccountId) {
-                jobManager.addLog(jobId, `VOD Category "${category.name}": Could not find destination M3U account ID for "${sourceAccountName}"`);
-                continue;
-              }
-
-              // Update the relation enabled state
-              const enabled = relation.enabled !== false;
-              jobManager.addLog(jobId, `VOD Category "${category.name}": Setting enabled=${enabled} for M3U account "${sourceAccountName}" (ID ${destAccountId})`);
-
-              // We need to get the current category to see all its relations
-              const currentCat = await client.get(`/api/vod/categories/${catId}/`);
-              const updatedRelations = (currentCat.m3u_accounts || []).map((rel: any) => {
-                if (rel.m3u_account === destAccountId) {
-                  return { ...rel, enabled };
-                }
-                return rel;
-              });
-
-              // If the relation doesn't exist, add it
-              if (!updatedRelations.some((rel: any) => rel.m3u_account === destAccountId)) {
-                updatedRelations.push({
-                  category: catId,
-                  m3u_account: destAccountId,
-                  enabled,
-                });
-              }
-
-              await client.patch(`/api/vod/categories/${catId}/`, {
-                m3u_accounts: updatedRelations,
-              });
-            } catch (err) {
-              jobManager.addLog(jobId, `VOD Category "${category.name}": Failed to update M3U account relation: ${err}`);
-            }
-          }
-        }
-
-        imported++;
-      } catch (error) {
-        this.logJobError(jobId, 'VOD category import failed', category?.name, error);
         errors++;
       }
     }
@@ -1927,6 +1898,22 @@ export class ImportService {
     for (const user of users) {
       try {
         const existingUser = existing.find((u: any) => u.username === user.username);
+        const isAdmin = user.user_level === 'admin' || user.is_superuser === true || existingUser?.is_superuser === true;
+
+        // For admin users that already exist, only update XC password (in custom_properties)
+        if (isAdmin && existingUser) {
+          if (user.custom_properties) {
+            jobManager.addLog(jobId, `User ${user.username}: Admin user - only updating custom_properties (XC password)`);
+            await client.patch(`/api/accounts/users/${existingUser.id}/`, {
+              custom_properties: user.custom_properties,
+            });
+            imported++;
+          } else {
+            jobManager.addLog(jobId, `User ${user.username}: Admin user - skipping (no custom_properties to restore)`);
+            skipped++;
+          }
+          continue;
+        }
 
         const userData: any = {
           username: user.username,
@@ -2092,6 +2079,15 @@ export class ImportService {
       return { imported, skipped: logos ? 0 : 1, errors: logos ? 1 : 0 };
     }
 
+    // Fetch existing logos to avoid duplicates
+    let existingLogos: any[] = [];
+    try {
+      existingLogos = await this.getAllPaginated(client, '/api/channels/logos/');
+    } catch (e) {
+      console.warn('Could not fetch existing logos, will attempt all uploads');
+    }
+    const existingNames = new Set(existingLogos.map((l: any) => l.name?.toLowerCase()));
+
     for (let i = 0; i < logos.length; i++) {
       const logo = logos[i];
       const name = logo?.name || logo?.id || `logo-${i}`;
@@ -2101,15 +2097,32 @@ export class ImportService {
         continue;
       }
 
+      // Skip if logo with same name already exists
+      if (existingNames.has(name.toString().toLowerCase())) {
+        skipped++;
+        continue;
+      }
+
       try {
-        const dataUrl = `data:image/png;base64,${base64}`;
-        await client.post('/api/channels/logos/upload/', {
-          name,
-          url: dataUrl,
+        // Convert base64 to Buffer for file upload
+        const buffer = globalThis.Buffer.from(base64, 'base64');
+        const formData = new FormData();
+        formData.append('name', name.toString());
+        formData.append('file', buffer, {
+          filename: `${name}.png`,
+          contentType: 'image/png',
+        });
+
+        await client.post('/api/channels/logos/upload/', formData, {
+          headers: formData.getHeaders(),
         });
         imported++;
-      } catch (error) {
-        console.error('Failed to import logo', name, error);
+        // Add to existing set to prevent duplicate attempts within same import
+        existingNames.add(name.toString().toLowerCase());
+      } catch (error: any) {
+        const errData = error?.response?.data;
+        const errStatus = error?.response?.status;
+        console.error(`Failed to import logo "${name}" (status=${errStatus}):`, errData || error?.message);
         errors++;
       }
     }

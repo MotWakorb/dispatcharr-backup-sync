@@ -10,7 +10,6 @@
   let error: string | null = null;
   let pollInterval: number | null = null;
   let initialized = false;
-  let toast: { message: string; job?: JobStatus } | null = null;
 
   onMount(() => {
     loadJobs(true);
@@ -30,14 +29,6 @@
     error = null;
     try {
       jobs = await listJobs();
-      // Check for completions compared to previous snapshot (implicit via current jobs removal + history update)
-      const completedExports = history.filter(
-        (j) => j.jobType === 'export' && j.status === 'completed'
-      );
-      if (completedExports.length > 0) {
-        const latest = completedExports[completedExports.length - 1];
-        toast = { message: 'Export completed', job: latest };
-      }
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to load jobs';
     } finally {
@@ -240,27 +231,6 @@
   </div>
 </div>
 
-{#if toast}
-  {@const toastJob = toast?.job}
-  <div class="toast">
-    <span>{toast.message}</span>
-    {#if toastJob && toastJob.jobType === 'export'}
-      <div class="toast-actions">
-        {#if toastJob.result?.fileName}
-          <button class="btn btn-success btn-sm" on:click={() => toastJob && download(toastJob)}>
-            Download
-          </button>
-        {/if}
-        {#if toastJob.result?.logosFileName}
-          <button class="btn btn-secondary btn-sm" on:click={() => toastJob && downloadLogos(toastJob)}>
-            Logos
-          </button>
-        {/if}
-      </div>
-    {/if}
-    <button class="btn btn-secondary btn-sm" on:click={() => toast = null}>Dismiss</button>
-  </div>
-{/if}
 
 <style>
   .table-wrapper {
@@ -344,23 +314,4 @@
     margin-top: 1rem;
   }
 
-  .toast {
-    position: fixed;
-    bottom: 1rem;
-    right: 1rem;
-    background: #111827;
-    color: #fff;
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    z-index: 2000;
-  }
-
-  .toast-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
 </style>

@@ -10,10 +10,13 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - DATA_DIR=/data
       - DEFAULT_PROD_URL=${DEFAULT_PROD_URL:-}
       - DEFAULT_DEV_URL=${DEFAULT_DEV_URL:-}
       - DEFAULT_USERNAME=${DEFAULT_USERNAME:-}
       - DEFAULT_PASSWORD=${DEFAULT_PASSWORD:-}
+    volumes:
+      - backend-data:/data
     networks:
       - dispatcharr-manager
 
@@ -33,3 +36,6 @@ services:
 networks:
   dispatcharr-manager:
     driver: bridge
+
+volumes:
+  backend-data:

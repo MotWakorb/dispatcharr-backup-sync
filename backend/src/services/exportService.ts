@@ -291,13 +291,6 @@ export class ExportService {
         });
         bumpProgress(accounts.length, 'Exporting M3U sources...');
         jobManager.addLog(jobId, `Exported ${accounts.length} M3U sources`);
-
-        // Export VOD Categories with M3U account relations
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting VOD categories...');
-        const vodCategories = await this.getAllPaginated(client, '/api/vod/categories/', jobId);
-        exportData.data.vodCategories = vodCategories;
-        bumpProgress(vodCategories.length, 'Exporting VOD categories...');
-        jobManager.addLog(jobId, `Exported ${vodCategories.length} VOD categories with M3U account relations`);
       }
 
       // Export Stream Profiles

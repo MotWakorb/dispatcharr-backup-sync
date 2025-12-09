@@ -1,10 +1,105 @@
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
 import type { JobStatus, JobLogEntry } from '../types/index.js';
+
+const DATA_DIR = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
+const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
+const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
 
 class JobManager {
   private jobs: Map<string, JobStatus> = new Map();
   private logs: Map<string, JobLogEntry[]> = new Map();
   private history: JobStatus[] = [];
+
+  constructor() {
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk(): void {
+    try {
+      // Ensure data directory exists
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      // Load jobs
+      if (fs.existsSync(JOBS_FILE)) {
+        const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf-8'));
+
+        // Restore jobs map
+        if (data.jobs && Array.isArray(data.jobs)) {
+          for (const job of data.jobs) {
+            // Convert date strings back to Date objects
+            if (job.startedAt) job.startedAt = new Date(job.startedAt);
+            if (job.completedAt) job.completedAt = new Date(job.completedAt);
+
+            // Mark interrupted jobs as failed
+            if (job.status === 'running' || job.status === 'pending') {
+              job.status = 'failed';
+              job.error = 'Job was interrupted by server restart';
+              job.completedAt = new Date();
+              this.history.push({ ...job });
+            }
+
+            this.jobs.set(job.jobId, job);
+          }
+        }
+
+        // Restore history
+        if (data.history && Array.isArray(data.history)) {
+          for (const job of data.history) {
+            if (job.startedAt) job.startedAt = new Date(job.startedAt);
+            if (job.completedAt) job.completedAt = new Date(job.completedAt);
+            // Avoid duplicates
+            if (!this.history.find(h => h.jobId === job.jobId)) {
+              this.history.push(job);
+            }
+          }
+        }
+
+        console.log(`Loaded ${this.jobs.size} jobs and ${this.history.length} history entries from disk`);
+      }
+
+      // Load logs
+      if (fs.existsSync(LOGS_FILE)) {
+        const logsData = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
+        if (logsData && typeof logsData === 'object') {
+          for (const [jobId, entries] of Object.entries(logsData)) {
+            this.logs.set(jobId, entries as JobLogEntry[]);
+          }
+        }
+        console.log(`Loaded logs for ${this.logs.size} jobs from disk`);
+      }
+    } catch (error) {
+      console.error('Failed to load jobs from disk:', error);
+    }
+  }
+
+  private saveToDisk(): void {
+    try {
+      // Ensure data directory exists
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+
+      // Save jobs and history
+      const jobsData = {
+        jobs: Array.from(this.jobs.values()),
+        history: this.history,
+      };
+      fs.writeFileSync(JOBS_FILE, JSON.stringify(jobsData, null, 2));
+
+      // Save logs
+      const logsData: Record<string, JobLogEntry[]> = {};
+      for (const [jobId, entries] of this.logs.entries()) {
+        logsData[jobId] = entries;
+      }
+      fs.writeFileSync(LOGS_FILE, JSON.stringify(logsData, null, 2));
+    } catch (error) {
+      console.error('Failed to save jobs to disk:', error);
+    }
+  }
 
   createJob(jobType?: JobStatus['jobType']): string {
     const jobId = uuidv4();
@@ -17,6 +112,7 @@ class JobManager {
     };
     this.jobs.set(jobId, job);
     this.logs.set(jobId, []);
+    this.saveToDisk();
     return jobId;
   }
 
@@ -32,6 +128,7 @@ class JobManager {
         job.completedAt = new Date();
         this.recordHistory(job);
       }
+      this.saveToDisk();
     }
   }
 
@@ -94,21 +191,34 @@ class JobManager {
   // Clean up old jobs (completed > 1 hour ago)
   cleanup(): void {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    let cleaned = false;
     for (const [jobId, job] of this.jobs.entries()) {
       if (job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
         this.logs.delete(jobId);
+        cleaned = true;
       }
+    }
+    if (cleaned) {
+      this.saveToDisk();
     }
   }
 
   addLog(jobId: string, message: string): void {
     const log = this.logs.get(jobId);
     if (!log) return;
+    const timestamp = new Date().toISOString();
     log.push({
-      timestamp: new Date().toISOString(),
+      timestamp,
       message,
     });
+    // Mirror to console for docker logs visibility
+    const shortId = jobId.slice(0, 8);
+    console.log(`[${timestamp}] [${shortId}] ${message}`);
+    // Save logs periodically (every 10 entries to reduce I/O)
+    if (log.length % 10 === 0) {
+      this.saveToDisk();
+    }
   }
 
   getLogs(jobId: string): JobLogEntry[] {

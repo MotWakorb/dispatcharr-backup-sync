@@ -105,7 +105,9 @@ export class DispatcharrClient {
 
     try {
       console.log(`Making POST request to: ${endpoint}`);
-      console.log(`POST ${endpoint} payload:`, JSON.stringify(data).slice(0, 200));
+      if (data !== undefined) {
+        console.log(`POST ${endpoint} payload:`, JSON.stringify(data).slice(0, 200));
+      }
       const response = await this.client.post(endpoint, data, config);
       console.log(`POST ${endpoint} response status:`, response.status);
       return response.data;

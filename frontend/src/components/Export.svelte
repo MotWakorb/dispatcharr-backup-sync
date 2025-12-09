@@ -52,7 +52,6 @@
   let overlayMessage = 'Export in progress...';
   let showOverlay = false;
   let backgroundJobId: string | null = null;
-  let toast: { message: string; action?: () => void } | null = null;
   let showLogs = false;
   let logs: { timestamp: string; message: string }[] = [];
   let logsPoll: number | null = null;
@@ -114,12 +113,6 @@
         }
         if (job.status === 'failed') {
           error = job.error || job.message || 'Export failed';
-        }
-        if (job.status === 'completed' && backgroundJobId === job.jobId && !toast) {
-          toast = {
-            message: 'Export completed',
-            action: () => handleDownloadFromId(job.jobId),
-          };
         }
         if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
           stopLogPolling();
@@ -313,15 +306,6 @@
     </div>
   {/if}
 
-  {#if toast}
-    <div class="toast">
-      <span>{toast.message}</span>
-      {#if toast.action}
-        <button class="btn btn-success btn-sm" on:click={() => toast?.action?.()}>Download</button>
-      {/if}
-      <button class="btn btn-secondary btn-sm" on:click={() => toast = null}>Dismiss</button>
-    </div>
-  {/if}
 
   {#if showLogs}
     <div class="logs-overlay" role="presentation">
@@ -372,20 +356,6 @@
     padding: 1rem;
   }
 
-  .toast {
-    position: fixed;
-    bottom: 1rem;
-    right: 1rem;
-    background: #111827;
-    color: #fff;
-    padding: 0.75rem 1rem;
-    border-radius: 0.5rem;
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    z-index: 1001;
-  }
 
   .logs-overlay {
     position: fixed;
