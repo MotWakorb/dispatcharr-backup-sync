@@ -1,8 +1,6 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
-import yaml from 'js-yaml';
 import archiver from 'archiver';
-import tar from 'tar';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
@@ -10,14 +8,10 @@ import type { ExportRequest, ExportOptions } from '../types/index.js';
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
-const readFile = promisify(fs.readFile);
 const unlink = promisify(fs.unlink);
-const rmdir = promisify(fs.rmdir);
 
 export class ExportService {
   private tempDir = path.join(process.cwd(), 'temp');
-  private progressBase = 5;
-  private progressSpan = 90;
 
   private throwIfCancelled(jobId: string) {
     const job = jobManager.getJob(jobId);
@@ -57,63 +51,22 @@ export class ExportService {
     return allResults;
   }
 
-  private calcProgress(processedUnits: number, totalUnits: number): number {
-    if (totalUnits <= 0) return this.progressBase;
-    const ratio = Math.min(processedUnits / totalUnits, 1);
-    return Math.min(
-      this.progressBase + Math.floor(ratio * this.progressSpan),
-      this.progressBase + this.progressSpan
-    );
-  }
-
-  private async getCount(client: any, endpoint: string): Promise<number> {
-    try {
-      const resp = await client.get(`${endpoint}?page=1&page_size=1`);
-      if (typeof resp?.count === 'number') return resp.count;
-      if (Array.isArray(resp)) return resp.length;
-      if (Array.isArray(resp?.results)) return resp.results.length;
-      return 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private async estimateWork(client: DispatcharrClient, options: ExportOptions): Promise<{
-    totalUnits: number;
-    logoCount: number;
-  }> {
-    let totalUnits = 0;
-    let logoCount = 0;
-    const wantLogos = options.syncLogos !== false;
-
-    if (options.syncChannelGroups) totalUnits += await this.getCount(client, '/api/channels/groups/');
-    if (options.syncChannelProfiles) totalUnits += await this.getCount(client, '/api/channels/profiles/');
-    if (options.syncChannels) totalUnits += await this.getCount(client, '/api/channels/channels/');
-    if (options.syncM3USources) {
-      totalUnits += await this.getCount(client, '/api/m3u/accounts/');
-      totalUnits += await this.getCount(client, '/api/vod/categories/');
-    }
-    if (options.syncStreamProfiles) totalUnits += await this.getCount(client, '/api/core/streamprofiles/');
-    if (options.syncUserAgents) totalUnits += await this.getCount(client, '/api/core/useragents/');
-    if (options.syncEPGSources) {
-      totalUnits += await this.getCount(client, '/api/epg/sources/');
-      // Include EPG data rows as part of EPG export
-      totalUnits += await this.getCount(client, '/api/epg/epgdata/');
-    }
-    if (options.syncPlugins) totalUnits += await this.getCount(client, '/api/plugins/plugins/');
-    if (options.syncDVRRules) totalUnits += await this.getCount(client, '/api/channels/recurring-rules/');
-    if (options.syncComskipConfig) totalUnits += 1;
-    if (options.syncUsers) totalUnits += await this.getCount(client, '/api/accounts/users/');
-    if (wantLogos) {
-      logoCount = await this.getCount(client, '/api/channels/logos/');
-      totalUnits += logoCount;
-    }
-    // Core settings always count as 1 unit when selected
-    if (options.syncCoreSettings) totalUnits += 1;
-
-    if (totalUnits === 0) totalUnits = 1;
-
-    return { totalUnits, logoCount };
+  private countEnabledOptions(options: ExportOptions): number {
+    let count = 0;
+    if (options.syncChannelGroups) count++;
+    if (options.syncChannelProfiles) count++;
+    if (options.syncChannels) count++;
+    if (options.syncM3USources) count++;
+    if (options.syncStreamProfiles) count++;
+    if (options.syncUserAgents) count++;
+    if (options.syncCoreSettings) count++;
+    if (options.syncEPGSources) count += 2; // EPG sources + EPG data
+    if (options.syncPlugins) count++;
+    if (options.syncDVRRules) count++;
+    if (options.syncComskipConfig) count++;
+    if (options.syncUsers) count++;
+    if (options.syncLogos) count++;
+    return count;
   }
 
   async export(request: ExportRequest, jobId: string): Promise<string> {
@@ -128,24 +81,15 @@ export class ExportService {
       const client = new DispatcharrClient(request.source);
 
       // Authenticate
-      jobManager.setProgress(jobId, this.progressBase, 'Authenticating...');
+      jobManager.setProgress(jobId, 5, 'Authenticating...');
       await client.authenticate();
       jobManager.addLog(jobId, 'Authenticated to source instance');
 
-      // Pre-calculate work units for realistic progress
-      const { totalUnits, logoCount } = await this.estimateWork(client, request.options);
-      jobManager.addLog(
-        jobId,
-        `Estimated work: ${totalUnits} items${logoCount ? `, ${logoCount} logos` : ''}`
-      );
-      let processedUnits = 0;
+      // Calculate step-based progress (like sync/import)
+      let currentProgress = 10;
+      const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
+      const progressPerStep = 85 / totalSteps; // 85% for export steps, 10% for auth, 5% for finalize
       const wantLogos = request.options.syncLogos !== false;
-
-      const bumpProgress = (units: number, message?: string) => {
-        processedUnits += units;
-        const percent = this.calcProgress(processedUnits, totalUnits);
-        jobManager.setProgress(jobId, percent, message);
-      };
 
       const exportData: any = {
         exported_at: new Date().toISOString(),
@@ -155,20 +99,20 @@ export class ExportService {
 
       // Export Channel Groups
       if (request.options.syncChannelGroups) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting channel groups...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting channel groups...');
         const allGroups = await client.get('/api/channels/groups/');
         // Filter out groups created by M3U sources (those with m3u_account_count > 0)
         const manualGroups = Array.isArray(allGroups)
           ? allGroups.filter((group: any) => !group.m3u_account_count || group.m3u_account_count === 0)
           : allGroups;
         exportData.data.channelGroups = manualGroups;
-        bumpProgress(Array.isArray(manualGroups) ? manualGroups.length : 1, 'Exporting channel groups...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${Array.isArray(manualGroups) ? manualGroups.length : 0} channel groups`);
       }
 
       // Export Channel Profiles
       if (request.options.syncChannelProfiles) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting channel profiles...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting channel profiles...');
         const profiles = await client.get('/api/channels/profiles/');
 
         // The profile objects already contain the channel IDs in the 'channels' array
@@ -183,13 +127,13 @@ export class ExportService {
         });
 
         exportData.data.channelProfiles = profilesWithChannels;
-        bumpProgress(Array.isArray(profiles) ? profiles.length : 1, 'Exporting channel profiles...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles with channel associations`);
       }
 
       // Export Channels
       if (request.options.syncChannels) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting channels...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting channels...');
         const allChannels = await this.getAllPaginated(client, '/api/channels/channels/', jobId);
         const allStreams = await this.getAllPaginated(client, '/api/channels/streams/', jobId);
         const streamMap = new Map<number, any>();
@@ -251,7 +195,7 @@ export class ExportService {
         }
 
         exportData.data.channels = channelsWithStreams;
-        bumpProgress(manualChannels.length, 'Exporting channels...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${manualChannels.length} channels`);
       }
 
@@ -267,7 +211,7 @@ export class ExportService {
           channelGroupMap = {};
         }
 
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting M3U sources...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting M3U sources...');
         // Swagger path uses /api/m3u/accounts/ for M3U source definitions
         const accounts = await this.getAllPaginated(client, '/api/m3u/accounts/', jobId);
         // Ensure credentials (username/password) are included if present on the source
@@ -289,39 +233,39 @@ export class ExportService {
             ...(password ? { password } : {}),
           };
         });
-        bumpProgress(accounts.length, 'Exporting M3U sources...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${accounts.length} M3U sources`);
       }
 
       // Export Stream Profiles
       if (request.options.syncStreamProfiles) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting stream profiles...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting stream profiles...');
         // Stream profiles live under /api/core/streamprofiles/ per swagger
         exportData.data.streamProfiles = await this.getAllPaginated(
           client,
           '/api/core/streamprofiles/',
           jobId
         );
-        bumpProgress(exportData.data.streamProfiles.length, 'Exporting stream profiles...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${exportData.data.streamProfiles.length} stream profiles`);
       }
 
       // Export User Agents
       if (request.options.syncUserAgents) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting user agents...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting user agents...');
         // User agents endpoint is /api/core/useragents/
         exportData.data.userAgents = await this.getAllPaginated(
           client,
           '/api/core/useragents/',
           jobId
         );
-        bumpProgress(exportData.data.userAgents.length, 'Exporting user agents...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${exportData.data.userAgents.length} user agents`);
       }
 
       // Export Core Settings
       if (request.options.syncCoreSettings) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting core settings...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting core settings...');
         const coreSettingsResp = await this.getAllPaginated(client, '/api/core/settings/', jobId);
         const coreSettings = Array.isArray(coreSettingsResp)
           ? coreSettingsResp
@@ -329,21 +273,21 @@ export class ExportService {
             ? [coreSettingsResp]
             : [];
         exportData.data.coreSettings = coreSettings;
-        bumpProgress(coreSettings.length || 1, 'Exporting core settings...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${coreSettings.length || 0} core settings`);
       }
 
       // Export EPG Sources
       if (request.options.syncEPGSources) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting EPG sources...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting EPG sources...');
         exportData.data.epgSources = await this.getAllPaginated(client, '/api/epg/sources/', jobId);
-        bumpProgress(exportData.data.epgSources.length || 1, 'Exporting EPG sources...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${exportData.data.epgSources.length || 0} EPG sources`);
 
         // Export EPG data rows so channel mappings stay intact
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting EPG data...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting EPG data...');
         exportData.data.epgData = await this.getAllPaginated(client, '/api/epg/epgdata/', jobId);
-        bumpProgress(exportData.data.epgData.length || 1, 'Exporting EPG data...');
+        currentProgress += progressPerStep;
         const epgDataCount = exportData.data.epgData.length || 0;
         jobManager.addLog(jobId, `Exported ${epgDataCount} EPG data rows`);
 
@@ -363,50 +307,49 @@ export class ExportService {
       } | null = null;
 
       if (wantLogos && !request.dryRun) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Downloading logos...');
-        logosResult = await this.downloadLogos(client, jobId, logoCount, (processed) => {
-          const percent = this.calcProgress(processedUnits + processed, totalUnits);
-          jobManager.setProgress(jobId, percent, 'Downloading logos...');
-        }, true);
-        bumpProgress(logosResult.count || logoCount, 'Downloading logos...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Downloading logos...');
+        logosResult = await this.downloadLogos(client, jobId, 0, undefined, true);
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Downloaded ${logosResult.count || 0} logos`);
       }
 
       // Export Plugins
       if (request.options.syncPlugins) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting plugins...');
-        const plugins = await client.get('/api/plugins/plugins/');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting plugins...');
+        const pluginsResp = await client.get('/api/plugins/plugins/');
+        // API returns {"plugins": [...]} - extract the array
+        const plugins = Array.isArray(pluginsResp) ? pluginsResp : (pluginsResp?.plugins || []);
         exportData.data.plugins = plugins;
-        bumpProgress(Array.isArray(plugins) ? plugins.length : 1, 'Exporting plugins...');
-        jobManager.addLog(jobId, `Exported ${Array.isArray(plugins) ? plugins.length : 0} plugins`);
+        currentProgress += progressPerStep;
+        jobManager.addLog(jobId, `Exported ${plugins.length} plugins`);
       }
 
       // Export DVR Rules
       if (request.options.syncDVRRules) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting DVR rules...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting DVR rules...');
         const dvrRules = await client.get('/api/channels/recurring-rules/');
         exportData.data.dvrRules = dvrRules;
-        bumpProgress(Array.isArray(dvrRules) ? dvrRules.length : 1, 'Exporting DVR rules...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${Array.isArray(dvrRules) ? dvrRules.length : 0} DVR rules`);
       }
 
       // Export Comskip Config
       if (request.options.syncComskipConfig) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting comskip config...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting comskip config...');
         exportData.data.comskipConfig = await client.get('/api/channels/dvr/comskip-config/');
-        bumpProgress(1, 'Exporting comskip config...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, 'Exported comskip config');
       }
 
       // Export Users
       if (request.options.syncUsers) {
-        jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Exporting users...');
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting users...');
         const allUsers = await this.getAllPaginated(client, '/api/accounts/users/', jobId);
         // Keep all returned users (including admins); sort for stable output
         exportData.data.users = allUsers.sort((a: any, b: any) =>
           (a.username || '').localeCompare(b.username || '')
         );
-        bumpProgress(exportData.data.users.length, 'Exporting users...');
+        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${exportData.data.users.length} users`);
       }
 
@@ -418,14 +361,13 @@ export class ExportService {
         return '';
       }
 
-      // Write config files (YAML + JSON) and pack into archive
-      jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Writing configuration files...');
+      // Write config file (JSON) and pack into archive
+      jobManager.setProgress(jobId, 95, 'Writing configuration file...');
       this.throwIfCancelled(jobId);
 
       const workDir = path.join(this.tempDir, `export-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
-      const yamlPath = path.join(workDir, 'config.yaml');
       const jsonPath = path.join(workDir, 'config.json');
       const configData = {
         ...exportData,
@@ -434,8 +376,7 @@ export class ExportService {
       // Do not embed logo binaries in config files; they are shipped separately
       delete (configData.data as any).logos;
 
-      await writeFile(yamlPath, this.formatExportContent(configData, 'yaml'), 'utf-8');
-      await writeFile(jsonPath, this.formatExportContent(configData, 'json'), 'utf-8');
+      await writeFile(jsonPath, this.formatExportContent(configData), 'utf-8');
 
       if (logosResult?.logos && Array.isArray(logosResult.logos)) {
         const logosDir = path.join(workDir, 'logos');
@@ -448,9 +389,8 @@ export class ExportService {
         });
       }
 
-      const compress = request.options.compress || 'zip';
-      jobManager.setProgress(jobId, this.calcProgress(processedUnits, totalUnits), 'Compressing...');
-      const finalFilePath = await this.compressDirectory(workDir, compress);
+      jobManager.setProgress(jobId, 98, 'Compressing...');
+      const finalFilePath = await this.compressDirectory(workDir);
 
       jobManager.completeJob(jobId, {
         filePath: finalFilePath,
@@ -543,33 +483,20 @@ export class ExportService {
     }
   }
 
-  private async compressDirectory(workDir: string, format: 'zip' | 'targz'): Promise<string> {
+  private async compressDirectory(workDir: string): Promise<string> {
     const baseName = path.basename(workDir);
-    if (format === 'zip') {
-      const zipPath = path.join(this.tempDir, `${baseName}.zip`);
-      const output = fs.createWriteStream(zipPath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
+    const zipPath = path.join(this.tempDir, `${baseName}.zip`);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
 
-      return new Promise((resolve, reject) => {
-        output.on('close', () => resolve(zipPath));
-        archive.on('error', reject);
+    return new Promise((resolve, reject) => {
+      output.on('close', () => resolve(zipPath));
+      archive.on('error', reject);
 
-        archive.pipe(output);
-        archive.directory(workDir, false);
-        archive.finalize();
-      });
-    }
-
-    const tarPath = path.join(this.tempDir, `${baseName}.tar.gz`);
-    await tar.create(
-      {
-        gzip: true,
-        file: tarPath,
-        cwd: workDir,
-      },
-      ['.']
-    );
-    return tarPath;
+      archive.pipe(output);
+      archive.directory(workDir, false);
+      archive.finalize();
+    });
   }
 
   private generateSummary(exportData: any, logosCount?: number): any {
@@ -618,7 +545,7 @@ export class ExportService {
     return summary;
   }
 
-  private formatExportContent(exportData: any, format: 'yaml' | 'json'): string {
+  private formatExportContent(exportData: any): string {
     const sections: { key: string; label: string }[] = [
       { key: 'channelGroups', label: 'Channel Groups' },
       { key: 'channelProfiles', label: 'Channel Profiles' },
@@ -636,54 +563,22 @@ export class ExportService {
       { key: 'logos', label: 'Logos' },
     ];
 
-    if (format === 'json') {
-      // Insert marker keys so the JSON stays valid but shows section boundaries
-      const dataWithComments: any = {};
-      for (const section of sections) {
-        const value = exportData.data[section.key];
-        if (value !== undefined) {
-          dataWithComments[`__comment_${section.key}`] = `--- ${section.label} ---`;
-          dataWithComments[section.key] = value;
-        }
-      }
-
-      const exportWithComments = {
-        ...exportData,
-        data: dataWithComments,
-      };
-
-      return JSON.stringify(exportWithComments, null, 2);
-    }
-
-    // YAML: add real comment lines between sections for readability
-    const indentLines = (text: string, spaces = 2) =>
-      text
-        .split('\n')
-        .map((line) => (line ? ' '.repeat(spaces) + line : line))
-        .join('\n');
-
-    const header = yaml.dump(
-      {
-        exported_at: exportData.exported_at,
-        source_url: exportData.source_url,
-      },
-      { lineWidth: -1 }
-    );
-
-    const parts: string[] = [header.trimEnd(), 'data:'];
-
+    // Insert marker keys so the JSON stays valid but shows section boundaries
+    const dataWithComments: any = {};
     for (const section of sections) {
       const value = exportData.data[section.key];
-      if (value === undefined) continue;
-
-      parts.push(`  # --- ${section.label} ---`);
-      const sectionYaml = yaml
-        .dump({ [section.key]: value }, { lineWidth: -1 })
-        .replace(/\n$/, '');
-      parts.push(indentLines(sectionYaml));
+      if (value !== undefined) {
+        dataWithComments[`__comment_${section.key}`] = `--- ${section.label} ---`;
+        dataWithComments[section.key] = value;
+      }
     }
 
-    return parts.join('\n') + '\n';
+    const exportWithComments = {
+      ...exportData,
+      data: dataWithComments,
+    };
+
+    return JSON.stringify(exportWithComments, null, 2);
   }
 
   async cleanup(filePath: string): Promise<void> {

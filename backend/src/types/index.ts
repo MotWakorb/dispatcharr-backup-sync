@@ -33,9 +33,7 @@ export interface SyncOptions {
   syncEPGSources?: boolean;
 }
 
-export interface ExportOptions extends SyncOptions {
-  compress?: 'zip' | 'targz';
-}
+export type ExportOptions = SyncOptions;
 
 export interface SyncRequest {
   source: DispatcharrConnection;

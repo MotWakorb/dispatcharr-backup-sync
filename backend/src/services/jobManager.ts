@@ -239,6 +239,19 @@ class JobManager {
   getHistory(): JobStatus[] {
     return [...this.history];
   }
+
+  clearHistory(): void {
+    // Clear history array
+    this.history = [];
+    // Also clear logs for completed jobs
+    for (const [jobId, job] of this.jobs.entries()) {
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+        this.jobs.delete(jobId);
+        this.logs.delete(jobId);
+      }
+    }
+    this.saveToDisk();
+  }
 }
 
 // Singleton instance

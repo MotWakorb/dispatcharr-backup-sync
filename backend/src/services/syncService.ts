@@ -53,39 +53,22 @@ export class SyncService {
       const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
       const progressPerStep = 80 / totalSteps; // 80% for sync steps, 20% for auth/complete
 
-      // Sync Channel Groups
-      if (request.options.syncChannelGroups) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing channel groups...');
-        results.synced.channelGroups = await this.syncChannelGroups(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
+      // Order matches importService.ts for proper dependency handling:
+      // 1. M3U Sources (needed for streams)
+      // 2. EPG Sources (needed for EPG data)
+      // 3. Channel Profiles (needed for channel associations)
+      // 4. Channel Groups (needed for channel assignment)
+      // 5. Stream Profiles (needed for channel stream_profile_id)
+      // 6. Channels (depends on groups and stream profiles)
+      // 7. User Agents
+      // 8. Core Settings
+      // 9. Plugins
+      // 10. DVR Rules
+      // 11. Comskip Config
+      // 12. Users
+      // 13. Logos
 
-      // Sync Channel Profiles
-      if (request.options.syncChannelProfiles) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing channel profiles...');
-        results.synced.channelProfiles = await this.syncChannelProfiles(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
-
-      // Sync Channels
-      if (request.options.syncChannels) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing channels...');
-        results.synced.channels = await this.syncChannels(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
-
+      // 1. Sync M3U Sources
       if (request.options.syncM3USources) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing M3U sources...');
         results.synced.m3uSources = await this.syncM3USources(
@@ -96,36 +79,7 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      if (request.options.syncStreamProfiles) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing stream profiles...');
-        results.synced.streamProfiles = await this.syncStreamProfiles(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
-
-      if (request.options.syncUserAgents) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing user agents...');
-        results.synced.userAgents = await this.syncUserAgents(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
-
-      if (request.options.syncCoreSettings) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing core settings...');
-        results.synced.coreSettings = await this.syncCoreSettings(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
-
+      // 2. Sync EPG Sources
       if (request.options.syncEPGSources) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing EPG sources...');
         results.synced.epgSources = await this.syncEPGSources(
@@ -136,21 +90,80 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // Sync Users
-      if (request.options.syncUsers) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
-        results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun);
+      // 3. Sync Channel Profiles
+      if (request.options.syncChannelProfiles) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing channel profiles...');
+        results.synced.channelProfiles = await this.syncChannelProfiles(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
         currentProgress += progressPerStep;
       }
 
-      // Sync Plugins
+      // 4. Sync Channel Groups
+      if (request.options.syncChannelGroups) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing channel groups...');
+        results.synced.channelGroups = await this.syncChannelGroups(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      // 5. Sync Stream Profiles
+      if (request.options.syncStreamProfiles) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing stream profiles...');
+        results.synced.streamProfiles = await this.syncStreamProfiles(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      // 6. Sync Channels
+      if (request.options.syncChannels) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing channels...');
+        results.synced.channels = await this.syncChannels(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      // 7. Sync User Agents
+      if (request.options.syncUserAgents) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing user agents...');
+        results.synced.userAgents = await this.syncUserAgents(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      // 8. Sync Core Settings
+      if (request.options.syncCoreSettings) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing core settings...');
+        results.synced.coreSettings = await this.syncCoreSettings(
+          sourceClient,
+          destClient,
+          request.dryRun
+        );
+        currentProgress += progressPerStep;
+      }
+
+      // 9. Sync Plugins
       if (request.options.syncPlugins) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing plugins...');
         results.synced.plugins = await this.syncPlugins(sourceClient, destClient, request.dryRun);
         currentProgress += progressPerStep;
       }
 
-      // Sync DVR Rules
+      // 10. Sync DVR Rules
       if (request.options.syncDVRRules) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing DVR rules...');
         results.synced.dvrRules = await this.syncDVRRules(
@@ -161,6 +174,7 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
+      // 11. Sync Comskip Config
       if (request.options.syncComskipConfig) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing comskip config...');
         results.synced.comskipConfig = await this.syncComskipConfig(
@@ -171,6 +185,14 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
+      // 12. Sync Users
+      if (request.options.syncUsers) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
+        results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun);
+        currentProgress += progressPerStep;
+      }
+
+      // 13. Sync Logos
       if (request.options.syncLogos) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
         results.synced.logos = await this.syncLogos(
@@ -471,8 +493,12 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean
   ): Promise<{ synced: number; skipped: number; errors: number }> {
-    const sourcePlugins = await source.get('/api/plugins/plugins/');
-    const destPlugins = await dest.get('/api/plugins/plugins/');
+    const sourcePluginsResp = await source.get('/api/plugins/plugins/');
+    const destPluginsResp = await dest.get('/api/plugins/plugins/');
+
+    // API returns {"plugins": [...]} - extract the array
+    const sourcePlugins = Array.isArray(sourcePluginsResp) ? sourcePluginsResp : (sourcePluginsResp?.plugins || []);
+    const destPlugins = Array.isArray(destPluginsResp) ? destPluginsResp : (destPluginsResp?.plugins || []);
 
     let synced = 0;
     let skipped = 0;

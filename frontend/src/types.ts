@@ -33,9 +33,7 @@ export interface SyncOptions {
   syncEPGSources?: boolean;
 }
 
-export interface ExportOptions extends SyncOptions {
-  compress?: 'zip' | 'targz';
-}
+export type ExportOptions = SyncOptions;
 
 export type ImportOptions = SyncOptions;
 
@@ -68,4 +66,11 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
   message?: string;
+}
+
+export interface PluginInfo {
+  key: string;
+  name?: string;
+  enabled?: boolean;
+  settings?: Record<string, any>;
 }

@@ -357,3 +357,49 @@ h3 { font-size: 1.25rem; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Toggle Buttons (for option selection) */
+.toggle-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .toggle-buttons {
+    grid-template-columns: 1fr;
+  }
+}
+
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border: 2px solid var(--gray-300);
+  border-radius: 0.5rem;
+  background: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  text-align: center;
+}
+
+.toggle-btn:hover {
+  border-color: var(--gray-400);
+  background: var(--gray-50);
+}
+
+.toggle-btn.selected {
+  border-color: var(--primary);
+  background: #dbeafe;
+  color: var(--primary-dark);
+}
+
+.toggle-btn.selected:hover {
+  border-color: var(--primary-dark);
+  background: #bfdbfe;
+}

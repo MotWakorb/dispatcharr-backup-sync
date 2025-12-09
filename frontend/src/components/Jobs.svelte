@@ -1,15 +1,23 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory } from '../api';
-  import type { JobStatus } from '../types';
+  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
+  import type { JobStatus, JobLogEntry } from '../types';
 
   let jobs: JobStatus[] = [];
   let history: JobStatus[] = [];
   let loading = false;
   let loadingHistory = false;
+  let clearingHistory = false;
   let error: string | null = null;
   let pollInterval: number | null = null;
   let initialized = false;
+
+  // Logs modal state
+  let showLogsModal = false;
+  let logsModalJob: JobStatus | null = null;
+  let logs: JobLogEntry[] = [];
+  let logsLoading = false;
+  let logsError: string | null = null;
 
   onMount(() => {
     loadJobs(true);
@@ -73,6 +81,54 @@
   }
 
   const statusLabel = (status: JobStatus['status']) => status;
+
+  async function viewLogs(job: JobStatus) {
+    logsModalJob = job;
+    showLogsModal = true;
+    logsLoading = true;
+    logsError = null;
+    logs = [];
+    try {
+      logs = await getJobLogs(job.jobId);
+    } catch (err: any) {
+      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
+    } finally {
+      logsLoading = false;
+    }
+  }
+
+  async function refreshLogs() {
+    if (!logsModalJob) return;
+    logsLoading = true;
+    logsError = null;
+    try {
+      logs = await getJobLogs(logsModalJob.jobId);
+    } catch (err: any) {
+      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
+    } finally {
+      logsLoading = false;
+    }
+  }
+
+  function closeLogsModal() {
+    showLogsModal = false;
+    logsModalJob = null;
+    logs = [];
+    logsError = null;
+  }
+
+  async function handleClearHistory() {
+    if (!confirm('Are you sure you want to clear all job history?')) return;
+    clearingHistory = true;
+    try {
+      await clearJobHistory();
+      history = [];
+    } catch (err: any) {
+      error = err.response?.data?.error || err.message || 'Failed to clear history';
+    } finally {
+      clearingHistory = false;
+    }
+  }
 </script>
 
 <div class="jobs-stack">
@@ -173,14 +229,26 @@
         <h3 class="card-title">History</h3>
         <p class="text-sm text-gray">Recent completed/failed jobs</p>
       </div>
-      <button class="btn btn-secondary btn-sm" on:click={loadHistory} disabled={loadingHistory}>
-        {#if loadingHistory}
-          <span class="spinner"></span>
-          Loading...
-        {:else}
-          Refresh history
+      <div class="history-actions">
+        <button class="btn btn-secondary btn-sm" on:click={loadHistory} disabled={loadingHistory}>
+          {#if loadingHistory}
+            <span class="spinner"></span>
+            Loading...
+          {:else}
+            Refresh
+          {/if}
+        </button>
+        {#if history.length > 0}
+          <button class="btn btn-danger btn-sm" on:click={handleClearHistory} disabled={clearingHistory}>
+            {#if clearingHistory}
+              <span class="spinner"></span>
+              Clearing...
+            {:else}
+              Clear History
+            {/if}
+          </button>
         {/if}
-      </button>
+      </div>
     </div>
 
     {#if loadingHistory && history.length === 0}
@@ -195,9 +263,8 @@
               <th>Job ID</th>
               <th>Type</th>
               <th>Status</th>
-              <th>Message</th>
               <th>Finished</th>
-              <th class="text-right">Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -206,30 +273,76 @@
                 <td class="mono">{job.jobId}</td>
                 <td>{job.jobType || 'unknown'}</td>
                 <td><span class="badge badge-{job.status}">{job.status}</span></td>
-                <td class="text-sm text-gray">{job.message || job.error || '-'}</td>
                 <td class="text-sm">
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
-                {#if job.jobType === 'export' && job.status === 'completed' && job.result?.fileName}
-                  <button class="btn btn-success btn-sm" on:click={() => download(job)}>
-                    Download
+                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
+                    Logs
                   </button>
-                  {#if job.result?.logosFileName}
-                    <button class="btn btn-secondary btn-sm" on:click={() => downloadLogos(job)}>
-                      Logos
+                  {#if job.jobType === 'export' && job.status === 'completed' && job.result?.fileName}
+                    <button class="btn btn-success btn-sm" on:click={() => download(job)}>
+                      Download
                     </button>
+                    {#if job.result?.logosFileName}
+                      <button class="btn btn-secondary btn-sm" on:click={() => downloadLogos(job)}>
+                        Logos
+                      </button>
+                    {/if}
                   {/if}
-                {/if}
-              </td>
-            </tr>
-          {/each}
+                </td>
+              </tr>
+            {/each}
           </tbody>
         </table>
       </div>
     {/if}
   </div>
 </div>
+
+<!-- Logs Modal -->
+{#if showLogsModal}
+  <div class="modal-overlay" role="presentation">
+    <div class="logs-modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <h3>Job Logs</h3>
+          <p class="text-sm text-gray">{logsModalJob?.jobType} - {logsModalJob?.jobId}</p>
+        </div>
+        <div class="modal-actions">
+          {#if logsModalJob?.status === 'running' || logsModalJob?.status === 'pending'}
+            <button class="btn btn-secondary btn-sm" type="button" on:click={refreshLogs} disabled={logsLoading}>
+              {#if logsLoading}
+                <span class="spinner"></span>
+              {/if}
+              Refresh
+            </button>
+          {/if}
+          <button class="close-btn" type="button" on:click={closeLogsModal} aria-label="Close">
+            &times;
+          </button>
+        </div>
+      </div>
+      {#if logsError}
+        <div class="alert alert-error mb-2">{logsError}</div>
+      {/if}
+      <div class="logs-body">
+        {#if logsLoading && logs.length === 0}
+          <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading logs...</span></div>
+        {:else if logs.length === 0}
+          <p class="text-sm text-gray">No logs available.</p>
+        {:else}
+          {#each logs as log}
+            <div class="log-line {/error|failed/i.test(log.message) ? 'log-error' : ''}">
+              <span class="log-time">{new Date(log.timestamp).toLocaleTimeString()}</span>
+              <span class="log-msg">{log.message}</span>
+            </div>
+          {/each}
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 
 <style>
@@ -246,8 +359,14 @@
     border-bottom: 1px solid var(--gray-200);
   }
   .actions {
-    display: flex;
+    display: inline-flex;
     gap: 0.5rem;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+  th:last-child,
+  td:last-child {
+    white-space: nowrap;
   }
   .badge {
     display: inline-block;
@@ -270,9 +389,21 @@
     gap: 1rem;
   }
 
-  .jobs-actions {
+  .jobs-actions,
+  .history-actions {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .btn-danger {
+    background: var(--danger);
+    color: white;
+    border-color: var(--danger);
+  }
+
+  .btn-danger:hover {
+    background: #b91c1c;
+    border-color: #b91c1c;
   }
 
   .jobs-stack {
@@ -312,6 +443,103 @@
 
   .history-card {
     margin-top: 1rem;
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1001;
+    padding: 1rem;
+  }
+
+  .logs-modal {
+    width: min(800px, 95%);
+    max-height: 85vh;
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--gray-200);
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 1.125rem;
+  }
+
+  .modal-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+    line-height: 1;
+    padding: 0.25rem;
+  }
+
+  .close-btn:hover {
+    color: var(--gray-800);
+  }
+
+  .logs-body {
+    padding: 1rem 1.25rem;
+    overflow-y: auto;
+    flex: 1;
+    background: var(--gray-50);
+    font-family: Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    max-height: 60vh;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--gray-200);
+  }
+
+  .log-line:last-child {
+    border-bottom: none;
+  }
+
+  .log-time {
+    color: var(--gray-500);
+    min-width: 5rem;
+    flex-shrink: 0;
+  }
+
+  .log-msg {
+    color: var(--gray-800);
+    word-break: break-word;
+  }
+
+  .log-error .log-msg {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .text-right {
+    text-align: right;
   }
 
 </style>

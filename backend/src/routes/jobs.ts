@@ -52,3 +52,19 @@ jobsRouter.get('/history/list', (_req, res) => {
     } as ApiResponse);
   }
 });
+
+// Clear job history
+jobsRouter.delete('/history', (_req, res) => {
+  try {
+    jobManager.clearHistory();
+    res.json({
+      success: true,
+      message: 'History cleared',
+    } as ApiResponse);
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to clear history',
+    } as ApiResponse);
+  }
+});

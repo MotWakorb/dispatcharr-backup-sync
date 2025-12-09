@@ -8,13 +8,10 @@
     return Boolean((options as Record<string, boolean | undefined>)[key]);
   };
 
-  const setOptionChecked = (key: string, value: boolean) => {
-    (options as Record<string, boolean | undefined>)[key] = value;
-  };
-
-  const handleOptionChange = (key: string, event: Event) => {
-    const target = event.target as HTMLInputElement;
-    setOptionChecked(key, target.checked);
+  const toggleOption = (key: string) => {
+    const current = getOptionChecked(key);
+    (options as Record<string, boolean | undefined>)[key] = !current;
+    options = options; // Trigger Svelte reactivity
   };
 
   const allOptions = [
@@ -38,6 +35,7 @@
     allOptions.forEach(opt => {
       options[opt.key as keyof SyncOptions] = !allSelected;
     });
+    options = options; // Trigger Svelte reactivity
   }
 
   $: allSelected = allOptions.every(opt => options[opt.key as keyof SyncOptions]);
@@ -51,18 +49,15 @@
     </button>
   </div>
 
-  <div class="grid grid-3">
+  <div class="toggle-buttons">
     {#each allOptions as option}
-      <div class="checkbox-group">
-        <input
-          type="checkbox"
-          id={option.key}
-          class="form-checkbox"
-          checked={getOptionChecked(option.key)}
-          on:change={(event) => handleOptionChange(option.key, event)}
-        />
-        <label for={option.key}>{option.label}</label>
-      </div>
+      <button
+        type="button"
+        class="toggle-btn {options[option.key] ? 'selected' : ''}"
+        on:click={() => toggleOption(option.key)}
+      >
+        {option.label}
+      </button>
     {/each}
   </div>
 </div>

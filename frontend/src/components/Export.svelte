@@ -38,7 +38,6 @@
     syncComskipConfig: true,
     syncUsers: true,
     syncLogos: true,
-    compress: 'zip',
   };
 
   let dryRun = false;
@@ -55,6 +54,7 @@
   let showLogs = false;
   let logs: { timestamp: string; message: string }[] = [];
   let logsPoll: number | null = null;
+  let showBackgroundModal = false;
 
   onMount(loadSavedConnections);
 
@@ -178,6 +178,20 @@
     window.location.href = url;
   }
 
+  function closeOverlay() {
+    showOverlay = false;
+    currentJob = null;
+    exporting = false;
+  }
+
+  function runInBackground() {
+    backgroundJobId = currentJob?.jobId || backgroundJobId;
+    showOverlay = false;
+    currentJob = null;
+    exporting = false;
+    showBackgroundModal = true;
+  }
+
   onDestroy(() => {
     if (pollInterval) {
       clearTimeout(pollInterval);
@@ -213,18 +227,7 @@
       <OptionsForm bind:options title="Export Options" />
     </div>
 
-    <div class="grid grid-1 mt-3">
-      <div class="form-group">
-        <label class="form-label" for="compress">Archive Format</label>
-        <select id="compress" class="form-select" bind:value={options.compress}>
-          <option value="zip">ZIP (default)</option>
-          <option value="targz">TAR.GZ</option>
-        </select>
-        <p class="text-sm text-gray mt-1">Export always includes both YAML and JSON plus logos when enabled.</p>
-      </div>
-    </div>
-
-    <div class="flex items-center gap-2 mt-2">
+    <div class="flex items-center gap-2 mt-3">
       <div class="checkbox-group">
         <input
           type="checkbox"
@@ -242,26 +245,17 @@
       </div>
     {/if}
 
-    <div class="actions-row">
-      <button
-        class="btn btn-primary"
-        on:click={handleExport}
-        disabled={!isValid || exporting}
-      >
-        {#if exporting}
-          <span class="spinner"></span>
-          Exporting...
-        {:else}
+    {#if !exporting && !canDownload}
+      <div class="actions-row">
+        <button
+          class="btn btn-primary"
+          on:click={handleExport}
+          disabled={!isValid}
+        >
           {dryRun ? 'Preview Export' : 'Start Export'}
-        {/if}
-      </button>
-
-      {#if canDownload}
-        <button class="btn btn-success" on:click={handleDownload}>
-          Download Export
         </button>
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
   {#if overlayVisible}
@@ -281,14 +275,19 @@
                 </button>
               {/if}
               {#if currentJob?.status === 'running' || currentJob?.status === 'pending'}
-                <button class="btn btn-secondary btn-sm" on:click={() => { showOverlay = false; backgroundJobId = currentJob?.jobId || backgroundJobId; }}>
+                <button class="btn btn-secondary btn-sm" on:click={runInBackground}>
                   Run in background
                 </button>
                 <button class="btn btn-secondary btn-sm" on:click={handleCancel} disabled={!currentJob}>
                   Cancel
                 </button>
               {:else}
-                <button class="btn btn-secondary btn-sm" on:click={() => showOverlay = false}>
+                {#if canDownload}
+                  <button class="btn btn-success btn-sm" on:click={handleDownload}>
+                    Download
+                  </button>
+                {/if}
+                <button class="btn btn-secondary btn-sm" on:click={closeOverlay}>
                   Close
                 </button>
               {/if}
@@ -330,6 +329,22 @@
               </div>
             {/each}
           {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showBackgroundModal}
+    <div class="overlay">
+      <div class="overlay-card" style="max-width: 400px;">
+        <h3 class="mb-2">Running in Background</h3>
+        <p class="text-sm text-gray mb-3">
+          Your export is running in the background. You can view progress, logs, and download the file from the <strong>Jobs</strong> page.
+        </p>
+        <div class="flex justify-end">
+          <button class="btn btn-primary btn-sm" on:click={() => showBackgroundModal = false}>
+            OK
+          </button>
         </div>
       </div>
     </div>

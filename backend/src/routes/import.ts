@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { importService } from '../services/importService.js';
 import { jobManager } from '../services/jobManager.js';
+import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import multer from 'multer';
-import type { ImportRequest } from '../types/index.js';
+import FormData from 'form-data';
+import type { ImportRequest, DispatcharrConnection } from '../types/index.js';
 
 export const importRouter = Router();
 
@@ -158,6 +160,88 @@ importRouter.get('/status/:jobId', (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get job status',
+    });
+  }
+});
+
+// Upload plugin files to destination instance
+importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
+  try {
+    const files = req.files as Express.Multer.File[];
+    if (!files || files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one plugin file is required',
+      });
+    }
+
+    let connection: DispatcharrConnection;
+    try {
+      connection = JSON.parse(req.body.connection || '{}');
+    } catch {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid connection data',
+      });
+    }
+
+    if (!connection.url || !connection.username || !connection.password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Connection URL, username, and password are required',
+      });
+    }
+
+    const client = new DispatcharrClient(connection);
+    await client.authenticate();
+
+    const results: { uploaded: number; skipped: string[]; errors: string[] } = {
+      uploaded: 0,
+      skipped: [],
+      errors: [],
+    };
+
+    for (const file of files) {
+      try {
+        // Create form data for plugin import
+        const formData = new FormData();
+        formData.append('file', file.buffer, {
+          filename: file.originalname,
+          contentType: file.mimetype || 'application/zip',
+        });
+
+        // Upload plugin to the destination instance
+        await client.post('/api/plugins/plugins/import/', formData, {
+          headers: {
+            ...formData.getHeaders(),
+          },
+        });
+
+        results.uploaded++;
+        console.log(`Successfully uploaded plugin: ${file.originalname}`);
+      } catch (error: any) {
+        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || 'Unknown error';
+
+        // Check if this is an "already exists" error - treat as skipped, not error
+        if (errorMsg.toLowerCase().includes('already exists')) {
+          results.skipped.push(file.originalname);
+          console.log(`Plugin already installed: ${file.originalname}`);
+        } else {
+          results.errors.push(`${file.originalname}: ${errorMsg}`);
+          console.error(`Failed to upload plugin ${file.originalname}:`, errorMsg);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      data: results,
+    });
+  } catch (error: any) {
+    console.error('Error uploading plugins:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to upload plugins',
     });
   }
 });

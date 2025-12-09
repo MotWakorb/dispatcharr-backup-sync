@@ -564,7 +564,7 @@ export class ImportService {
     }
   }
 
-  async inspect(request: ImportRequest): Promise<{ sections: string[]; uploadId?: string }> {
+  async inspect(request: ImportRequest): Promise<{ sections: string[]; uploadId?: string; plugins?: any[] }> {
     // Reuse the import flow up to parsing so the UI can offer section toggles for archives
     let tempFilePath: string | null = null;
     let configFilePath: string | null = null;
@@ -611,13 +611,16 @@ export class ImportService {
 
       const sections = Object.keys(data).filter((key) => key in SECTION_OPTION_MAP);
 
+      // Extract plugins list if present in the backup
+      const plugins = Array.isArray(data.plugins) ? data.plugins : [];
+
       // Cache the uploaded file for reuse during import
       const uploadId = uuidv4();
       const cacheFile = path.join(this.cacheDir, `${uploadId}`);
       await writeFile(cacheFile, fileBuffer);
       await writeFile(`${cacheFile}.meta`, JSON.stringify({ fileName: request.fileName }));
 
-      return { sections, uploadId }; // uploadId is used by the client to skip re-upload
+      return { sections, uploadId, plugins }; // uploadId is used by the client to skip re-upload
     } finally {
       try {
         if (tempFilePath) await unlink(tempFilePath);

@@ -1,9 +1,78 @@
 import { Router } from 'express';
 import { syncService } from '../services/syncService.js';
 import { jobManager } from '../services/jobManager.js';
-import type { SyncRequest } from '../types/index.js';
+import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
 
 export const syncRouter = Router();
+
+// Compare plugins between source and destination
+syncRouter.post('/compare-plugins', async (req, res) => {
+  try {
+    const { source, destination } = req.body as {
+      source: DispatcharrConnection;
+      destination: DispatcharrConnection;
+    };
+
+    if (!source || !destination) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: source and destination are required',
+      });
+    }
+
+    const sourceClient = new DispatcharrClient(source);
+    const destClient = new DispatcharrClient(destination);
+
+    await sourceClient.authenticate();
+    await destClient.authenticate();
+
+    const sourcePluginsResp = await sourceClient.get('/api/plugins/plugins/');
+    const destPluginsResp = await destClient.get('/api/plugins/plugins/');
+
+    const sourcePlugins = Array.isArray(sourcePluginsResp)
+      ? sourcePluginsResp
+      : sourcePluginsResp?.plugins || [];
+    const destPlugins = Array.isArray(destPluginsResp)
+      ? destPluginsResp
+      : destPluginsResp?.plugins || [];
+
+    const destPluginKeys = new Set(destPlugins.map((p: any) => p.key));
+
+    // Find plugins that exist in source but not in destination
+    const missingPlugins = sourcePlugins
+      .filter((p: any) => p.key && !destPluginKeys.has(p.key))
+      .map((p: any) => ({
+        key: p.key,
+        name: p.name || p.key,
+        version: p.version,
+        description: p.description,
+      }));
+
+    res.json({
+      success: true,
+      data: {
+        sourcePlugins: sourcePlugins.map((p: any) => ({
+          key: p.key,
+          name: p.name || p.key,
+          version: p.version,
+        })),
+        destPlugins: destPlugins.map((p: any) => ({
+          key: p.key,
+          name: p.name || p.key,
+          version: p.version,
+        })),
+        missingPlugins,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error comparing plugins:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to compare plugins',
+    });
+  }
+});
 
 // Start a new sync job
 syncRouter.post('/', async (req, res) => {

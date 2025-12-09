@@ -10,6 +10,7 @@ import type {
   SavedConnectionInput,
   JobLogEntry,
   ImportOptions,
+  PluginInfo,
 } from './types';
 
 const api = axios.create({
@@ -66,6 +67,24 @@ export async function deleteSavedConnection(id: string): Promise<void> {
 }
 
 // Sync APIs
+export async function comparePlugins(
+  source: DispatcharrConnection,
+  destination: DispatcharrConnection
+): Promise<{
+  sourcePlugins: PluginInfo[];
+  destPlugins: PluginInfo[];
+  missingPlugins: PluginInfo[];
+}> {
+  const response = await api.post<
+    ApiResponse<{
+      sourcePlugins: PluginInfo[];
+      destPlugins: PluginInfo[];
+      missingPlugins: PluginInfo[];
+    }>
+  >('/sync/compare-plugins', { source, destination });
+  return response.data.data!;
+}
+
 export async function startSync(
   source: DispatcharrConnection,
   destination: DispatcharrConnection,
@@ -144,6 +163,10 @@ export async function getJobHistory(): Promise<JobStatus[]> {
   return response.data.data || [];
 }
 
+export async function clearJobHistory(): Promise<void> {
+  await api.delete<ApiResponse>('/jobs/history');
+}
+
 // Import APIs
 export async function startImport(
   destination: DispatcharrConnection,
@@ -190,11 +213,11 @@ export async function getImportStatus(jobId: string): Promise<JobStatus> {
 export async function inspectImportFile(
   file: File,
   onUploadProgress?: (percent: number) => void
-): Promise<{ sections: string[]; uploadId?: string; fileName?: string }> {
+): Promise<{ sections: string[]; uploadId?: string; fileName?: string; plugins?: PluginInfo[] }> {
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await api.post<ApiResponse<{ sections: string[]; uploadId?: string; fileName?: string }>>(
+  const response = await api.post<ApiResponse<{ sections: string[]; uploadId?: string; fileName?: string; plugins?: PluginInfo[] }>>(
     '/import/inspect',
     formData,
     {
@@ -211,4 +234,35 @@ export async function inspectImportFile(
   );
 
   return response.data.data || { sections: [] };
+}
+
+// Plugin upload for import
+export async function uploadPluginFiles(
+  connection: DispatcharrConnection,
+  files: File[],
+  onUploadProgress?: (percent: number) => void
+): Promise<{ uploaded: number; skipped?: string[]; errors: string[] }> {
+  const formData = new FormData();
+  formData.append('connection', JSON.stringify(connection));
+  files.forEach((file) => {
+    formData.append('plugins', file);
+  });
+
+  const response = await api.post<ApiResponse<{ uploaded: number; skipped?: string[]; errors: string[] }>>(
+    '/import/plugins',
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (evt) => {
+        if (evt.total && onUploadProgress) {
+          const percent = Math.round((evt.loaded / evt.total) * 100);
+          onUploadProgress(percent);
+        }
+      },
+    }
+  );
+
+  return response.data.data || { uploaded: 0, errors: [] };
 }
