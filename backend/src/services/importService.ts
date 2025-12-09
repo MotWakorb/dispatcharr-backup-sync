@@ -460,6 +460,16 @@ export class ImportService {
         currentProgress += progressPerStep;
       }
 
+      // Trigger EPG refresh after import to ensure EPG data is assigned to channels
+      if (data.epgSources && this.isEnabled('epgSources', request.options)) {
+        jobManager.setProgress(jobId, 95, 'Triggering EPG refresh to assign data to channels...');
+        try {
+          await this.triggerEpgRefresh(client, jobId);
+        } catch (error: any) {
+          jobManager.addLog(jobId, `Warning: EPG refresh trigger failed: ${error.message}`);
+        }
+      }
+
       // Cleanup temp files
       try {
         await unlink(tempFilePath);
@@ -2335,30 +2345,100 @@ export class ImportService {
         return;
       }
 
-      const chunkSize = 200;
-      for (let i = 0; i < associations.length; i += chunkSize) {
-        const chunk = associations.slice(i, i + chunkSize);
+      // Use individual PUT requests instead of batch-set-epg to avoid triggering Dispatcharr refresh issues
+      let successCount = 0;
+      let failCount = 0;
+
+      jobManager.addLog(jobId, `Assigning EPG to channels individually (${associations.length} total)...`);
+
+      for (let i = 0; i < associations.length; i++) {
+        const assoc = associations[i];
         try {
-          jobManager.addLog(
-            jobId,
-            `EPG batch chunk ${i}-${i + chunk.length}: ` +
-              JSON.stringify(chunk.slice(0, 5)) +
-              (chunk.length > 5 ? ` ...(${chunk.length} total)` : '')
-          );
-          await client.post('/api/channels/channels/batch-set-epg/', { associations: chunk });
+          // Find the channel to get its current data
+          const channel = channels.find((ch: any) => ch.id === assoc.channel_id);
+          if (!channel) {
+            failCount++;
+            continue;
+          }
+
+          // Update the channel with the EPG association
+          await client.put(`/api/channels/channels/${assoc.channel_id}/`, {
+            ...channel,
+            epg_data_id: assoc.epg_data_id,
+          });
+
+          successCount++;
+
+          // Log progress every 50 channels
+          if ((i + 1) % 50 === 0) {
+            jobManager.addLog(jobId, `EPG assignment progress: ${i + 1}/${associations.length} channels processed`);
+          }
         } catch (error: any) {
-          this.logJobError(
-            jobId,
-            'Batch EPG set failed',
-            `chunk ${i}-${i + chunk.length} payload=${JSON.stringify(chunk)}`,
-            error
-          );
+          failCount++;
+          // Only log first 5 errors to avoid spam
+          if (failCount <= 5) {
+            this.logJobError(
+              jobId,
+              'Individual EPG assignment failed',
+              `channel_id=${assoc.channel_id}, epg_data_id=${assoc.epg_data_id}`,
+              error
+            );
+          }
         }
       }
 
-      jobManager.addLog(jobId, `Assigned EPG to ${associations.length} channels (backup epg_data_id -> target match with fallbacks)`);
+      jobManager.addLog(jobId, `EPG assignment completed: ${successCount} successful, ${failCount} failed out of ${associations.length} total`);
     } catch (error) {
       this.logJobError(jobId, 'EPG assignment failed', '', error);
+    }
+  }
+
+  private async triggerEpgRefresh(
+    client: DispatcharrClient,
+    jobId: string
+  ): Promise<void> {
+    try {
+      jobManager.addLog(jobId, 'Triggering EPG refresh by toggling EPG sources...');
+
+      // Get all EPG sources
+      const epgSources = await client.get('/api/epg/sources/').catch(() => []);
+
+      if (!Array.isArray(epgSources) || epgSources.length === 0) {
+        jobManager.addLog(jobId, 'No EPG sources found to refresh');
+        return;
+      }
+
+      jobManager.addLog(jobId, `Found ${epgSources.length} EPG source(s) to refresh`);
+
+      // Toggle each active EPG source to trigger a refresh
+      for (const source of epgSources) {
+        if (!source?.id) continue;
+
+        try {
+          const wasActive = source.is_active !== false; // Default to true if undefined
+
+          if (wasActive) {
+            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Toggling to trigger refresh...`);
+
+            // Toggle off
+            await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
+            await new Promise((resolve) => globalThis.setTimeout(resolve, 1000));
+
+            // Toggle back on
+            await client.patch(`/api/epg/sources/${source.id}/`, { is_active: true });
+
+            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Refresh triggered`);
+          } else {
+            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Skipped (inactive)`);
+          }
+        } catch (error: any) {
+          this.logJobError(jobId, 'EPG source refresh failed', source.name || source.id, error);
+        }
+      }
+
+      jobManager.addLog(jobId, 'EPG refresh triggered for all active sources');
+    } catch (error) {
+      this.logJobError(jobId, 'EPG refresh trigger failed', '', error);
     }
   }
 
