@@ -6,19 +6,13 @@ services:
     container_name: dispatcharr-manager-backend
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "6002:6002"
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=6002
       - DATA_DIR=/data
-      - DEFAULT_PROD_URL=${DEFAULT_PROD_URL:-}
-      - DEFAULT_DEV_URL=${DEFAULT_DEV_URL:-}
-      - DEFAULT_USERNAME=${DEFAULT_USERNAME:-}
-      - DEFAULT_PASSWORD=${DEFAULT_PASSWORD:-}
     volumes:
       - backend-data:/data
-    networks:
-      - dispatcharr-manager
 
   frontend:
     build:
@@ -27,15 +21,9 @@ services:
     container_name: dispatcharr-manager-frontend
     restart: unless-stopped
     ports:
-      - "3002:80"
+      - "6001:6001"
     depends_on:
       - backend
-    networks:
-      - dispatcharr-manager
-
-networks:
-  dispatcharr-manager:
-    driver: bridge
 
 volumes:
   backend-data:

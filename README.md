@@ -30,6 +30,8 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 
 ## Quick Start with Docker Compose
 
+DBAS runs entirely in Docker containers - no local installation required. It can run on any machine that has network access to your Dispatcharr instances (e.g., your home server, NAS, or even a different machine than where Dispatcharr is running).
+
 ### 1. Create a docker-compose.yml
 
 ```yaml
@@ -39,35 +41,22 @@ services:
     container_name: dispatcharr-manager-backend
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "6002:6002"
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=6002
       - DATA_DIR=/data
-      # Optional: Pre-fill connection forms with default values
-      - DEFAULT_PROD_URL=http://your-prod-dispatcharr:5000
-      - DEFAULT_DEV_URL=http://your-dev-dispatcharr:5000
-      - DEFAULT_USERNAME=admin
-      - DEFAULT_PASSWORD=
     volumes:
       - backend-data:/data
-    networks:
-      - dispatcharr-manager
 
   frontend:
     image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
     container_name: dispatcharr-manager-frontend
     restart: unless-stopped
     ports:
-      - "3002:80"
+      - "6001:6001"
     depends_on:
       - backend
-    networks:
-      - dispatcharr-manager
-
-networks:
-  dispatcharr-manager:
-    driver: bridge
 
 volumes:
   backend-data:
@@ -81,12 +70,12 @@ docker compose up -d
 
 ### 3. Access the UI
 
-Open http://localhost:3002 in your browser.
+Open `http://<docker-host>:6001` in your browser (e.g., `http://192.168.1.100:6001` or `http://myserver:6001`).
 
-### 4. Verify Backend Health
+### 4. Verify Backend Health (Optional)
 
 ```bash
-curl http://localhost:3001/health
+curl http://<docker-host>:6002/health
 ```
 
 ## Usage
@@ -157,11 +146,11 @@ docker compose up -d
 Run development servers in containers (no local Node.js installation required):
 
 ```bash
-# Backend dev server (port 3001)
-docker run --rm -it -v ${PWD}/backend:/app -w /app -p 3001:3001 node:20-alpine sh -c "npm install && npm run dev"
+# Backend dev server (port 6002)
+docker run --rm -it -v ${PWD}/backend:/app -w /app -p 6002:6002 node:20-alpine sh -c "npm install && npm run dev"
 
-# Frontend dev server (port 3002)
-docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 3002:3000 node:20-alpine sh -c "npm install && npm run dev -- --host --port 3000"
+# Frontend dev server (port 6001)
+docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine sh -c "npm install && npm run dev -- --host --port 3000"
 ```
 
 ## Environment Variables
@@ -169,12 +158,8 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 3002:3000 node:20-alpine 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NODE_ENV` | Node environment | `production` |
-| `PORT` | Backend API port | `3001` |
+| `PORT` | Backend API port | `6002` |
 | `DATA_DIR` | Persistent data directory | `/data` |
-| `DEFAULT_PROD_URL` | Pre-fill production URL in forms | - |
-| `DEFAULT_DEV_URL` | Pre-fill development URL in forms | - |
-| `DEFAULT_USERNAME` | Pre-fill username in forms | - |
-| `DEFAULT_PASSWORD` | Pre-fill password in forms | - |
 
 ## API Reference
 

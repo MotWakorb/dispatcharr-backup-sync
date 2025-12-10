@@ -25,7 +25,7 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Expose port
-EXPOSE 80
+EXPOSE 6001
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]
