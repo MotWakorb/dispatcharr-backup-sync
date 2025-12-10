@@ -11,6 +11,7 @@ services:
       - NODE_ENV=production
       - PORT=6002
       - DATA_DIR=/data
+      - TZ=${TZ:-UTC}
     volumes:
       - backend-data:/data
 

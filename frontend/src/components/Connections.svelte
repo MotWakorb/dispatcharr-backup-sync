@@ -6,8 +6,11 @@
     deleteSavedConnection,
     testConnection,
     updateSavedConnection,
+    getSettings,
+    updateSettings,
+    getTimezones,
   } from '../api';
-  import type { SavedConnection, SavedConnectionInput } from '../types';
+  import type { SavedConnection, SavedConnectionInput, AppSettings, TimeFormat } from '../types';
 
   let savedConnections: SavedConnection[] = [];
   let loadingList = false;
@@ -44,7 +47,62 @@
     { loading: boolean; result?: { success: boolean; message: string } }
   > = {};
 
-  onMount(loadConnections);
+  // Settings state
+  let appSettings: AppSettings | null = null;
+  let availableTimezones: string[] = [];
+  let selectedTimezone: string = 'UTC';
+  let selectedTimeFormat: TimeFormat = '12h';
+  let savingSettings = false;
+  let settingsSuccess: string | null = null;
+  let settingsError: string | null = null;
+
+  onMount(async () => {
+    await loadConnections();
+    await loadSettings();
+  });
+
+  async function loadSettings() {
+    try {
+      [appSettings, availableTimezones] = await Promise.all([
+        getSettings(),
+        getTimezones(),
+      ]);
+      selectedTimezone = appSettings.timezone;
+      selectedTimeFormat = appSettings.timeFormat || '12h';
+    } catch (err: any) {
+      // Settings load error - non-critical
+      console.error('Failed to load settings:', err);
+    }
+  }
+
+  async function handleSaveSettings() {
+    const timezoneChanged = selectedTimezone !== appSettings?.timezone;
+    const timeFormatChanged = selectedTimeFormat !== appSettings?.timeFormat;
+
+    if (!timezoneChanged && !timeFormatChanged) return;
+
+    savingSettings = true;
+    settingsError = null;
+    settingsSuccess = null;
+    try {
+      const updates: Partial<AppSettings> = {};
+      if (timezoneChanged) updates.timezone = selectedTimezone;
+      if (timeFormatChanged) updates.timeFormat = selectedTimeFormat;
+
+      appSettings = await updateSettings(updates);
+
+      const messages: string[] = [];
+      if (timezoneChanged) messages.push(`Timezone updated to ${selectedTimezone}`);
+      if (timeFormatChanged) messages.push(`Time format updated to ${selectedTimeFormat === '12h' ? '12-hour' : '24-hour'}`);
+      settingsSuccess = messages.join('. ') + '.';
+    } catch (err: any) {
+      settingsError = err.response?.data?.error || err.message || 'Failed to update settings';
+      selectedTimezone = appSettings?.timezone || 'UTC';
+      selectedTimeFormat = appSettings?.timeFormat || '12h';
+    } finally {
+      savingSettings = false;
+    }
+  }
 
   async function loadConnections() {
     loadingList = true;
@@ -373,6 +431,88 @@
     {/if}
   </div>
 
+  <!-- App Settings Card -->
+  <div class="card mt-4">
+    <div class="card-header">
+      <h2 class="card-title">App Settings</h2>
+      <p class="text-sm text-gray">Configure application-wide settings.</p>
+    </div>
+
+    {#if settingsSuccess}
+      <div class="alert alert-success mb-2">{settingsSuccess}</div>
+    {/if}
+
+    {#if settingsError}
+      <div class="alert alert-error mb-2">{settingsError}</div>
+    {/if}
+
+    <div class="settings-section">
+      <div class="setting-row">
+        <div class="setting-info">
+          <label class="form-label" for="timezone-select">Timezone</label>
+          <p class="text-sm text-gray">All scheduled jobs will run based on this timezone.</p>
+        </div>
+        <div class="setting-control">
+          <select
+            id="timezone-select"
+            class="form-input"
+            bind:value={selectedTimezone}
+            disabled={savingSettings}
+          >
+            {#each availableTimezones as tz}
+              <option value={tz}>{tz}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+
+      <div class="setting-row mt-3">
+        <div class="setting-info">
+          <label class="form-label" for="time-format-select">Time Format</label>
+          <p class="text-sm text-gray">Display times in 12-hour (AM/PM) or 24-hour format.</p>
+        </div>
+        <div class="setting-control">
+          <div class="toggle-buttons-inline">
+            <button
+              type="button"
+              class="toggle-btn {selectedTimeFormat === '12h' ? 'selected' : ''}"
+              on:click={() => selectedTimeFormat = '12h'}
+              disabled={savingSettings}
+            >
+              12-hour
+            </button>
+            <button
+              type="button"
+              class="toggle-btn {selectedTimeFormat === '24h' ? 'selected' : ''}"
+              on:click={() => selectedTimeFormat = '24h'}
+              disabled={savingSettings}
+            >
+              24-hour
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-row mt-3">
+        <div></div>
+        <div class="setting-control">
+          <button
+            class="btn btn-primary"
+            on:click={handleSaveSettings}
+            disabled={savingSettings || (selectedTimezone === appSettings?.timezone && selectedTimeFormat === appSettings?.timeFormat)}
+          >
+            {#if savingSettings}
+              <span class="spinner"></span>
+              Saving...
+            {:else}
+              Save Settings
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Create Connection Modal -->
   {#if showCreateModal}
     <div class="overlay" role="presentation">
@@ -381,7 +521,7 @@
         <div class="modal-header">
           <div>
             <h3>Create Connection</h3>
-            <p class="text-sm text-gray">Add a new Dispatcharr instance connection.</p>
+            <p class="text-sm text-gray">Add a new Dispatcharr instance connection. You must test the connection successfully before saving.</p>
           </div>
           <button class="close-btn" type="button" on:click={closeCreateModal} aria-label="Close">
             &times;
@@ -406,7 +546,7 @@
               <input
                 id="create-instance-url"
                 class="form-input"
-                placeholder="http://localhost:5000"
+                placeholder="http://localhost:9191"
                 bind:value={createForm.instanceUrl}
                 on:input={markCreateDirty}
               />
@@ -514,7 +654,7 @@
               <input
                 id="edit-instance-url"
                 class="form-input"
-                placeholder="http://localhost:5000"
+                placeholder="http://localhost:9191"
                 bind:value={editingForm.instanceUrl}
                 on:input={markEditDirty}
               />
@@ -677,5 +817,90 @@
     width: 1.125rem;
     height: 1.125rem;
     border-width: 2px;
+  }
+
+  .mt-4 {
+    margin-top: 1.5rem;
+  }
+
+  .settings-section {
+    padding: 0.5rem 0;
+  }
+
+  .setting-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .setting-info {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .setting-info .form-label {
+    margin-bottom: 0.25rem;
+  }
+
+  .setting-info p {
+    margin: 0;
+  }
+
+  .setting-control {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .setting-control select {
+    min-width: 200px;
+  }
+
+  .mt-3 {
+    margin-top: 1rem;
+  }
+
+  .toggle-buttons-inline {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border: 2px solid var(--gray-300);
+    border-radius: 0.5rem;
+    background: white;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--gray-600);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+  }
+
+  .toggle-btn:hover:not(:disabled) {
+    border-color: var(--gray-400);
+    background: var(--gray-50);
+  }
+
+  .toggle-btn.selected {
+    border-color: var(--primary);
+    background: #dbeafe;
+    color: var(--primary-dark);
+  }
+
+  .toggle-btn.selected:hover:not(:disabled) {
+    border-color: var(--primary-dark);
+    background: #bfdbfe;
+  }
+
+  .toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

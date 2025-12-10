@@ -6,6 +6,9 @@ import { importRouter } from './routes/import.js';
 import { connectionsRouter } from './routes/connections.js';
 import { savedConnectionsRouter } from './routes/savedConnections.js';
 import { jobsRouter } from './routes/jobs.js';
+import { schedulesRouter } from './routes/schedules.js';
+import { settingsRouter } from './routes/settings.js';
+import { schedulerService } from './services/schedulerService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,6 +31,8 @@ app.use('/api/import', importRouter);
 app.use('/api/connections', connectionsRouter);
 app.use('/api/saved-connections', savedConnectionsRouter);
 app.use('/api/jobs', jobsRouter);
+app.use('/api/schedules', schedulesRouter);
+app.use('/api/settings', settingsRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -49,4 +54,22 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`Dispatcharr Manager API running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
+
+  // Initialize scheduler after server starts
+  schedulerService.initialize().catch((error) => {
+    console.error('Failed to initialize scheduler:', error);
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down...');
+  schedulerService.shutdown();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down...');
+  schedulerService.shutdown();
+  process.exit(0);
 });

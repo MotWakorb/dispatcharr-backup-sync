@@ -89,3 +89,37 @@ export interface ApiResponse<T = any> {
   error?: string;
   message?: string;
 }
+
+// Schedule types
+export type SchedulePreset = 'hourly' | 'daily' | 'weekly' | 'monthly' | 'custom';
+export type ScheduledJobType = 'backup' | 'sync';
+
+export interface ScheduleInput {
+  name: string;
+  jobType: ScheduledJobType;
+  sourceConnectionId: string;
+  destinationConnectionId?: string;
+  options: SyncOptions;
+  schedulePreset: SchedulePreset;
+  cronExpression?: string;
+  enabled: boolean;
+}
+
+export interface Schedule extends ScheduleInput {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  lastRunAt?: string;
+  lastRunJobId?: string;
+  lastRunStatus?: 'completed' | 'failed' | 'cancelled';
+  nextRunAt?: string;
+}
+
+export interface ScheduleRunHistoryEntry {
+  scheduleId: string;
+  jobId: string;
+  startedAt: string;
+  completedAt?: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  error?: string;
+}

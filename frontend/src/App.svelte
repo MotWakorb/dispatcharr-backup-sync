@@ -4,10 +4,11 @@
   import Import from './components/Import.svelte';
   import Connections from './components/Connections.svelte';
   import Jobs from './components/Jobs.svelte';
+  import Schedules from './components/Schedules.svelte';
 
   console.log('App component init');
 
-  let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' = 'sync';
+  let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' | 'schedules' = 'sync';
 </script>
 
 <main>
@@ -48,6 +49,13 @@
       </button>
       <button
         class="tab"
+        class:active={activeTab === 'schedules'}
+        on:click={() => activeTab = 'schedules'}
+      >
+        Schedules
+      </button>
+      <button
+        class="tab"
         class:active={activeTab === 'jobs'}
         on:click={() => activeTab = 'jobs'}
       >
@@ -63,6 +71,8 @@
       <Import />
     {:else if activeTab === 'connections'}
       <Connections />
+    {:else if activeTab === 'schedules'}
+      <Schedules />
     {:else if activeTab === 'jobs'}
       <Jobs />
     {/if}

@@ -11,6 +11,10 @@ import type {
   JobLogEntry,
   ImportOptions,
   PluginInfo,
+  Schedule,
+  ScheduleInput,
+  ScheduleRunHistoryEntry,
+  AppSettings,
 } from './types';
 
 const api = axios.create({
@@ -265,4 +269,65 @@ export async function uploadPluginFiles(
   );
 
   return response.data.data || { uploaded: 0, errors: [] };
+}
+
+// Schedule APIs
+export async function listSchedules(): Promise<Schedule[]> {
+  const response = await api.get<ApiResponse<Schedule[]>>('/schedules');
+  return response.data.data || [];
+}
+
+export async function getSchedule(id: string): Promise<Schedule> {
+  const response = await api.get<ApiResponse<Schedule>>(`/schedules/${id}`);
+  return response.data.data!;
+}
+
+export async function createSchedule(input: ScheduleInput): Promise<Schedule> {
+  const response = await api.post<ApiResponse<Schedule>>('/schedules', input);
+  return response.data.data!;
+}
+
+export async function updateSchedule(id: string, input: Partial<ScheduleInput>): Promise<Schedule> {
+  const response = await api.put<ApiResponse<Schedule>>(`/schedules/${id}`, input);
+  return response.data.data!;
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await api.delete<ApiResponse>(`/schedules/${id}`);
+}
+
+export async function toggleSchedule(id: string): Promise<Schedule> {
+  const response = await api.post<ApiResponse<Schedule>>(`/schedules/${id}/toggle`);
+  return response.data.data!;
+}
+
+export async function triggerScheduleRun(id: string): Promise<void> {
+  await api.post<ApiResponse>(`/schedules/${id}/run`);
+}
+
+export async function getScheduleHistory(id: string, limit?: number): Promise<ScheduleRunHistoryEntry[]> {
+  const params = limit ? `?limit=${limit}` : '';
+  const response = await api.get<ApiResponse<ScheduleRunHistoryEntry[]>>(`/schedules/${id}/history${params}`);
+  return response.data.data || [];
+}
+
+export async function validateCronExpression(expression: string): Promise<boolean> {
+  const response = await api.post<ApiResponse<{ valid: boolean }>>('/schedules/validate-cron', { expression });
+  return response.data.data?.valid || false;
+}
+
+// Settings APIs
+export async function getSettings(): Promise<AppSettings> {
+  const response = await api.get<ApiResponse<AppSettings>>('/settings');
+  return response.data.data!;
+}
+
+export async function updateSettings(settings: Partial<AppSettings>): Promise<AppSettings> {
+  const response = await api.put<ApiResponse<AppSettings>>('/settings', settings);
+  return response.data.data!;
+}
+
+export async function getTimezones(): Promise<string[]> {
+  const response = await api.get<ApiResponse<string[]>>('/settings/timezones');
+  return response.data.data || [];
 }
