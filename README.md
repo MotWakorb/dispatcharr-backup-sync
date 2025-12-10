@@ -222,6 +222,12 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
   node smoke.playwright.mjs"
 ```
 
+## Roadmap
+
+- **Job Scheduler**: Schedule recurring sync and backup jobs to run automatically
+- **Notification System**: Alert on job success or failure via Discord, Email, and Telegram
+- **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
+
 ## License
 
 MIT
