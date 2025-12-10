@@ -154,7 +154,7 @@
     </div>
   {:else}
     <div class="alert alert-info mb-2">
-      Select a saved account below. Create or edit accounts in the Connections tab.
+      Select a saved account below. Create or edit accounts in the Settings tab.
     </div>
     {#if connection.url && showSelectedSummary}
       <div class="saved-summary">

@@ -11,20 +11,22 @@
 
   let savedConnections: SavedConnection[] = [];
   let loadingList = false;
-  let saving = false;
   let error: string | null = null;
   let success: string | null = null;
-  let form: SavedConnectionInput = {
+
+  // Create modal state
+  let showCreateModal = false;
+  let createForm: SavedConnectionInput = {
     name: '',
     instanceUrl: '',
     username: '',
     password: '',
   };
-  let testState: Record<
-    string,
-    { loading: boolean; result?: { success: boolean; message: string } }
-  > = {};
-  let creatingTest = { loading: false, result: null as null | { success: boolean; message: string } };
+  let createTest = { loading: false, result: null as null | { success: boolean; message: string } };
+  let createSaving = false;
+  let createError: string | null = null;
+
+  // Edit modal state
   let editingConnection: SavedConnection | null = null;
   let editingForm: SavedConnectionInput = {
     name: '',
@@ -36,12 +38,11 @@
   let editingSaving = false;
   let editingError: string | null = null;
 
-  const formIds = {
-    name: 'conn-name',
-    instanceUrl: 'conn-instance-url',
-    username: 'conn-username',
-    password: 'conn-password',
-  };
+  // Test state for table rows
+  let testState: Record<
+    string,
+    { loading: boolean; result?: { success: boolean; message: string } }
+  > = {};
 
   onMount(loadConnections);
 
@@ -57,80 +58,96 @@
     }
   }
 
-  async function handleSave(event?: Event) {
-    event?.preventDefault();
+  // Create modal functions
+  function openCreateModal() {
+    showCreateModal = true;
+    createForm = { name: '', instanceUrl: '', username: '', password: '' };
+    createTest = { loading: false, result: null };
+    createError = null;
     error = null;
     success = null;
-    if (!creatingTest.result?.success) {
-      error = 'Please test the connection and ensure it succeeds before saving.';
-      return;
-    }
-
-    if (!form.name || !form.instanceUrl || !form.username || !form.password) {
-      error = 'Name, instance URL, username, and password are required.';
-      return;
-    }
-
-    const payload: SavedConnectionInput = {
-      name: form.name.trim(),
-      instanceUrl: form.instanceUrl.trim(),
-      username: form.username.trim(),
-      password: form.password,
-    };
-
-    saving = true;
-    try {
-      await createSavedConnection(payload);
-      success = 'Connection saved.';
-      form = { name: '', instanceUrl: '', username: '', password: '' };
-      creatingTest = { loading: false, result: null };
-      await loadConnections();
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to save connection';
-    } finally {
-      saving = false;
-    }
   }
 
-  function markDirty() {
-    creatingTest = { loading: false, result: null };
-    success = null;
+  function closeCreateModal() {
+    showCreateModal = false;
+    createForm = { name: '', instanceUrl: '', username: '', password: '' };
+    createTest = { loading: false, result: null };
+    createError = null;
+  }
+
+  function markCreateDirty() {
+    createTest = { loading: false, result: null };
+    createError = null;
   }
 
   async function handleCreateTest(event?: Event) {
     event?.preventDefault();
-    error = null;
-    success = null;
-    if (!form.instanceUrl || !form.username || !form.password) {
-      error = 'Instance URL, username, and password are required to test.';
+    createError = null;
+    if (!createForm.instanceUrl || !createForm.username || !createForm.password) {
+      createError = 'Instance URL, username, and password are required to test.';
       return;
     }
-    creatingTest = { loading: true, result: null };
+    createTest = { loading: true, result: null };
     try {
       const result = await testConnection({
-        url: form.instanceUrl.trim(),
-        username: form.username.trim(),
-        password: form.password,
+        url: createForm.instanceUrl.trim(),
+        username: createForm.username.trim(),
+        password: createForm.password,
       });
-      creatingTest = {
+      createTest = {
         loading: false,
         result: { success: result.success, message: result.message },
       };
       if (!result.success) {
-        error = result.message || 'Connection test failed.';
+        createError = result.message || 'Connection test failed.';
       }
     } catch (err: any) {
-      creatingTest = {
+      createTest = {
         loading: false,
         result: {
           success: false,
           message: err.response?.data?.error || err.message || 'Connection failed',
         },
       };
-      error = creatingTest.result.message;
+      createError = createTest.result.message;
     }
   }
 
+  async function handleCreate(event?: Event) {
+    event?.preventDefault();
+    createError = null;
+
+    if (!createTest.result?.success) {
+      createError = 'Please test the connection and ensure it succeeds before saving.';
+      return;
+    }
+
+    if (!createForm.name || !createForm.instanceUrl || !createForm.username || !createForm.password) {
+      createError = 'Name, instance URL, username, and password are required.';
+      return;
+    }
+
+    const payload: SavedConnectionInput = {
+      name: createForm.name.trim(),
+      instanceUrl: createForm.instanceUrl.trim(),
+      username: createForm.username.trim(),
+      password: createForm.password,
+    };
+
+    createSaving = true;
+    try {
+      await createSavedConnection(payload);
+      success = 'Connection saved.';
+      closeCreateModal();
+      await loadConnections();
+    } catch (err: any) {
+      createError = err.response?.data?.error || err.message || 'Failed to save connection';
+    } finally {
+      createSaving = false;
+    }
+  }
+
+  // Edit modal functions
   function startEdit(conn: SavedConnection) {
     editingConnection = conn;
     editingForm = {
@@ -155,14 +172,11 @@
   function markEditDirty() {
     editingTest = { loading: false, result: null };
     editingError = null;
-    success = null;
   }
 
   async function handleEditTest(event?: Event) {
     event?.preventDefault();
     editingError = null;
-    error = null;
-    success = null;
     if (!editingForm.instanceUrl || !editingForm.username || !editingForm.password) {
       editingError = 'Instance URL, username, and password are required to test.';
       return;
@@ -198,8 +212,6 @@
     if (!editingConnection) return;
 
     editingError = null;
-    error = null;
-    success = null;
 
     if (!editingForm.name || !editingForm.instanceUrl || !editingForm.username || !editingForm.password) {
       editingError = 'Name, instance URL, username, and password are required.';
@@ -234,6 +246,7 @@
 
     try {
       await deleteSavedConnection(id);
+      success = 'Connection deleted.';
       await loadConnections();
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to delete connection';
@@ -268,109 +281,32 @@
 </script>
 
 <div>
-  <div class="card export-card">
-    <div class="card-header">
-      <h2 class="card-title">Saved Connections</h2>
-      <p class="text-sm text-gray">Create and manage Dispatcharr accounts for quick selection.</p>
+  <div class="card">
+    <div class="card-header flex justify-between items-center">
+      <div>
+        <h2 class="card-title">Connections</h2>
+        <p class="text-sm text-gray">Manage your Dispatcharr instance connections.</p>
+      </div>
+      <button class="btn btn-primary" on:click={openCreateModal}>
+        Create Connection
+      </button>
     </div>
 
-    <form on:submit|preventDefault={handleSave}>
-      <div class="grid grid-2 gap-3">
-        <div class="form-group">
-          <label class="form-label" for={formIds.name}>Name</label>
-          <input
-            id={formIds.name}
-            class="form-input"
-            placeholder="Friendly label"
-            bind:value={form.name}
-            on:input={markDirty}
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for={formIds.instanceUrl}>Instance URL</label>
-          <input
-            id={formIds.instanceUrl}
-            class="form-input"
-            placeholder="http://localhost:9191"
-            bind:value={form.instanceUrl}
-            on:input={markDirty}
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for={formIds.username}>Username</label>
-          <input
-            id={formIds.username}
-            class="form-input"
-            placeholder="admin"
-            bind:value={form.username}
-            on:input={markDirty}
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for={formIds.password}>Password</label>
-          <input
-            id={formIds.password}
-            type="password"
-            class="form-input"
-            placeholder="Password"
-            bind:value={form.password}
-            on:input={markDirty}
-          />
-        </div>
-      </div>
-
-      <div class="actions-row">
-        <button class="btn btn-secondary" type="button" on:click={handleCreateTest} disabled={creatingTest.loading}>
-          {#if creatingTest.loading}
-            <span class="spinner"></span>
-            Testing...
-          {:else}
-            Test Connection
-          {/if}
-        </button>
-        <button class="btn btn-primary" type="submit" disabled={saving || !creatingTest.result?.success}>
-          {#if saving}
-            <span class="spinner"></span>
-            Saving...
-          {:else}
-            Save Connection
-          {/if}
-        </button>
-      </div>
-    </form>
-
-    {#if creatingTest.result}
-      <div
-        class="alert mt-2"
-        class:alert-success={creatingTest.result?.success}
-        class:alert-error={!creatingTest.result?.success}
-      >
-        {creatingTest.result.message}
-      </div>
-    {/if}
-
     {#if error}
-      <div class="alert alert-error mt-2">{error}</div>
+      <div class="alert alert-error mb-2">{error}</div>
     {/if}
 
     {#if success}
-      <div class="alert alert-success mt-2">{success}</div>
+      <div class="alert alert-success mb-2">{success}</div>
     {/if}
-  </div>
-
-  <div class="card export-card">
-    <div class="card-header">
-      <h3 class="card-title">Existing Accounts</h3>
-      <p class="text-sm text-gray">Select, test, or delete saved accounts.</p>
-    </div>
 
     {#if loadingList}
       <p>Loading saved connections...</p>
     {:else if savedConnections.length === 0}
-      <p class="text-gray">No saved connections yet.</p>
+      <div class="empty-state">
+        <p class="text-gray">No saved connections yet.</p>
+        <p class="text-sm text-gray">Click "Create Connection" to add your first Dispatcharr instance.</p>
+      </div>
     {:else}
       <div class="table-wrapper">
         <table class="table">
@@ -437,16 +373,127 @@
     {/if}
   </div>
 
+  <!-- Create Connection Modal -->
+  {#if showCreateModal}
+    <div class="overlay" role="presentation">
+      <button class="sr-only" on:click={closeCreateModal}>Close create dialog</button>
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <h3>Create Connection</h3>
+            <p class="text-sm text-gray">Add a new Dispatcharr instance connection.</p>
+          </div>
+          <button class="close-btn" type="button" on:click={closeCreateModal} aria-label="Close">
+            &times;
+          </button>
+        </div>
+
+        <form on:submit|preventDefault={handleCreate}>
+          <div class="grid grid-2 gap-3">
+            <div class="form-group">
+              <label class="form-label" for="create-name">Name</label>
+              <input
+                id="create-name"
+                class="form-input"
+                placeholder="Friendly label (e.g., Production)"
+                bind:value={createForm.name}
+                on:input={markCreateDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="create-instance-url">Instance URL</label>
+              <input
+                id="create-instance-url"
+                class="form-input"
+                placeholder="http://localhost:5000"
+                bind:value={createForm.instanceUrl}
+                on:input={markCreateDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="create-username">Username</label>
+              <input
+                id="create-username"
+                class="form-input"
+                placeholder="admin"
+                bind:value={createForm.username}
+                on:input={markCreateDirty}
+              />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="create-password">Password</label>
+              <input
+                id="create-password"
+                type="password"
+                class="form-input"
+                placeholder="Password"
+                bind:value={createForm.password}
+                on:input={markCreateDirty}
+              />
+            </div>
+          </div>
+
+          {#if createTest.result}
+            <div
+              class="alert mt-3"
+              class:alert-success={createTest.result?.success}
+              class:alert-error={!createTest.result?.success}
+            >
+              {createTest.result.message}
+            </div>
+          {/if}
+
+          {#if createError && !createTest.result}
+            <div class="alert alert-error mt-3">{createError}</div>
+          {/if}
+
+          <div class="modal-footer">
+            <button
+              class="btn btn-secondary"
+              type="button"
+              on:click={handleCreateTest}
+              disabled={createTest.loading}
+            >
+              {#if createTest.loading}
+                <span class="spinner"></span>
+                Testing...
+              {:else}
+                Test Connection
+              {/if}
+            </button>
+            <div class="flex gap-2">
+              <button class="btn btn-secondary" type="button" on:click={closeCreateModal}>Cancel</button>
+              <button class="btn btn-primary" type="submit" disabled={createSaving || !createTest.result?.success}>
+                {#if createSaving}
+                  <span class="spinner"></span>
+                  Saving...
+                {:else}
+                  Save Connection
+                {/if}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Edit Connection Modal -->
   {#if editingConnection}
     <div class="overlay" role="presentation">
       <button class="sr-only" on:click={closeEdit}>Close edit dialog</button>
-      <div class="edit-modal" role="dialog" aria-modal="true">
-        <div class="flex justify-between items-center mb-2">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
           <div>
             <h3>Edit Connection</h3>
             <p class="text-sm text-gray">Update settings for {editingConnection.name}</p>
           </div>
-          <button class="btn btn-secondary btn-sm" type="button" on:click={closeEdit}>Close</button>
+          <button class="close-btn" type="button" on:click={closeEdit} aria-label="Close">
+            &times;
+          </button>
         </div>
 
         <form on:submit|preventDefault={handleUpdate}>
@@ -467,7 +514,7 @@
               <input
                 id="edit-instance-url"
                 class="form-input"
-                placeholder="http://localhost:9191"
+                placeholder="http://localhost:5000"
                 bind:value={editingForm.instanceUrl}
                 on:input={markEditDirty}
               />
@@ -497,9 +544,23 @@
             </div>
           </div>
 
-          <div class="actions-row modal-actions">
+          {#if editingTest.result}
+            <div
+              class="alert mt-3"
+              class:alert-success={editingTest.result?.success}
+              class:alert-error={!editingTest.result?.success}
+            >
+              {editingTest.result.message}
+            </div>
+          {/if}
+
+          {#if editingError && !editingTest.result}
+            <div class="alert alert-error mt-3">{editingError}</div>
+          {/if}
+
+          <div class="modal-footer">
             <button
-              class="btn btn-secondary btn-sm"
+              class="btn btn-secondary"
               type="button"
               on:click={handleEditTest}
               disabled={editingTest.loading}
@@ -508,61 +569,28 @@
                 <span class="spinner"></span>
                 Testing...
               {:else}
-                Test changes
+                Test Connection
               {/if}
             </button>
             <div class="flex gap-2">
-              <button class="btn btn-secondary btn-sm" type="button" on:click={closeEdit}>Cancel</button>
-              <button class="btn btn-primary btn-sm" type="submit" disabled={editingSaving}>
+              <button class="btn btn-secondary" type="button" on:click={closeEdit}>Cancel</button>
+              <button class="btn btn-primary" type="submit" disabled={editingSaving}>
                 {#if editingSaving}
                   <span class="spinner"></span>
                   Saving...
                 {:else}
-                  Save changes
+                  Save Changes
                 {/if}
               </button>
             </div>
           </div>
         </form>
-
-        {#if editingTest.result}
-          <div
-            class="alert mt-2"
-            class:alert-success={editingTest.result?.success}
-            class:alert-error={!editingTest.result?.success}
-          >
-            {editingTest.result.message}
-          </div>
-        {/if}
-
-        {#if editingError}
-          <div class="alert alert-error mt-2">{editingError}</div>
-        {/if}
       </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .export-card {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .actions-row {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 1rem;
-  }
-
-  .modal-actions {
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-
   .table-wrapper {
     overflow-x: auto;
   }
@@ -584,6 +612,11 @@
     justify-content: flex-end;
   }
 
+  .empty-state {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+
   .overlay {
     position: fixed;
     inset: 0;
@@ -595,7 +628,7 @@
     z-index: 1000;
   }
 
-  .edit-modal {
+  .modal {
     width: min(720px, 100%);
     background: #fff;
     border-radius: 0.75rem;
@@ -606,7 +639,41 @@
     gap: 0.5rem;
   }
 
-  .edit-modal .spinner {
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+  }
+
+  .modal-header h3 {
+    margin: 0;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--gray-500);
+    padding: 0;
+    line-height: 1;
+  }
+
+  .close-btn:hover {
+    color: var(--gray-800);
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .modal .spinner {
     width: 1.125rem;
     height: 1.125rem;
     border-width: 2px;

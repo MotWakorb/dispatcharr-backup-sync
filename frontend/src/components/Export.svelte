@@ -48,7 +48,7 @@
   let savedConnections: SavedConnection[] = [];
   let loadingSavedConnections = false;
   let savedConnectionsError: string | null = null;
-  let overlayMessage = 'Export in progress...';
+  let overlayMessage = 'Backup in progress...';
   let showOverlay = false;
   let backgroundJobId: string | null = null;
   let showLogs = false;
@@ -75,7 +75,7 @@
     exporting = true;
     error = null;
     currentJob = null;
-    overlayMessage = 'Export in progress...';
+    overlayMessage = 'Backup in progress...';
     showOverlay = true;
     backgroundJobId = null;
     logs = [];
@@ -87,7 +87,7 @@
       startLogPolling(jobId);
       pollJobStatus(jobId);
     } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to start export';
+      error = err.response?.data?.error || err.message || 'Failed to start backup';
       exporting = false;
     }
   }
@@ -109,10 +109,10 @@
         }
         // Keep overlay visible when job completes so user can see results and click Close
         if (job.status === 'cancelled') {
-          overlayMessage = 'Export cancelled';
+          overlayMessage = 'Backup cancelled';
         }
         if (job.status === 'failed') {
-          error = job.error || job.message || 'Export failed';
+          error = job.error || job.message || 'Backup failed';
         }
         if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
           stopLogPolling();
@@ -127,7 +127,7 @@
 
   async function handleCancel() {
     if (!currentJob?.jobId) return;
-    overlayMessage = 'Cancelling export...';
+    overlayMessage = 'Cancelling backup...';
     if (pollInterval) {
       clearTimeout(pollInterval);
       pollInterval = null;
@@ -136,10 +136,10 @@
     try {
       await cancelExport(currentJob.jobId);
       currentJob = { ...currentJob, status: 'cancelled', message: 'Cancelled by user' };
-      overlayMessage = 'Export cancelled';
+      overlayMessage = 'Backup cancelled';
       await loadLogs(currentJob.jobId);
     } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to cancel export';
+      error = err.response?.data?.error || err.message || 'Failed to cancel backup';
     } finally {
       exporting = false;
     }
@@ -207,8 +207,8 @@
 <div>
   <div class="card export-card">
     <div class="card-header">
-      <h2 class="card-title">Export Configuration</h2>
-      <p class="text-sm text-gray">Export Dispatcharr configuration to a file</p>
+      <h2 class="card-title">Backup Configuration</h2>
+      <p class="text-sm text-gray">Backup Dispatcharr configuration to a file</p>
     </div>
 
     <ConnectionForm
@@ -224,7 +224,7 @@
     />
 
     <div class="mt-3">
-      <OptionsForm bind:options title="Export Options" />
+      <OptionsForm bind:options title="Backup Options" />
     </div>
 
     <div class="flex items-center gap-2 mt-3">
@@ -252,7 +252,7 @@
           on:click={handleExport}
           disabled={!isValid}
         >
-          {dryRun ? 'Preview Export' : 'Start Export'}
+          {dryRun ? 'Preview Backup' : 'Start Backup'}
         </button>
       </div>
     {/if}
@@ -298,7 +298,7 @@
         {:else}
           <div class="flex items-center gap-2">
             <span class="spinner"></span>
-            <span>Preparing export...</span>
+            <span>Preparing backup...</span>
           </div>
         {/if}
       </div>
@@ -339,7 +339,7 @@
       <div class="overlay-card" style="max-width: 400px;">
         <h3 class="mb-2">Running in Background</h3>
         <p class="text-sm text-gray mb-3">
-          Your export is running in the background. You can view progress, logs, and download the file from the <strong>Jobs</strong> page.
+          Your backup is running in the background. You can view progress, logs, and download the file from the <strong>Jobs</strong> page.
         </p>
         <div class="flex justify-end">
           <button class="btn btn-primary btn-sm" on:click={() => showBackgroundModal = false}>

@@ -42,7 +42,7 @@
 
   // Overlay state
   let showOverlay = false;
-  let overlayMessage = 'Import in progress...';
+  let overlayMessage = 'Restore in progress...';
 
   const sectionDefinitions: { key: string; label: string; optionKey: keyof ImportOptions }[] = [
     { key: 'channelGroups', label: 'Channel Groups', optionKey: 'syncChannelGroups' },
@@ -118,7 +118,7 @@
         importOptions[def.optionKey] = true;
       });
       if (detected.length === 0) {
-        parseError = 'No importable sections detected in the file.';
+        parseError = 'No restorable sections detected in the file.';
       } else {
         // Show the import modal after successful inspection
         showImportModal = true;
@@ -180,19 +180,19 @@
 
   async function handleImport() {
     if (!selectedFile) {
-      error = 'Please select a file to import';
+      error = 'Please select a file to restore';
       return;
     }
 
     if (availableSections.length > 0) {
       const anySelected = availableSections.some((def) => importOptions[def.optionKey]);
       if (!anySelected) {
-        error = 'Select at least one section to import or deselect the file.';
+        error = 'Select at least one section to restore or deselect the file.';
         return;
       }
     }
 
-    // Plugin uploads are now handled inline in the import modal, so proceed directly
+    // Plugin uploads are now handled inline in the restore modal, so proceed directly
     await executeImport();
   }
 
@@ -204,7 +204,7 @@
     logs = [];
     showLogs = false;
     showImportModal = false; // Close config modal so progress overlay shows
-    overlayMessage = 'Import in progress...';
+    overlayMessage = 'Restore in progress...';
     showOverlay = true;
     stopLogPolling();
 
@@ -221,7 +221,7 @@
       startLogPolling(jobId);
       pollJobStatus(jobId);
     } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to start import';
+      error = err.response?.data?.error || err.message || 'Failed to start restore';
       importing = false;
       importUploadProgress = 0;
       showOverlay = false;
@@ -335,10 +335,10 @@
         }
         // Keep overlay visible when job completes so user can see results and click Close
         if (job.status === 'cancelled') {
-          overlayMessage = 'Import cancelled';
+          overlayMessage = 'Restore cancelled';
         }
         if (job.status === 'failed') {
-          error = job.error || job.message || 'Import failed';
+          error = job.error || job.message || 'Restore failed';
         }
         if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
           stopLogPolling();
@@ -347,7 +347,7 @@
         importing = false;
       }
     } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to get job status';
+      error = err.response?.data?.error || err.message || 'Failed to get restore status';
       importing = false;
     }
   }
@@ -378,8 +378,8 @@
 <div>
   <div class="card export-card">
     <div class="card-header">
-      <h2 class="card-title">Import Configuration</h2>
-      <p class="text-sm text-gray">Import configuration from a backup file</p>
+      <h2 class="card-title">Restore Configuration</h2>
+      <p class="text-sm text-gray">Restore configuration from a backup file</p>
     </div>
 
     <ConnectionForm
@@ -437,13 +437,13 @@
     </div>
   </div>
 
-  <!-- Import Configuration Modal -->
+  <!-- Restore Configuration Modal -->
   {#if showImportModal}
     <div class="modal-overlay" role="presentation">
       <div class="modal import-modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <div>
-            <h3>Import Configuration</h3>
+            <h3>Restore Configuration</h3>
             <p class="text-sm text-gray">{selectedFile?.name}</p>
           </div>
           <button class="close-btn" type="button" on:click={closeImportModal} aria-label="Close">
@@ -455,7 +455,7 @@
           {#if importOptionsEnabled}
             <div class="options-form">
               <div class="flex items-center justify-between mb-2">
-                <h4>Import Options</h4>
+                <h4>Restore Options</h4>
                 <button class="btn btn-secondary btn-sm" type="button" on:click={toggleImportSections}>
                   {allImportOptionsSelected ? 'Deselect All' : 'Select All'}
                 </button>
@@ -550,7 +550,7 @@
           {/if}
 
           <div class="alert alert-warning mt-3">
-            <strong>Warning:</strong> Importing will overwrite existing configuration in the destination instance.
+            <strong>Warning:</strong> Restoring will overwrite existing configuration in the destination instance.
             Make sure you have a backup before proceeding.
           </div>
 
@@ -572,9 +572,9 @@
           >
             {#if importing}
               <span class="spinner"></span>
-              Importing...
+              Restoring...
             {:else}
-              Start Import
+              Start Restore
             {/if}
           </button>
         </div>
@@ -614,7 +614,7 @@
         {:else}
           <div class="flex items-center gap-2">
             <span class="spinner"></span>
-            <span>Preparing import...</span>
+            <span>Preparing restore...</span>
           </div>
         {/if}
       </div>

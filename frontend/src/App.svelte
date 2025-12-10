@@ -13,7 +13,7 @@
 <main>
   <div class="container">
     <header class="mb-3">
-      <h1>Dispatcharr Manager</h1>
+      <h1>DBAS: Dispatcharr Backup and Sync</h1>
       <p class="text-gray">Backup, sync, and restore your Dispatcharr configuration</p>
     </header>
 
@@ -30,21 +30,21 @@
         class:active={activeTab === 'export'}
         on:click={() => activeTab = 'export'}
       >
-        Export
+        Backup
       </button>
       <button
         class="tab"
         class:active={activeTab === 'import'}
         on:click={() => activeTab = 'import'}
       >
-        Import
+        Restore
       </button>
       <button
         class="tab"
         class:active={activeTab === 'connections'}
         on:click={() => activeTab = 'connections'}
       >
-        Connections
+        Settings
       </button>
       <button
         class="tab"

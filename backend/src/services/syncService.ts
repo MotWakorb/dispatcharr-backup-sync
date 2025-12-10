@@ -925,6 +925,7 @@ export class SyncService {
     let streamsMatched = 0;
     let streamsUnmatched = 0;
     let groupsAssigned = 0;
+    let customStreamsCreated = 0;
     let debugLogged = 0;
     const debugLimit = 5;
 
@@ -1065,6 +1066,71 @@ export class SyncService {
           }
         }
 
+        // If no matches found and channel has streams with URLs, try creating custom streams
+        // (Similar to import logic for hand-made channels with direct URLs)
+        if (matchedStreams.size === 0 && Array.isArray(channel.streams)) {
+          const creatableStreams = channel.streams
+            .map((s: any) => {
+              // Get full stream metadata from source
+              if (typeof s === 'number') {
+                return sourceStreamById[s];
+              } else if (s && typeof s === 'object') {
+                return s.id != null ? { ...sourceStreamById[s.id], ...s } : s;
+              }
+              return null;
+            })
+            .filter((s: any) => s && s.url); // Only streams with URLs can be created
+
+          for (const stream of creatableStreams) {
+            try {
+              const streamPayload: any = {
+                name: stream.name || channel.name,
+                url: stream.url,
+              };
+
+              // Add optional fields if present
+              if (stream.tvg_id) streamPayload.tvg_id = stream.tvg_id;
+              if (stream.stream_hash || stream.hash) {
+                streamPayload.stream_hash = stream.stream_hash || stream.hash;
+              }
+              if (stream.tvc_guide_stationid) {
+                streamPayload.tvc_guide_stationid = stream.tvc_guide_stationid;
+              }
+
+              // Map stream profile if present
+              const mappedProfileId = stream.stream_profile_id ? profileMap[stream.stream_profile_id] : undefined;
+              if (mappedProfileId) {
+                streamPayload.stream_profile_id = mappedProfileId;
+              }
+
+              // Map channel group if present
+              if (stream.channel_group != null) {
+                const groupName = sourceGroupIdToName[stream.channel_group];
+                if (groupName) {
+                  const destGroupId = destGroupNameToId[groupName.toLowerCase()];
+                  if (destGroupId) {
+                    streamPayload.channel_group = destGroupId;
+                  }
+                }
+              }
+
+              // Create the custom stream
+              const created = await dest.post('/api/channels/streams/', streamPayload);
+              if (created?.id) {
+                matchedStreams.add(created.id);
+                customStreamsCreated++;
+                if (jobId && customStreamsCreated <= 5) {
+                  jobManager.addLog(jobId, `Created custom stream "${streamPayload.name}" for channel "${channel.name}"`);
+                }
+              }
+            } catch (err: any) {
+              if (jobId) {
+                jobManager.addLog(jobId, `Failed to create custom stream for "${channel.name}": ${err.message}`);
+              }
+            }
+          }
+        }
+
         if (matchedStreams.size > 0) {
           channelData.streams = Array.from(matchedStreams);
           streamsMatched++;
@@ -1088,7 +1154,7 @@ export class SyncService {
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Channels: ${streamsMatched} with streams matched, ${streamsUnmatched} without stream matches, ${groupsAssigned} with groups assigned`);
+      jobManager.addLog(jobId, `Channels: ${streamsMatched} with streams matched, ${streamsUnmatched} without stream matches, ${groupsAssigned} with groups assigned, ${customStreamsCreated} custom streams created`);
     }
 
     return { synced, skipped, errors };
@@ -1686,16 +1752,44 @@ export class SyncService {
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     try {
       const config = await source.get('/api/channels/dvr/comskip-config/');
+
+      // Check if config is empty, null, or doesn't exist on source
+      // The API returns {"path":"","exists":false} when no config is set
+      if (!config || config.exists === false) {
+        if (jobId) {
+          jobManager.addLog(jobId, 'Comskip config: No configuration found on source, skipping');
+        }
+        return { synced: 0, skipped: 1, errors: 0 };
+      }
+
       if (dryRun) {
         return { synced: 1, skipped: 0, errors: 0 };
       }
-      const payload = typeof config === 'string' ? { config } : config;
+
+      // The comskip config endpoint might expect different payload formats
+      // Try to determine the correct format based on what we received
+      let payload: any;
+      if (typeof config === 'string') {
+        payload = { config };
+      } else if (config.config !== undefined) {
+        // Already in the right format
+        payload = config;
+      } else {
+        // Pass through as-is
+        payload = config;
+      }
+
       await dest.post('/api/channels/dvr/comskip-config/', payload);
+      if (jobId) {
+        jobManager.addLog(jobId, 'Comskip config: Synced successfully');
+      }
       return { synced: 1, skipped: 0, errors: 0 };
     } catch (error: any) {
       const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
+      const statusCode = error?.response?.status || 'N/A';
+      console.error(`[syncComskipConfig] Failed with status ${statusCode}: ${errMsg}`);
       if (jobId) {
-        jobManager.addLog(jobId, `Comskip config: Failed - ${errMsg}`);
+        jobManager.addLog(jobId, `Comskip config: Failed (HTTP ${statusCode}) - ${errMsg}`);
       }
       return { synced: 0, skipped: 0, errors: 1 };
     }

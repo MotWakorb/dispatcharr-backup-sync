@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
 import type { JobStatus, JobLogEntry } from '../types/index.js';
@@ -102,7 +101,13 @@ class JobManager {
   }
 
   createJob(jobType?: JobStatus['jobType']): string {
-    const jobId = uuidv4();
+    const now = new Date();
+    const jobId = now.getFullYear().toString() +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      String(now.getDate()).padStart(2, '0') +
+      String(now.getHours()).padStart(2, '0') +
+      String(now.getMinutes()).padStart(2, '0') +
+      String(now.getSeconds()).padStart(2, '0');
     const job: JobStatus = {
       jobId,
       status: 'pending',

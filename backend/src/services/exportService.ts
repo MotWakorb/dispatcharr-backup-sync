@@ -65,7 +65,6 @@ export class ExportService {
     if (options.syncDVRRules) count++;
     if (options.syncComskipConfig) count++;
     if (options.syncUsers) count++;
-    if (options.syncLogos) count++;
     return count;
   }
 
@@ -89,7 +88,6 @@ export class ExportService {
       let currentProgress = 10;
       const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
       const progressPerStep = 85 / totalSteps; // 85% for export steps, 10% for auth, 5% for finalize
-      const wantLogos = request.options.syncLogos !== false;
 
       const exportData: any = {
         exported_at: new Date().toISOString(),
@@ -298,21 +296,6 @@ export class ExportService {
         }
       }
 
-      // Export Logos
-      let logosResult: {
-        zipPath: string;
-        fileName: string;
-        count: number;
-        logos?: { id?: string | number; name?: string; data: string }[];
-      } | null = null;
-
-      if (wantLogos && !request.dryRun) {
-        jobManager.setProgress(jobId, Math.round(currentProgress), 'Downloading logos...');
-        logosResult = await this.downloadLogos(client, jobId, 0, undefined, true);
-        currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Downloaded ${logosResult.count || 0} logos`);
-      }
-
       // Export Plugins
       if (request.options.syncPlugins) {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting plugins...');
@@ -365,7 +348,7 @@ export class ExportService {
       jobManager.setProgress(jobId, 95, 'Writing configuration file...');
       this.throwIfCancelled(jobId);
 
-      const workDir = path.join(this.tempDir, `export-${jobId}`);
+      const workDir = path.join(this.tempDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
       const jsonPath = path.join(workDir, 'config.json');
@@ -373,21 +356,8 @@ export class ExportService {
         ...exportData,
         data: { ...exportData.data },
       };
-      // Do not embed logo binaries in config files; they are shipped separately
-      delete (configData.data as any).logos;
 
       await writeFile(jsonPath, this.formatExportContent(configData), 'utf-8');
-
-      if (logosResult?.logos && Array.isArray(logosResult.logos)) {
-        const logosDir = path.join(workDir, 'logos');
-        await mkdir(logosDir, { recursive: true });
-        logosResult.logos.forEach((logo, idx) => {
-          const buffer = Buffer.from(logo.data, 'base64');
-          const name = (logo.name || logo.id || `logo-${idx}`).toString();
-          const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_');
-          fs.writeFileSync(path.join(logosDir, `${safe}.png`), buffer);
-        });
-      }
 
       jobManager.setProgress(jobId, 98, 'Compressing...');
       const finalFilePath = await this.compressDirectory(workDir);
@@ -395,12 +365,9 @@ export class ExportService {
       jobManager.completeJob(jobId, {
         filePath: finalFilePath,
         fileName: path.basename(finalFilePath),
-        summary: this.generateSummary(exportData, logosResult?.count),
+        summary: this.generateSummary(exportData),
       });
 
-      if (logosResult?.zipPath) {
-        await this.cleanup(logosResult.zipPath);
-      }
       await this.cleanupDirectory(workDir);
 
       return finalFilePath;
@@ -410,75 +377,6 @@ export class ExportService {
       } else {
         jobManager.failJob(jobId, error.message);
       }
-      throw error;
-    }
-  }
-
-  private async downloadLogos(
-    client: DispatcharrClient,
-    jobId: string,
-    expectedCount: number,
-    onProgress?: (downloaded: number) => void,
-    collectForConfig: boolean = false
-  ): Promise<{ zipPath: string; fileName: string; count: number; logos?: { id?: string | number; name?: string; data: string }[] }> {
-    try {
-      const logoList = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
-      let downloaded = 0;
-      const logosForConfig: { id?: string | number; name?: string; data: string }[] = [];
-
-      const fileName = `dispatcharr-logos-${Date.now()}.zip`;
-      const zipPath = path.join(this.tempDir, fileName);
-
-      await mkdir(this.tempDir, { recursive: true });
-      const output = fs.createWriteStream(zipPath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
-
-      const zipPromise = new Promise<void>((resolve, reject) => {
-        output.on('close', () => resolve());
-        archive.on('error', reject);
-      });
-
-      archive.pipe(output);
-
-      for (let i = 0; i < logoList.length; i++) {
-        this.throwIfCancelled(jobId);
-        const logo = logoList[i];
-        if (logo.url) {
-          try {
-            const response = await client.get(logo.url, { responseType: 'arraybuffer' });
-            const buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
-            const safeName = `${logo.id || `logo-${i}`}.png`;
-            archive.append(buffer, { name: safeName });
-
-            if (collectForConfig) {
-              logosForConfig.push({
-                id: logo.id,
-                name: logo.name,
-                data: buffer.toString('base64'),
-              });
-            }
-          } catch (error) {
-            console.error(`Failed to download logo ${logo.id}:`, error);
-          }
-        }
-
-        downloaded++;
-        if (onProgress && (i % 10 === 0 || downloaded === expectedCount)) {
-          onProgress(downloaded);
-        }
-      }
-
-      await archive.finalize();
-      await zipPromise;
-
-      return {
-        zipPath,
-        fileName,
-        count: downloaded,
-        logos: collectForConfig ? logosForConfig : undefined,
-      };
-    } catch (error) {
-      console.error('Error downloading logos:', error);
       throw error;
     }
   }
@@ -499,7 +397,7 @@ export class ExportService {
     });
   }
 
-  private generateSummary(exportData: any, logosCount?: number): any {
+  private generateSummary(exportData: any): any {
     const summary: any = {
       exported_at: exportData.exported_at,
       source_url: exportData.source_url,
@@ -536,11 +434,6 @@ export class ExportService {
     if (exportData.data.users) {
       summary.counts.users = exportData.data.users.length;
     }
-    if (logosCount !== undefined) {
-      summary.counts.logos = logosCount;
-    } else if (exportData.data.logos) {
-      summary.counts.logos = exportData.data.logos.length || 0;
-    }
 
     return summary;
   }
@@ -560,7 +453,6 @@ export class ExportService {
       { key: 'dvrRules', label: 'DVR Rules' },
       { key: 'comskipConfig', label: 'Comskip Config' },
       { key: 'users', label: 'Users' },
-      { key: 'logos', label: 'Logos' },
     ];
 
     // Insert marker keys so the JSON stays valid but shows section boundaries
