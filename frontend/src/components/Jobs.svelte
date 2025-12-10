@@ -19,6 +19,11 @@
   let logsLoading = false;
   let logsError: string | null = null;
 
+  // Toast notification state
+  let toast: { message: string; type: 'success' | 'error' } | null = null;
+  let toastTimeout: number | null = null;
+  let previousJobStatuses: Map<string, string> = new Map();
+
   onMount(() => {
     loadJobs(true);
     loadHistory();
@@ -31,12 +36,49 @@
     }
   });
 
+  function showToast(message: string, type: 'success' | 'error') {
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toast = { message, type };
+    toastTimeout = window.setTimeout(() => {
+      toast = null;
+    }, 5000);
+  }
+
+  function dismissToast() {
+    if (toastTimeout) clearTimeout(toastTimeout);
+    toast = null;
+  }
+
+  function checkForCompletions(newJobs: JobStatus[]) {
+    for (const job of newJobs) {
+      const prevStatus = previousJobStatuses.get(job.jobId);
+      if (prevStatus && prevStatus !== job.status) {
+        if (job.status === 'completed') {
+          showToast(`${job.jobType} job completed successfully`, 'success');
+          loadHistory();
+        } else if (job.status === 'failed') {
+          showToast(`${job.jobType} job failed: ${job.error || 'Unknown error'}`, 'error');
+          loadHistory();
+        }
+      }
+    }
+    // Update tracked statuses
+    previousJobStatuses = new Map(newJobs.map(j => [j.jobId, j.status]));
+  }
+
   async function loadJobs(manual: boolean = false) {
     const shouldShowLoading = manual || !initialized;
     if (shouldShowLoading) loading = true;
     error = null;
     try {
-      jobs = await listJobs();
+      const newJobs = await listJobs();
+      if (initialized) {
+        checkForCompletions(newJobs);
+      } else {
+        // Initial load - just track statuses
+        previousJobStatuses = new Map(newJobs.map(j => [j.jobId, j.status]));
+      }
+      jobs = newJobs;
     } catch (err: any) {
       error = err.response?.data?.error || err.message || 'Failed to load jobs';
     } finally {
@@ -133,21 +175,8 @@
 
 <div class="jobs-stack">
   <div class="card">
-    <div class="card-header jobs-header">
+    <div class="card-header">
       <h2 class="card-title">Jobs</h2>
-      <div class="jobs-actions">
-        <button class="btn btn-secondary btn-sm" on:click={() => loadJobs(true)} disabled={loading}>
-          {#if loading}
-            <span class="spinner"></span>
-            Refreshing...
-          {:else}
-            Refresh
-          {/if}
-        </button>
-        <button class="btn btn-secondary btn-sm" on:click={() => { loadJobs(true); loadHistory(); }}>
-          Force Reload
-        </button>
-      </div>
     </div>
 
     {#if error}
@@ -169,12 +198,11 @@
               <th>Message</th>
               <th>Progress</th>
               <th>Started</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {#each jobs.slice().reverse() as job (job.jobId)}
-              <tr>
+              <tr class="job-row" on:click={() => viewLogs(job)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && viewLogs(job)}>
                 <td class="mono">{job.jobId}</td>
                 <td>{job.jobType || 'unknown'}</td>
                 <td>
@@ -198,23 +226,6 @@
                   {/if}
                 </td>
                 <td class="text-sm">{new Date(job.startedAt).toLocaleString()}</td>
-                <td class="actions">
-                {#if job.jobType === 'export' && job.status === 'completed' && job.result?.fileName}
-                  <button class="btn btn-success btn-sm" on:click={() => download(job)}>
-                    Download
-                  </button>
-                  {#if job.result?.logosFileName}
-                    <button class="btn btn-secondary btn-sm" on:click={() => downloadLogos(job)}>
-                      Logos
-                    </button>
-                  {/if}
-                {/if}
-                {#if job.jobType === 'export' && job.status === 'running'}
-                  <button class="btn btn-secondary btn-sm" on:click={() => cancel(job)}>
-                    Cancel
-                  </button>
-                  {/if}
-                </td>
               </tr>
             {/each}
           </tbody>
@@ -344,6 +355,14 @@
   </div>
 {/if}
 
+<!-- Toast notification -->
+{#if toast}
+  <div class="toast toast-{toast.type}">
+    <span>{toast.message}</span>
+    <button class="toast-close" on:click={dismissToast} aria-label="Dismiss">&times;</button>
+  </div>
+{/if}
+
 
 <style>
   .table-wrapper {
@@ -389,7 +408,6 @@
     gap: 1rem;
   }
 
-  .jobs-actions,
   .history-actions {
     display: flex;
     gap: 0.5rem;
@@ -540,6 +558,73 @@
 
   .text-right {
     text-align: right;
+  }
+
+  .job-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .job-row:hover {
+    background-color: var(--gray-100);
+  }
+
+  .job-row:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+  }
+
+  /* Notification toast */
+  .toast {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    padding: 1rem 1.25rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 1100;
+    animation: slideIn 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .toast-success {
+    background: #d1fae5;
+    color: var(--success);
+    border: 1px solid var(--success);
+  }
+
+  .toast-error {
+    background: #fee2e2;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    color: inherit;
+    opacity: 0.7;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .toast-close:hover {
+    opacity: 1;
+  }
+
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
 </style>

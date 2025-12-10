@@ -37,7 +37,7 @@
     syncDVRRules: true,
     syncComskipConfig: true,
     syncUsers: true,
-    syncLogos: true,
+    // syncLogos disabled for v1.0 release
   };
 
   let dryRun = false;

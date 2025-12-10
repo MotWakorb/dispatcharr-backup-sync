@@ -1394,10 +1394,6 @@ export class ImportService {
           if (source[key] !== undefined) payload[key] = source[key];
         }
 
-        // Log VOD settings for debugging
-        jobManager.addLog(jobId, `M3U ${source.name}: VOD settings in backup - enable_vod=${source.enable_vod}, auto_enable_new_groups_vod=${source.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${source.auto_enable_new_groups_series}, auto_enable_new_groups_live=${source.auto_enable_new_groups_live}`);
-        jobManager.addLog(jobId, `M3U ${source.name}: VOD settings in payload - enable_vod=${payload.enable_vod}, auto_enable_new_groups_vod=${payload.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${payload.auto_enable_new_groups_series}, auto_enable_new_groups_live=${payload.auto_enable_new_groups_live}`);
-
         // Basic validation: need either server_url or file_path
         if (!payload.server_url && !payload.file_path) {
           this.logJobError(jobId, 'M3U import failed', source?.name || source?.id || 'unknown', {
@@ -1458,7 +1454,7 @@ export class ImportService {
             if (cg?.channel_sort_reverse !== undefined) entry.channel_sort_reverse = cg.channel_sort_reverse;
             if (cg?.channel_profile_ids !== undefined) entry.channel_profile_ids = cg.channel_profile_ids;
 
-            // Store the group name for logging
+            // Store the group name for matching
             entry._groupName = nameCandidate;
 
             channelGroupsPayload.push(entry);
@@ -1470,11 +1466,9 @@ export class ImportService {
         let apiResponse: any;
         if (match?.id) {
           apiResponse = await client.put(`/api/m3u/accounts/${accountId}/`, payload);
-          jobManager.addLog(jobId, `M3U ${source.name}: API response after PUT - enable_vod=${apiResponse.enable_vod}, auto_enable_new_groups_vod=${apiResponse.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${apiResponse.auto_enable_new_groups_series}, auto_enable_new_groups_live=${apiResponse.auto_enable_new_groups_live}`);
         } else {
           apiResponse = await client.post('/api/m3u/accounts/', payload);
           accountId = apiResponse?.id ?? apiResponse;
-          jobManager.addLog(jobId, `M3U ${source.name}: API response after POST - enable_vod=${apiResponse.enable_vod}, auto_enable_new_groups_vod=${apiResponse.auto_enable_new_groups_vod}, auto_enable_new_groups_series=${apiResponse.auto_enable_new_groups_series}, auto_enable_new_groups_live=${apiResponse.auto_enable_new_groups_live}`);
         }
 
         // Trigger refresh for this account to pull streams/channels
@@ -1515,7 +1509,6 @@ export class ImportService {
                 }
               }
             }
-            jobManager.addLog(jobId, `M3U ${source?.name}: Built group ID->name mapping with ${Object.keys(groupIdToName).length} entries`);
 
             // Create maps for matching by name (IDs differ between backup and target)
             const backupGroupsByName: Record<string, any> = {};
@@ -1531,30 +1524,16 @@ export class ImportService {
             );
 
             // Build complete payload with all discovered groups, setting enabled/disabled based on backup
-            jobManager.addLog(jobId, `M3U ${source?.name}: Discovered ${discoveredGroups.length} groups after refresh, have ${channelGroupsPayload.length} groups from backup`);
-
             const completePayload = discoveredGroups.map((dg: any) => {
-              // Look up the actual group name from the channel groups endpoint
               const groupId = dg.channel_group;
               const actualGroupName = groupIdToName[groupId] || dg.name || dg.channel_group_name || '';
               const discoveredName = actualGroupName.toLowerCase();
               const backupGroup = backupGroupsByName[discoveredName];
               const shouldBeEnabled = enabledGroupNames.has(discoveredName);
 
-              // Get group name for logging
-              const backupName = backupGroup?._groupName || '';
-              const groupName = backupName || actualGroupName || `Group ${groupId}`;
-
-              if (backupGroup) {
-                jobManager.addLog(jobId, `M3U ${source?.name}: Group "${groupName}" (ID: ${dg.channel_group}, backup name: "${backupName}", discovered name: "${discoveredName}") - backup says enabled=${backupGroup.enabled}, applying enabled=${shouldBeEnabled}`);
-              } else {
-                jobManager.addLog(jobId, `M3U ${source?.name}: Group "${groupName}" (ID: ${dg.channel_group}) - NOT in backup, defaulting to enabled=false`);
-              }
-
               return {
                 ...dg,
                 enabled: shouldBeEnabled,
-                // Preserve other settings from backup if available
                 ...(backupGroup?.auto_channel_sync !== undefined && { auto_channel_sync: backupGroup.auto_channel_sync }),
                 ...(backupGroup?.auto_sync_channel_start !== undefined && { auto_sync_channel_start: backupGroup.auto_sync_channel_start }),
                 ...(backupGroup?.custom_properties !== undefined && { custom_properties: backupGroup.custom_properties }),
@@ -1567,55 +1546,50 @@ export class ImportService {
             });
 
             const enabledCount = completePayload.filter(cg => cg.enabled).length;
-            const disabledCount = completePayload.filter(cg => !cg.enabled).length;
-            jobManager.addLog(jobId, `M3U ${source?.name}: Applying ${enabledCount} enabled and ${disabledCount} disabled channel groups via PATCH`);
+            const autoSyncCount = completePayload.filter(cg => cg.auto_channel_sync).length;
+            jobManager.addLog(jobId, `M3U ${source?.name}: Applying ${enabledCount} enabled, ${completePayload.length - enabledCount} disabled channel groups`);
 
-            // Update with complete payload including enabled/disabled flags
-            const patchResponse = await client.patch(`/api/m3u/accounts/${accountId}/`, {
+            // Apply channel group settings via PATCH
+            await client.patch(`/api/m3u/accounts/${accountId}/`, {
               channel_groups: completePayload,
             });
 
-            // Log the response to verify it was accepted
-            const responseGroups = patchResponse?.channel_groups || [];
-            const responseEnabledCount = responseGroups.filter((cg: any) => cg.enabled).length;
-            jobManager.addLog(jobId, `M3U ${source?.name}: API response shows ${responseEnabledCount} enabled groups out of ${responseGroups.length} total`);
+            // Also try dedicated group-settings endpoint for auto_channel_sync settings
+            // Note: Dispatcharr API may not persist these values (known limitation)
+            if (autoSyncCount > 0) {
+              const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
+              await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
+                channel_groups: autoSyncGroups,
+              }).catch(() => null);
+            }
 
             // Wait for Dispatcharr to process the group changes before triggering refresh
-            jobManager.addLog(jobId, `M3U ${source?.name}: Waiting 3 seconds for group changes to be processed...`);
             await new Promise((resolve) => globalThis.setTimeout(resolve, 3000));
 
             // Trigger refresh to pull streams for enabled groups
-            jobManager.addLog(jobId, `M3U ${source?.name}: Triggering stream refresh for enabled groups`);
-            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch((err) => {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Account refresh API error: ${err?.response?.data || err?.message || err}`);
-              return null;
-            });
+            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(() => null);
 
             // If account-specific refresh fails, try global refresh
             if (!refreshResult) {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Trying global M3U refresh...`);
-              refreshResult = await client.post(`/api/m3u/refresh/`).catch((err) => {
-                jobManager.addLog(jobId, `M3U ${source?.name}: Global refresh error: ${err?.response?.data || err?.message || err}`);
-                return null;
-              });
+              refreshResult = await client.post(`/api/m3u/refresh/`).catch(() => null);
             }
 
-            if (refreshResult) {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Refresh initiated successfully, waiting for streams to load...`);
-            } else {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Refresh returned no result, waiting for streams anyway...`);
-            }
-
-            // Wait for streams to actually be loaded (polls stream count)
+            // Wait for streams to be loaded
             const streamCount = await waitForStreamsLoaded(accountId, source?.name || 'Unknown', !refreshResult);
-            jobManager.addLog(jobId, `M3U ${source?.name}: Found ${streamCount} streams after waiting`);
+            jobManager.addLog(jobId, `M3U ${source?.name}: ${streamCount} streams loaded`);
 
-            // Re-apply the PATCH after refresh, in case the refresh reset enabled/disabled states
+            // Re-apply settings after refresh in case it reset them
             if (streamCount > 0) {
-              jobManager.addLog(jobId, `M3U ${source?.name}: Re-applying group settings after refresh`);
               await client.patch(`/api/m3u/accounts/${accountId}/`, {
                 channel_groups: completePayload,
               });
+
+              if (autoSyncCount > 0) {
+                const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
+                await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
+                  channel_groups: autoSyncGroups,
+                }).catch(() => null);
+              }
             }
           }
         }

@@ -57,7 +57,8 @@
     { key: 'dvrRules', label: 'DVR Rules', optionKey: 'syncDVRRules' },
     { key: 'comskipConfig', label: 'Comskip Config', optionKey: 'syncComskipConfig' },
     { key: 'users', label: 'Users', optionKey: 'syncUsers' },
-    { key: 'logos', label: 'Logos', optionKey: 'syncLogos' },
+    // Logos disabled for v1.0 release - code remains in backend
+    // { key: 'logos', label: 'Logos', optionKey: 'syncLogos' },
   ];
 
   onMount(loadSavedConnections);
@@ -410,7 +411,7 @@
             id="file"
             type="file"
             class="sr-only"
-            accept=".yaml,.yml,.json,.zip,.tar.gz,.tgz"
+            accept=".json,.zip"
             on:change={handleFileSelect}
             bind:this={fileInput}
           />
@@ -421,7 +422,7 @@
             </p>
           {:else}
             <p class="text-sm">Drag & drop a backup file here, or click to choose.</p>
-            <p class="text-xs text-gray">Supports YAML/JSON, .zip, .tar.gz archives.</p>
+            <p class="text-xs text-gray">Supports JSON and .zip archives.</p>
           {/if}
         </div>
         {#if !isConnectionValid}

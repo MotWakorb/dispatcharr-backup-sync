@@ -32,7 +32,7 @@
     syncDVRRules: true,
     syncComskipConfig: true,
     syncUsers: true,
-    syncLogos: false,
+    // syncLogos disabled for v1.0 release
   };
 
   let dryRun = false;
@@ -83,7 +83,6 @@
         missingPlugins = result.missingPlugins;
 
         if (missingPlugins.length > 0) {
-          // Show plugin upload modal
           showPluginUploadModal = true;
           checkingPlugins = false;
           return;
@@ -96,7 +95,6 @@
       checkingPlugins = false;
     }
 
-    // No missing plugins or plugin sync disabled, proceed with sync
     await startSyncJob();
   }
 
@@ -342,8 +340,9 @@
 
 {#if showPluginUploadModal}
   <PluginUploadModal
+    show={true}
     connection={destConnection}
-    detectedPlugins={missingPlugins}
+    plugins={missingPlugins}
     on:uploaded={handlePluginUploadComplete}
     on:skip={handlePluginUploadSkip}
     on:continue={handlePluginUploadComplete}
