@@ -30,6 +30,7 @@ class NotificationService {
     // Check if this event type should trigger notifications
     if (event.type === 'job_started' && !settings.notifyOnStart) return [];
     if (event.type === 'job_completed' && !settings.notifyOnComplete) return [];
+    if (event.type === 'job_completed_with_errors' && !settings.notifyOnCompleteWithErrors) return [];
     if (event.type === 'job_failed' && !settings.notifyOnFailure) return [];
 
     const providers = await notificationStore.getEnabledProviders();
@@ -223,6 +224,8 @@ class NotificationService {
         return '🚀';
       case 'job_completed':
         return '✅';
+      case 'job_completed_with_errors':
+        return '⚠️';
       case 'job_failed':
         return '❌';
     }
@@ -234,6 +237,8 @@ class NotificationService {
         return 'Started';
       case 'job_completed':
         return 'Completed';
+      case 'job_completed_with_errors':
+        return 'Completed with Errors';
       case 'job_failed':
         return 'Failed';
     }
@@ -245,6 +250,8 @@ class NotificationService {
         return 0x3498db; // Blue
       case 'job_completed':
         return 0x57f287; // Green
+      case 'job_completed_with_errors':
+        return 0xf39c12; // Orange
       case 'job_failed':
         return 0xed4245; // Red
     }
@@ -272,9 +279,16 @@ class NotificationService {
 
     const subject = `${testPrefix}[DBAS] ${jobType} ${status} - ${event.scheduleName}`;
 
+    const getColorForType = (type: NotificationEvent['type']) => {
+      if (type === 'job_failed') return '#ed4245';
+      if (type === 'job_completed') return '#57f287';
+      if (type === 'job_completed_with_errors') return '#f39c12';
+      return '#3498db';
+    };
+
     let html = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: ${event.type === 'job_failed' ? '#ed4245' : event.type === 'job_completed' ? '#57f287' : '#3498db'};">
+        <h2 style="color: ${getColorForType(event.type)};">
           ${emoji} ${jobType} ${status}
         </h2>
         <table style="width: 100%; border-collapse: collapse;">
@@ -296,6 +310,14 @@ class NotificationService {
           <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Duration</strong></td>
             <td style="padding: 8px; border-bottom: 1px solid #eee;">${this.formatDuration(event.duration)}</td>
+          </tr>`;
+    }
+
+    if (event.errorCount && event.errorCount > 0) {
+      html += `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Error Count</strong></td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee; color: #f39c12;">${event.errorCount}</td>
           </tr>`;
     }
 
@@ -358,8 +380,12 @@ class NotificationService {
       message += `⏱ Duration: ${this.formatDuration(event.duration)}\n`;
     }
 
+    if (event.errorCount && event.errorCount > 0) {
+      message += `⚠️ Errors: ${event.errorCount}\n`;
+    }
+
     if (event.error) {
-      message += `\n⚠️ *Error:* ${event.error}`;
+      message += `\n❌ *Error:* ${event.error}`;
     }
 
     return message;
@@ -408,6 +434,7 @@ class NotificationService {
     const colorMap = {
       job_started: '#3498db',
       job_completed: '#57f287',
+      job_completed_with_errors: '#f39c12',
       job_failed: '#ed4245',
     };
 

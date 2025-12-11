@@ -170,6 +170,7 @@ export interface NotificationProviderInput {
 export interface NotificationGlobalSettings {
   notifyOnStart: boolean;
   notifyOnComplete: boolean;
+  notifyOnCompleteWithErrors: boolean;
   notifyOnFailure: boolean;
   includeLogsInEmail: boolean;
 }

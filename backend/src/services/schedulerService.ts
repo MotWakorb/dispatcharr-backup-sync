@@ -199,14 +199,30 @@ class SchedulerService {
       await scheduleStore.recordRunComplete(scheduleId, jobId, 'completed');
       console.log(`Schedule "${schedule.name}" completed successfully`);
 
-      // Send completion notification (async, don't wait)
+      // Check if job completed with errors
+      const jobResult = jobManager.getJob(jobId);
+      let totalErrors = 0;
+
+      if (jobResult?.result) {
+        // Count errors from all sync/export sections
+        for (const key in jobResult.result) {
+          const section = jobResult.result[key];
+          if (section && typeof section === 'object' && 'errors' in section) {
+            totalErrors += section.errors || 0;
+          }
+        }
+      }
+
+      // Send appropriate completion notification (async, don't wait)
+      const notificationType = totalErrors > 0 ? 'job_completed_with_errors' : 'job_completed';
       notificationService.notify({
-        type: 'job_completed',
+        type: notificationType,
         scheduleName: schedule.name,
         jobType: schedule.jobType,
         jobId,
         timestamp: new Date().toISOString(),
         duration: Date.now() - startTime,
+        ...(totalErrors > 0 && { errorCount: totalErrors }),
       }).catch((err) => console.error('Failed to send completion notification:', err));
 
     } catch (error: any) {

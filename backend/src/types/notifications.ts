@@ -45,6 +45,7 @@ export interface NotificationProviderInput {
 export interface NotificationGlobalSettings {
   notifyOnStart: boolean;
   notifyOnComplete: boolean;
+  notifyOnCompleteWithErrors: boolean;
   notifyOnFailure: boolean;
   includeLogsInEmail: boolean;
 }
@@ -55,11 +56,12 @@ export interface NotificationData {
 }
 
 export interface NotificationEvent {
-  type: 'job_started' | 'job_completed' | 'job_failed';
+  type: 'job_started' | 'job_completed' | 'job_completed_with_errors' | 'job_failed';
   scheduleName: string;
   jobType: 'backup' | 'sync';
   jobId: string;
   timestamp: string;
   error?: string;
+  errorCount?: number;
   duration?: number;
 }

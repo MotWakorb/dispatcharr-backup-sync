@@ -14,6 +14,7 @@ const DATA_FILE = path.join(DATA_DIR, 'notificationProviders.json');
 const DEFAULT_GLOBAL_SETTINGS: NotificationGlobalSettings = {
   notifyOnStart: false,
   notifyOnComplete: true,
+  notifyOnCompleteWithErrors: true,
   notifyOnFailure: true,
   includeLogsInEmail: false,
 };

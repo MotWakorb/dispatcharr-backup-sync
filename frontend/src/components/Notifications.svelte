@@ -392,6 +392,12 @@
         </div>
         <div class="checkbox-row">
           <label class="checkbox-label">
+            <input type="checkbox" bind:checked={globalSettings.notifyOnCompleteWithErrors} />
+            <span>Notify when job completes with errors</span>
+          </label>
+        </div>
+        <div class="checkbox-row">
+          <label class="checkbox-label">
             <input type="checkbox" bind:checked={globalSettings.notifyOnFailure} />
             <span>Notify when job fails</span>
           </label>
