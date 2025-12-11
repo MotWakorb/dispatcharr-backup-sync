@@ -11,7 +11,7 @@ const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
 
 export class ExportService {
-  private tempDir = path.join(process.cwd(), 'temp');
+  private backupDir = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'backups') : path.join(process.cwd(), 'data', 'backups');
 
   private throwIfCancelled(jobId: string) {
     const job = jobManager.getJob(jobId);
@@ -74,8 +74,8 @@ export class ExportService {
       this.throwIfCancelled(jobId);
       jobManager.addLog(jobId, 'Preparing export job');
 
-      // Ensure temp directory exists
-      await mkdir(this.tempDir, { recursive: true });
+      // Ensure backup directory exists
+      await mkdir(this.backupDir, { recursive: true });
 
       const client = new DispatcharrClient(request.source);
 
@@ -348,7 +348,7 @@ export class ExportService {
       jobManager.setProgress(jobId, 95, 'Writing configuration file...');
       this.throwIfCancelled(jobId);
 
-      const workDir = path.join(this.tempDir, `backup-${jobId}`);
+      const workDir = path.join(this.backupDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
       const jsonPath = path.join(workDir, 'config.json');
@@ -383,7 +383,7 @@ export class ExportService {
 
   private async compressDirectory(workDir: string): Promise<string> {
     const baseName = path.basename(workDir);
-    const zipPath = path.join(this.tempDir, `${baseName}.zip`);
+    const zipPath = path.join(this.backupDir, `${baseName}.zip`);
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
 
@@ -487,6 +487,42 @@ export class ExportService {
     } catch (error) {
       console.error('Failed to cleanup directory:', error);
     }
+  }
+
+  /**
+   * Cleanup old backups based on retention policy
+   * @param jobIdsToDelete Array of job IDs whose backup files should be deleted
+   */
+  async cleanupOldBackups(jobIdsToDelete: string[]): Promise<{ deleted: string[]; errors: string[] }> {
+    const deleted: string[] = [];
+    const errors: string[] = [];
+
+    for (const jobId of jobIdsToDelete) {
+      const backupPath = path.join(this.backupDir, `backup-${jobId}.zip`);
+      try {
+        await fs.promises.access(backupPath);
+        await unlink(backupPath);
+        deleted.push(jobId);
+        console.log(`Retention cleanup: Deleted backup file backup-${jobId}.zip`);
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          // File doesn't exist, skip silently
+          console.log(`Retention cleanup: Backup file backup-${jobId}.zip not found, skipping`);
+        } else {
+          errors.push(`Failed to delete backup-${jobId}.zip: ${error.message}`);
+          console.error(`Retention cleanup: Failed to delete backup-${jobId}.zip:`, error);
+        }
+      }
+    }
+
+    return { deleted, errors };
+  }
+
+  /**
+   * Get the backup directory path (for external use)
+   */
+  getBackupDir(): string {
+    return this.backupDir;
   }
 }
 

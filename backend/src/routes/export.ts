@@ -30,7 +30,7 @@ exportRouter.post('/', async (req, res) => {
     }
 
     // Create a new job
-    const jobId = jobManager.createJob('export');
+    const jobId = jobManager.createJob('backup');
 
     // Start export in background
     exportService

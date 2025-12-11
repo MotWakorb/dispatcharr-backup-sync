@@ -99,21 +99,21 @@
   }
 
   function download(job: JobStatus) {
-    if (job.jobType === 'export' && job.status === 'completed' && job.result?.fileName) {
+    if (job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName) {
       const url = getExportDownloadUrl(job.jobId);
       window.location.href = url;
     }
   }
 
   function downloadLogos(job: JobStatus) {
-    if (job.jobType === 'export' && job.status === 'completed' && job.result?.logosFileName) {
+    if (job.jobType === 'backup' && job.status === 'completed' && job.result?.logosFileName) {
       const url = getExportLogosDownloadUrl(job.jobId);
       window.location.href = url;
     }
   }
 
   async function cancel(job: JobStatus) {
-    if (job.jobType !== 'export' || job.status !== 'running') return;
+    if (job.jobType !== 'backup' || job.status !== 'running') return;
     try {
       await cancelExport(job.jobId);
       await loadJobs();
@@ -186,7 +186,7 @@
     {#if loading && jobs.length === 0}
       <p>Loading jobs...</p>
     {:else if jobs.length === 0}
-      <p class="text-gray">No jobs yet.</p>
+      <p class="text-gray">No jobs are currently running.</p>
     {:else}
       <div class="table-wrapper">
         <table class="table">
@@ -291,7 +291,7 @@
                   <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
                     Logs
                   </button>
-                  {#if job.jobType === 'export' && job.status === 'completed' && job.result?.fileName}
+                  {#if job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
                     </button>
@@ -367,6 +367,7 @@
 <style>
   .table-wrapper {
     overflow-x: auto;
+    width: 100%;
   }
   .table {
     width: 100%;
@@ -376,16 +377,17 @@
     padding: 0.75rem;
     text-align: left;
     border-bottom: 1px solid var(--gray-200);
+    white-space: nowrap;
+  }
+  th:nth-last-child(2),
+  td:nth-last-child(2) {
+    width: 100%;
   }
   .actions {
-    display: inline-flex;
+    display: flex;
     gap: 0.5rem;
     white-space: nowrap;
-    vertical-align: middle;
-  }
-  th:last-child,
-  td:last-child {
-    white-space: nowrap;
+    justify-content: flex-end;
   }
   .badge {
     display: inline-block;

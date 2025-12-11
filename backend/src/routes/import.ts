@@ -221,9 +221,19 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
         console.log(`Successfully uploaded plugin: ${file.originalname}`);
       } catch (error: any) {
         const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || 'Unknown error';
+        const statusCode = error.response?.status;
+        const errorLower = errorMsg.toLowerCase();
+
+        console.log(`Plugin upload error for ${file.originalname}: status=${statusCode}, message="${errorMsg}"`);
 
         // Check if this is an "already exists" error - treat as skipped, not error
-        if (errorMsg.toLowerCase().includes('already exists')) {
+        // Must be a 409 Conflict OR specifically mention plugin/version already exists
+        const isAlreadyExists = statusCode === 409 ||
+          errorLower.includes('plugin already exists') ||
+          errorLower.includes('already installed') ||
+          (errorLower.includes('already exists') && errorLower.includes('plugin'));
+
+        if (isAlreadyExists) {
           results.skipped.push(file.originalname);
           console.log(`Plugin already installed: ${file.originalname}`);
         } else {

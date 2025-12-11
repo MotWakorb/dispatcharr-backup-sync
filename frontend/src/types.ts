@@ -40,7 +40,7 @@ export type ImportOptions = SyncOptions;
 export interface JobStatus {
   jobId: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  jobType?: 'export' | 'import' | 'sync' | string;
+  jobType?: 'backup' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
   result?: any;
@@ -83,11 +83,14 @@ export interface ScheduleInput {
   name: string;
   jobType: ScheduledJobType;
   sourceConnectionId: string;
+  sourceConnectionName?: string; // Cached name in case connection is deleted
   destinationConnectionId?: string;
+  destinationConnectionName?: string; // Cached name in case connection is deleted
   options: SyncOptions;
   schedulePreset: SchedulePreset;
   cronExpression?: string;
   enabled: boolean;
+  retentionCount?: number; // Number of backups to keep (only for backup jobs)
 }
 
 export interface Schedule extends ScheduleInput {

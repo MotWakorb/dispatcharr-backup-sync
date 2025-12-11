@@ -194,6 +194,27 @@ class ScheduleStore {
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
       .slice(0, limit);
   }
+
+  /**
+   * Get all completed backup job IDs for a schedule (for retention cleanup)
+   */
+  async getCompletedBackupJobIds(scheduleId: string): Promise<string[]> {
+    const history = await loadHistoryFile();
+    return history.entries
+      .filter((e) => e.scheduleId === scheduleId && e.status === 'completed')
+      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+      .map((e) => e.jobId);
+  }
+
+  /**
+   * Delete history entries for specific job IDs
+   */
+  async deleteHistoryEntries(jobIds: string[]): Promise<void> {
+    const history = await loadHistoryFile();
+    const jobIdSet = new Set(jobIds);
+    history.entries = history.entries.filter((e) => !jobIdSet.has(e.jobId));
+    await saveHistoryFile(history);
+  }
 }
 
 export const scheduleStore = new ScheduleStore();

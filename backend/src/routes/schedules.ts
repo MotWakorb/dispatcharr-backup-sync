@@ -107,6 +107,18 @@ schedulesRouter.post('/', async (req, res) => {
       } as ApiResponse);
     }
 
+    // Cache connection names in case connections are deleted later
+    const sourceConn = await savedConnectionStore.getById(input.sourceConnectionId);
+    if (sourceConn) {
+      input.sourceConnectionName = sourceConn.name;
+    }
+    if (input.destinationConnectionId) {
+      const destConn = await savedConnectionStore.getById(input.destinationConnectionId);
+      if (destConn) {
+        input.destinationConnectionName = destConn.name;
+      }
+    }
+
     const schedule = await scheduleStore.create(input);
 
     // Schedule if enabled
@@ -149,7 +161,7 @@ schedulesRouter.put('/:id', async (req, res) => {
       } as ApiResponse);
     }
 
-    // Validate connections if changed
+    // Validate connections if changed and cache names
     if (input.sourceConnectionId) {
       const sourceConn = await savedConnectionStore.getById(input.sourceConnectionId);
       if (!sourceConn) {
@@ -158,6 +170,7 @@ schedulesRouter.put('/:id', async (req, res) => {
           error: 'Source connection not found',
         } as ApiResponse);
       }
+      input.sourceConnectionName = sourceConn.name;
     }
     if (input.destinationConnectionId) {
       const destConn = await savedConnectionStore.getById(input.destinationConnectionId);
@@ -167,6 +180,7 @@ schedulesRouter.put('/:id', async (req, res) => {
           error: 'Destination connection not found',
         } as ApiResponse);
       }
+      input.destinationConnectionName = destConn.name;
     }
 
     const schedule = await scheduleStore.update(id, input);

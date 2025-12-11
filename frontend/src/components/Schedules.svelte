@@ -334,6 +334,7 @@
       schedulePreset: 'daily',
       cronExpression: undefined,
       enabled: true,
+      retentionCount: undefined,
     };
   }
 
@@ -411,6 +412,7 @@
       schedulePreset: schedule.schedulePreset,
       cronExpression: schedule.cronExpression,
       enabled: schedule.enabled,
+      retentionCount: schedule.retentionCount,
     };
     formError = null;
     timeInputError = null;
@@ -543,19 +545,33 @@
     historyEntries = [];
   }
 
-  function getConnectionName(id: string | undefined): string {
-    if (!id) return 'Unknown';
-    return savedConnections.find((c) => c.id === id)?.name || 'Unknown';
+  function getConnectionName(id: string | undefined, cachedName?: string): string {
+    if (!id) return cachedName || 'Unknown';
+    const conn = savedConnections.find((c) => c.id === id);
+    // Use live connection name if found, otherwise fall back to cached name
+    return conn?.name || cachedName || 'Unknown';
   }
 
   function formatNextRun(nextRunAt?: string): string {
     if (!nextRunAt) return 'Not scheduled';
-    return new Date(nextRunAt).toLocaleString();
+    return new Date(nextRunAt).toLocaleString(undefined, {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   }
 
   function formatLastRun(schedule: Schedule): string {
     if (!schedule.lastRunAt) return 'Never';
-    return new Date(schedule.lastRunAt).toLocaleString();
+    return new Date(schedule.lastRunAt).toLocaleString(undefined, {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   }
 
   function getStatusBadgeClass(status?: string): string {
@@ -636,10 +652,9 @@
               <th>Type</th>
               <th>Schedule</th>
               <th>Source</th>
-              <th>Last Run</th>
-              <th>Next Run</th>
+              <th class="next-run-col">Next Run</th>
               <th>Status</th>
-              <th class="text-right">Actions</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -660,21 +675,13 @@
                 </td>
                 <td class="text-sm">{formatScheduleDescription(schedule)}</td>
                 <td class="text-sm">
-                  {getConnectionName(schedule.sourceConnectionId)}
+                  {getConnectionName(schedule.sourceConnectionId, schedule.sourceConnectionName)}
                   {#if schedule.jobType === 'sync'}
                     <span class="text-gray"> → </span>
-                    {getConnectionName(schedule.destinationConnectionId)}
+                    {getConnectionName(schedule.destinationConnectionId, schedule.destinationConnectionName)}
                   {/if}
                 </td>
-                <td class="text-sm">
-                  {formatLastRun(schedule)}
-                  {#if schedule.lastRunStatus}
-                    <span class="badge badge-sm {getStatusBadgeClass(schedule.lastRunStatus)}">
-                      {schedule.lastRunStatus}
-                    </span>
-                  {/if}
-                </td>
-                <td class="text-sm">{schedule.enabled ? formatNextRun(schedule.nextRunAt) : '-'}</td>
+                <td class="text-sm next-run-col">{schedule.enabled ? formatNextRun(schedule.nextRunAt) : '-'}</td>
                 <td>
                   {#if schedule.isRunning}
                     <span class="badge badge-running">
@@ -683,7 +690,7 @@
                     </span>
                   {:else}
                     <span class="badge {schedule.enabled ? 'badge-success' : 'badge-gray'}">
-                      {schedule.enabled ? 'Active' : 'Inactive'}
+                      {schedule.enabled ? 'Enabled' : 'Disabled'}
                     </span>
                   {/if}
                 </td>
@@ -815,6 +822,27 @@
               {/if}
             </div>
           </div>
+
+          {#if formData.jobType === 'backup'}
+            <div class="form-section">
+              <h4>Backup Retention</h4>
+              <div class="form-group">
+                <label class="form-label" for="retention-count">Keep last backups</label>
+                <div class="retention-input-group">
+                  <input
+                    id="retention-count"
+                    type="number"
+                    class="form-input retention-input"
+                    placeholder="e.g. 5"
+                    min="1"
+                    max="100"
+                    bind:value={formData.retentionCount}
+                  />
+                  <span class="retention-hint">Leave empty to keep all backups</span>
+                </div>
+              </div>
+            </div>
+          {/if}
 
           <div class="form-section">
             <h4>Schedule</h4>
@@ -1161,6 +1189,7 @@
 <style>
   .table-wrapper {
     overflow-x: auto;
+    width: 100%;
   }
 
   .table {
@@ -1172,13 +1201,24 @@
     padding: 0.75rem;
     text-align: left;
     border-bottom: 1px solid var(--gray-200);
+    white-space: nowrap;
+  }
+
+  th:nth-last-child(2),
+  td:nth-last-child(2) {
+    width: 100%;
+  }
+
+  .next-run-col {
+    min-width: 10rem;
   }
 
   .actions {
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    white-space: nowrap;
   }
 
   .empty-state {
@@ -1517,5 +1557,20 @@
     width: 1.125rem;
     height: 1.125rem;
     border-width: 2px;
+  }
+
+  .retention-input-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .retention-input {
+    width: 6rem;
+  }
+
+  .retention-hint {
+    font-size: 0.8125rem;
+    color: var(--gray-500);
   }
 </style>

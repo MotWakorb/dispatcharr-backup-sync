@@ -154,6 +154,11 @@ class SchedulerService {
           options: schedule.options,
           dryRun: false,
         }, jobId);
+
+        // Apply retention policy after successful backup
+        if (schedule.retentionCount && schedule.retentionCount > 0) {
+          await this.applyRetentionPolicy(scheduleId, schedule.retentionCount);
+        }
       } else if (schedule.jobType === 'sync') {
         // Get destination connection
         const destConn = await savedConnectionStore.getById(schedule.destinationConnectionId!);
@@ -246,6 +251,42 @@ class SchedulerService {
   // Validate cron expression
   validateCron(expression: string): boolean {
     return cron.validate(expression);
+  }
+
+  // Apply retention policy - delete old backups beyond the retention count
+  private async applyRetentionPolicy(scheduleId: string, retentionCount: number): Promise<void> {
+    try {
+      console.log(`Applying retention policy for schedule ${scheduleId}: keeping ${retentionCount} backups`);
+
+      // Get all completed backup job IDs for this schedule, sorted newest first
+      const completedJobIds = await scheduleStore.getCompletedBackupJobIds(scheduleId);
+
+      if (completedJobIds.length <= retentionCount) {
+        console.log(`Retention: ${completedJobIds.length} backups exist, retention count is ${retentionCount}, no cleanup needed`);
+        return;
+      }
+
+      // Get the job IDs to delete (oldest ones beyond retention count)
+      const jobIdsToDelete = completedJobIds.slice(retentionCount);
+
+      console.log(`Retention: Deleting ${jobIdsToDelete.length} old backups`);
+
+      // Delete the backup files
+      const result = await exportService.cleanupOldBackups(jobIdsToDelete);
+
+      // Delete the history entries for deleted backups
+      if (result.deleted.length > 0) {
+        await scheduleStore.deleteHistoryEntries(result.deleted);
+        console.log(`Retention: Cleaned up ${result.deleted.length} old backups and history entries`);
+      }
+
+      if (result.errors.length > 0) {
+        console.error(`Retention: Encountered ${result.errors.length} errors during cleanup:`, result.errors);
+      }
+    } catch (error) {
+      console.error(`Retention: Failed to apply retention policy for schedule ${scheduleId}:`, error);
+      // Don't throw - retention failure shouldn't fail the backup job
+    }
   }
 
   // Get human-readable description of preset
