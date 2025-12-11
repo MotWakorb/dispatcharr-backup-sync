@@ -6,6 +6,7 @@ import { settingsStore } from './settingsStore.js';
 import { exportService } from './exportService.js';
 import { syncService } from './syncService.js';
 import { jobManager } from './jobManager.js';
+import { notificationService } from './notificationService.js';
 import type { Schedule, SchedulePreset } from '../types/index.js';
 
 // Preset cron expressions
@@ -120,9 +121,11 @@ class SchedulerService {
     }
 
     let jobId: string | undefined;
+    let schedule: Schedule | undefined;
+    let startTime: number = Date.now();
 
     try {
-      const schedule = await scheduleStore.getById(scheduleId);
+      schedule = await scheduleStore.getById(scheduleId);
       if (!schedule) {
         console.error(`Schedule ${scheduleId} not found`);
         return undefined;
@@ -141,8 +144,18 @@ class SchedulerService {
 
       // Record run start
       await scheduleStore.recordRunStart(scheduleId, jobId);
+      startTime = Date.now();
 
       console.log(`Executing schedule "${schedule.name}" (${scheduleId}), job ${jobId}`);
+
+      // Send start notification (async, don't wait)
+      notificationService.notify({
+        type: 'job_started',
+        scheduleName: schedule.name,
+        jobType: schedule.jobType,
+        jobId,
+        timestamp: new Date().toISOString(),
+      }).catch((err) => console.error('Failed to send start notification:', err));
 
       if (schedule.jobType === 'backup') {
         await exportService.export({
@@ -186,19 +199,42 @@ class SchedulerService {
       await scheduleStore.recordRunComplete(scheduleId, jobId, 'completed');
       console.log(`Schedule "${schedule.name}" completed successfully`);
 
+      // Send completion notification (async, don't wait)
+      notificationService.notify({
+        type: 'job_completed',
+        scheduleName: schedule.name,
+        jobType: schedule.jobType,
+        jobId,
+        timestamp: new Date().toISOString(),
+        duration: Date.now() - startTime,
+      }).catch((err) => console.error('Failed to send completion notification:', err));
+
     } catch (error: any) {
       console.error(`Schedule ${scheduleId} failed:`, error);
       // Record failure
       if (jobId) {
         await scheduleStore.recordRunComplete(scheduleId, jobId, 'failed', error.message);
+
+        // Send failure notification (async, don't wait)
+        if (schedule) {
+          notificationService.notify({
+            type: 'job_failed',
+            scheduleName: schedule.name,
+            jobType: schedule.jobType,
+            jobId,
+            timestamp: new Date().toISOString(),
+            error: error.message,
+            duration: Date.now() - startTime,
+          }).catch((err) => console.error('Failed to send failure notification:', err));
+        }
       }
     } finally {
       this.runningJobs.delete(scheduleId);
 
-      // Update next run time
-      const schedule = await scheduleStore.getById(scheduleId);
-      if (schedule && schedule.enabled) {
-        const cronExpr = this.getCronExpression(schedule);
+      // Update next run time (re-fetch in case it was modified)
+      const currentSchedule = await scheduleStore.getById(scheduleId);
+      if (currentSchedule && currentSchedule.enabled) {
+        const cronExpr = this.getCronExpression(currentSchedule);
         await this.updateNextRunTime(scheduleId, cronExpr);
       }
     }

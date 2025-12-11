@@ -50,6 +50,7 @@ services:
       - DATA_DIR=/data
     volumes:
       - backend-data:/data
+      - ./backups:/data/backup  # Optional: mount local directory for backups
 
   frontend:
     image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
@@ -241,7 +242,7 @@ If no comskip configuration exists on the source instance, it will be reported a
 
 - Job state and history are persisted to the `/data` volume
 - Saved connections are stored in `/data/connections.json`
-- Exported files are temporarily stored in `/data/exports/` until downloaded
+- Backup files are stored in `/data/backup/` - mount a local directory (e.g., `./backups:/data/backup`) for easy access to backup files from your host machine
 
 ## Running Tests
 

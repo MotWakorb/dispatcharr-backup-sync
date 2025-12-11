@@ -121,3 +121,55 @@ export interface AppSettings {
   timezone: string;
   timeFormat: TimeFormat;
 }
+
+// Notification types
+export type NotificationProviderType = 'smtp' | 'telegram' | 'discord' | 'slack';
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  username?: string;
+  password?: string;
+  fromAddress: string;
+  toAddress: string;
+}
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+}
+
+export interface DiscordConfig {
+  webhookUrl: string;
+}
+
+export interface SlackConfig {
+  webhookUrl: string;
+}
+
+export type ProviderConfig = SmtpConfig | TelegramConfig | DiscordConfig | SlackConfig;
+
+export interface NotificationProvider {
+  id: string;
+  name: string;
+  type: NotificationProviderType;
+  enabled: boolean;
+  config: ProviderConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationProviderInput {
+  name: string;
+  type: NotificationProviderType;
+  enabled: boolean;
+  config: ProviderConfig;
+}
+
+export interface NotificationGlobalSettings {
+  notifyOnStart: boolean;
+  notifyOnComplete: boolean;
+  notifyOnFailure: boolean;
+  includeLogsInEmail: boolean;
+}

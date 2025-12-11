@@ -14,6 +14,11 @@ services:
       - TZ=${TZ:-UTC}
     volumes:
       - backend-data:/data
+      - type: bind
+        source: ${BACKUP_DIR:-./backups}
+        target: /data/backup
+        bind:
+          create_host_path: true
 
   frontend:
     build:
