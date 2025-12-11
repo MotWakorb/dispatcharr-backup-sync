@@ -7,6 +7,8 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 - **Backup**: Create a complete backup of your Dispatcharr configuration to a downloadable ZIP file
 - **Restore**: Restore a previously created backup to a Dispatcharr instance
 - **Sync**: Two-way synchronization between a source and destination instance with granular control over what gets synced
+- **Job Scheduler**: Automate recurring backups and syncs with flexible scheduling options
+- **Backup Retention**: Automatically clean up old backups, keeping only the last X backups per schedule
 - **Connection Management**: Save and manage multiple Dispatcharr instance connections
 - **Job Tracking**: Real-time progress monitoring with detailed logs for all operations
 - **Dry Run Mode**: Preview what changes would be made before committing them
@@ -124,6 +126,32 @@ The **Jobs** tab shows:
 - Detailed logs for each job (click a job row to view)
 - Download links for completed backups
 
+### Scheduling Automated Jobs
+
+The **Schedules** tab allows you to automate backups and syncs:
+
+1. Click **Create Schedule**
+2. Give your schedule a descriptive name
+3. Select the job type (**Backup** or **Sync**)
+4. Choose the source connection (and destination for sync jobs)
+5. Configure the schedule frequency:
+   - **Hourly**: Run every hour at a specific minute
+   - **Daily**: Run once a day at a specific time
+   - **Weekly**: Run on a specific day and time each week
+   - **Monthly**: Run on a specific day of the month
+   - **Custom**: Select multiple days of the week
+6. Choose which configuration areas to include
+7. For backup jobs, optionally set a **retention count** to automatically delete old backups (e.g., keep only the last 5 backups)
+8. Enable the schedule and save
+
+Scheduled jobs will run automatically at the configured times. You can:
+- **Run Now**: Manually trigger a scheduled job
+- **View History**: See past runs and their status
+- **Enable/Disable**: Temporarily pause a schedule without deleting it
+- **Edit**: Modify schedule settings at any time
+
+**Note**: The scheduler uses your configured timezone from the Settings tab.
+
 ## Building from Source
 
 ### Build Docker Images Locally
@@ -180,6 +208,11 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `/api/jobs/:jobId/logs` | GET | Get job logs |
 | `/api/jobs/:jobId/cancel` | POST | Cancel running job |
 | `/api/saved-connections` | CRUD | Manage saved connections |
+| `/api/schedules` | CRUD | Manage scheduled jobs |
+| `/api/schedules/:id/run` | POST | Trigger manual run |
+| `/api/schedules/:id/toggle` | POST | Enable/disable schedule |
+| `/api/schedules/:id/history` | GET | Get schedule run history |
+| `/api/settings` | GET/PUT | Manage app settings (timezone, time format) |
 
 ## Known Issues
 
@@ -224,7 +257,7 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
 
 ## Roadmap
 
-- **Job Scheduler**: Schedule recurring sync and backup jobs to run automatically
+- ~~**Job Scheduler**: Schedule recurring sync and backup jobs to run automatically~~ (Added in v1.1.0)
 - **Notification System**: Alert on job success or failure via Discord, Email, and Telegram
 - **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
 
