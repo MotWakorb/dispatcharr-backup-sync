@@ -28,8 +28,9 @@ Thumbs.db
 *.swo
 *~
 
-# Exports
+# Exports and Backups
 exports/
+backups/
 logoexport/
 *.zip
 *.tar.gz

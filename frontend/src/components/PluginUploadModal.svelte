@@ -193,7 +193,7 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -204,7 +204,7 @@
   .modal {
     width: min(600px, 95%);
     max-height: 85vh;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     display: flex;
@@ -217,7 +217,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .modal-header h3 {
@@ -236,7 +236,7 @@
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .modal-body {
@@ -250,11 +250,11 @@
     justify-content: flex-end;
     gap: 0.75rem;
     padding: 1rem 1.25rem;
-    border-top: 1px solid var(--gray-200);
+    border-top: 1px solid var(--border-color);
   }
 
   .plugin-list {
-    background: var(--gray-50);
+    background: var(--bg-hover);
     padding: 1rem;
     border-radius: 0.5rem;
   }
@@ -278,7 +278,7 @@
   }
 
   .plugin-key {
-    color: var(--gray-500);
+    color: var(--text-muted);
     font-size: 0.85rem;
   }
 
@@ -288,8 +288,8 @@
   }
 
   .dropzone {
-    border: 2px dashed var(--gray-300);
-    background: var(--gray-50);
+    border: 2px dashed var(--border-color-strong);
+    background: var(--bg-hover);
     padding: 1.5rem;
     border-radius: 0.5rem;
     text-align: center;
@@ -299,7 +299,7 @@
 
   .dropzone.dragging {
     border-color: var(--primary);
-    background: #e0ecff;
+    background: var(--bg-dropzone-drag);
   }
 
   .dropzone:hover {

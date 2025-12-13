@@ -111,8 +111,8 @@
 <style>
   .job-progress {
     padding: 1rem;
-    background: white;
-    border: 1px solid var(--gray-200);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
   }
 
@@ -127,45 +127,45 @@
   }
 
   .status-pending {
-    background: var(--gray-200);
-    color: var(--gray-700);
+    background: var(--border-color);
+    color: var(--text-secondary);
   }
 
   .status-running {
-    background: #dbeafe;
+    background: var(--bg-info);
     color: var(--primary);
   }
 
   .status-completed {
-    background: #d1fae5;
+    background: var(--bg-success);
     color: var(--success);
   }
 
   .status-failed {
-    background: #fee2e2;
+    background: var(--bg-error);
     color: var(--danger);
   }
 
   .status-cancelled {
-    background: #e5e7eb;
-    color: #6b7280;
+    background: var(--border-color);
+    color: var(--text-secondary);
   }
 
   .result-summary {
     margin-top: 1rem;
     padding-top: 1rem;
-    border-top: 1px solid var(--gray-200);
+    border-top: 1px solid var(--border-color);
   }
 
   .stat {
     padding: 0.75rem;
-    background: var(--gray-50);
+    background: var(--bg-hover);
     border-radius: 0.375rem;
   }
 
   .stat-label {
     font-size: 0.75rem;
-    color: var(--gray-600);
+    color: var(--text-secondary);
     text-transform: capitalize;
     margin-bottom: 0.25rem;
   }
@@ -173,7 +173,7 @@
   .stat-value {
     font-size: 1rem;
     font-weight: 600;
-    color: var(--gray-900);
+    color: var(--text-primary);
   }
 
   .text-success {

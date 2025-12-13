@@ -12,6 +12,8 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 - **Connection Management**: Save and manage multiple Dispatcharr instance connections
 - **Job Tracking**: Real-time progress monitoring with detailed logs for all operations
 - **Dry Run Mode**: Preview what changes would be made before committing them
+- **Dark Mode**: Light, dark, or auto theme (follows system preference)
+- **Update Notifications**: Automatic check for new releases with dismissible banner
 
 ### What Can Be Synced
 
@@ -50,6 +52,7 @@ services:
       - DATA_DIR=/data
     volumes:
       - backend-data:/data
+      - ./backups:/data/backup  # Optional: mount local directory for backups
 
   frontend:
     image: ghcr.io/motwakorb/dispatcharr-backup-sync-frontend:latest
@@ -212,7 +215,10 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `/api/schedules/:id/run` | POST | Trigger manual run |
 | `/api/schedules/:id/toggle` | POST | Enable/disable schedule |
 | `/api/schedules/:id/history` | GET | Get schedule run history |
-| `/api/settings` | GET/PUT | Manage app settings (timezone, time format) |
+| `/api/settings` | GET/PUT | Manage app settings (timezone, time format, theme) |
+| `/api/notifications/providers` | CRUD | Manage notification providers |
+| `/api/notifications/settings` | GET/PUT | Manage notification settings |
+| `/api/info` | GET | Get version info and update availability |
 
 ## Known Issues
 
@@ -241,7 +247,7 @@ If no comskip configuration exists on the source instance, it will be reported a
 
 - Job state and history are persisted to the `/data` volume
 - Saved connections are stored in `/data/connections.json`
-- Exported files are temporarily stored in `/data/exports/` until downloaded
+- Backup files are stored in `/data/backup/` - mount a local directory (e.g., `./backups:/data/backup`) for easy access to backup files from your host machine
 
 ## Running Tests
 
@@ -258,7 +264,9 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
 ## Roadmap
 
 - ~~**Job Scheduler**: Schedule recurring sync and backup jobs to run automatically~~ (Added in v1.1.0)
-- **Notification System**: Alert on job success or failure via Discord, Email, and Telegram
+- ~~**Notification System**: Alert on job success or failure via Discord, Email, Slack, and Telegram~~ (Added in v1.1.0)
+- ~~**Dark Mode**: Light, dark, and auto theme support~~ (Added in v1.2.0)
+- ~~**Version Display & Update Notifications**: Show current version and notify when updates are available~~ (Added in v1.2.0)
 - **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
 
 ## License

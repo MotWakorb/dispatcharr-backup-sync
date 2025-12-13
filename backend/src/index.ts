@@ -8,6 +8,8 @@ import { savedConnectionsRouter } from './routes/savedConnections.js';
 import { jobsRouter } from './routes/jobs.js';
 import { schedulesRouter } from './routes/schedules.js';
 import { settingsRouter } from './routes/settings.js';
+import { notificationsRouter } from './routes/notifications.js';
+import { infoRouter } from './routes/info.js';
 import { schedulerService } from './services/schedulerService.js';
 
 const app = express();
@@ -33,6 +35,8 @@ app.use('/api/saved-connections', savedConnectionsRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/notifications', notificationsRouter);
+app.use('/api/info', infoRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

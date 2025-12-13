@@ -15,6 +15,10 @@ import type {
   ScheduleInput,
   ScheduleRunHistoryEntry,
   AppSettings,
+  NotificationProvider,
+  NotificationProviderInput,
+  NotificationGlobalSettings,
+  VersionInfo,
 } from './types';
 
 const api = axios.create({
@@ -330,4 +334,55 @@ export async function updateSettings(settings: Partial<AppSettings>): Promise<Ap
 export async function getTimezones(): Promise<string[]> {
   const response = await api.get<ApiResponse<string[]>>('/settings/timezones');
   return response.data.data || [];
+}
+
+// Notification APIs
+export async function listNotificationProviders(): Promise<NotificationProvider[]> {
+  const response = await api.get<ApiResponse<NotificationProvider[]>>('/notifications/providers');
+  return response.data.data || [];
+}
+
+export async function getNotificationProvider(id: string): Promise<NotificationProvider> {
+  const response = await api.get<ApiResponse<NotificationProvider>>(`/notifications/providers/${id}`);
+  return response.data.data!;
+}
+
+export async function createNotificationProvider(input: NotificationProviderInput): Promise<NotificationProvider> {
+  const response = await api.post<ApiResponse<NotificationProvider>>('/notifications/providers', input);
+  return response.data.data!;
+}
+
+export async function updateNotificationProvider(id: string, input: NotificationProviderInput): Promise<NotificationProvider> {
+  const response = await api.put<ApiResponse<NotificationProvider>>(`/notifications/providers/${id}`, input);
+  return response.data.data!;
+}
+
+export async function deleteNotificationProvider(id: string): Promise<void> {
+  await api.delete<ApiResponse>(`/notifications/providers/${id}`);
+}
+
+export async function testNotificationProvider(id: string): Promise<{ success: boolean; message: string }> {
+  const response = await api.post<ApiResponse<{ success: boolean; message: string }>>(`/notifications/providers/${id}/test`);
+  return { success: response.data.success, message: response.data.message || '' };
+}
+
+export async function testNotificationProviderConfig(input: NotificationProviderInput): Promise<{ success: boolean; message: string }> {
+  const response = await api.post<ApiResponse<{ success: boolean; message: string }>>('/notifications/providers/test-config', input);
+  return { success: response.data.success, message: response.data.message || '' };
+}
+
+export async function getNotificationSettings(): Promise<NotificationGlobalSettings> {
+  const response = await api.get<ApiResponse<NotificationGlobalSettings>>('/notifications/settings');
+  return response.data.data!;
+}
+
+export async function updateNotificationSettings(settings: Partial<NotificationGlobalSettings>): Promise<NotificationGlobalSettings> {
+  const response = await api.put<ApiResponse<NotificationGlobalSettings>>('/notifications/settings', settings);
+  return response.data.data!;
+}
+
+// Version info API
+export async function getVersionInfo(): Promise<VersionInfo> {
+  const response = await api.get<ApiResponse<VersionInfo>>('/info');
+  return response.data.data!;
 }

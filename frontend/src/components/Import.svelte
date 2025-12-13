@@ -655,7 +655,7 @@
 
   .options-form {
     padding: 1rem;
-    background: var(--gray-50);
+    background: var(--bg-hover);
     border-radius: 0.5rem;
   }
 
@@ -665,8 +665,8 @@
   }
 
   .dropzone {
-    border: 2px dashed var(--gray-300);
-    background: var(--gray-50);
+    border: 2px dashed var(--border-color-strong);
+    background: var(--bg-hover);
     padding: 1.5rem;
     border-radius: 0.5rem;
     text-align: center;
@@ -676,7 +676,7 @@
 
   .dropzone.dragging {
     border-color: var(--primary);
-    background: #e0ecff;
+    background: var(--bg-dropzone-drag);
   }
 
   .dropzone.disabled {
@@ -692,7 +692,7 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -703,7 +703,7 @@
   .modal {
     width: min(700px, 95%);
     max-height: 85vh;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     display: flex;
@@ -716,7 +716,7 @@
     justify-content: space-between;
     align-items: flex-start;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .modal-header h3 {
@@ -729,13 +729,13 @@
     border: none;
     font-size: 1.5rem;
     cursor: pointer;
-    color: var(--gray-500);
+    color: var(--text-muted);
     line-height: 1;
     padding: 0.25rem;
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .modal-body {
@@ -749,13 +749,13 @@
     justify-content: flex-end;
     gap: 0.75rem;
     padding: 1rem 1.25rem;
-    border-top: 1px solid var(--gray-200);
+    border-top: 1px solid var(--border-color);
   }
 
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -765,7 +765,7 @@
 
   .overlay-card {
     width: min(700px, 100%);
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.25);
     padding: 1.25rem;
@@ -774,7 +774,7 @@
   .logs-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.4);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -785,7 +785,7 @@
   .logs-modal {
     width: min(800px, 100%);
     max-height: 80vh;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.25);
     padding: 1rem;
@@ -795,8 +795,8 @@
   }
 
   .logs-body {
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     padding: 0.75rem;
     overflow-y: auto;
@@ -809,7 +809,7 @@
     display: flex;
     gap: 0.5rem;
     padding: 0.25rem 0;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .log-line:last-child {
@@ -817,12 +817,12 @@
   }
 
   .log-time {
-    color: var(--gray-500);
+    color: var(--text-muted);
     min-width: 4.5rem;
   }
 
   .log-msg {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .log-error .log-msg {
@@ -832,15 +832,15 @@
 
   .plugins-info-box {
     padding: 1rem;
-    background: #fffbeb;
-    border: 2px solid #f59e0b;
+    background: var(--bg-warning-light);
+    border: 2px solid var(--border-warning);
     border-radius: 0.5rem;
     transition: border-color 0.2s, background-color 0.2s;
   }
 
   .plugins-info-box.plugin-dragging {
-    border-color: #d97706;
-    background: #fef3c7;
+    border-color: var(--warning-dark);
+    background: var(--bg-warning);
     border-style: dashed;
   }
 
@@ -854,7 +854,7 @@
   .plugins-header h4 {
     margin: 0;
     font-size: 0.95rem;
-    color: #92400e;
+    color: var(--text-warning);
   }
 
   .plugin-chips {
@@ -866,31 +866,31 @@
   .plugin-chip {
     display: inline-block;
     padding: 0.25rem 0.75rem;
-    background: #fef3c7;
-    border: 1px solid #fbbf24;
+    background: var(--bg-warning);
+    border: 1px solid var(--border-dropzone);
     border-radius: 1rem;
     font-size: 0.85rem;
-    color: #78350f;
+    color: var(--text-warning);
   }
 
   .text-warning {
-    color: #b45309;
+    color: var(--warning-dark);
   }
 
   .plugin-dropzone {
-    border: 2px dashed #fbbf24;
-    background: #fefce8;
+    border: 2px dashed var(--border-dropzone);
+    background: var(--bg-dropzone);
     padding: 1rem;
     border-radius: 0.5rem;
     text-align: center;
-    color: #92400e;
+    color: var(--text-warning);
     cursor: pointer;
     transition: border-color 0.2s, background 0.2s;
   }
 
   .plugin-dropzone:hover {
-    border-color: #d97706;
-    background: #fef3c7;
+    border-color: var(--warning-dark);
+    background: var(--bg-warning);
   }
 
   .error-list {
@@ -900,9 +900,9 @@
   }
 
   .alert-success {
-    background: #d1fae5;
-    border: 1px solid #10b981;
-    color: #065f46;
+    background: var(--bg-success);
+    border: 1px solid var(--success);
+    color: var(--text-success);
   }
 
   .inline-spinner {

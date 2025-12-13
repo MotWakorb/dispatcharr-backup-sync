@@ -1200,7 +1200,7 @@
   th, td {
     padding: 0.75rem;
     text-align: left;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
   }
 
@@ -1239,7 +1239,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1251,7 +1251,7 @@
     width: min(600px, 100%);
     max-height: 90vh;
     overflow-y: auto;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     padding: 1.25rem;
@@ -1286,7 +1286,7 @@
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .modal-footer {
@@ -1301,7 +1301,7 @@
   .form-section {
     margin-bottom: 1.5rem;
     padding-bottom: 1rem;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .form-section:last-of-type {
@@ -1326,10 +1326,10 @@
     align-items: center;
     justify-content: center;
     padding: 0.5rem 1rem;
-    border: 2px solid var(--gray-300);
+    border: 2px solid var(--border-color-strong);
     border-radius: 0.5rem;
-    background: white;
-    color: var(--gray-600);
+    background: var(--bg-card);
+    color: var(--text-secondary);
     font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
@@ -1343,8 +1343,8 @@
 
   .toggle-btn.selected {
     border-color: var(--primary);
-    background: #dbeafe;
-    color: var(--primary-dark);
+    background: var(--bg-selected);
+    color: var(--primary);
   }
 
   .time-picker-grid {
@@ -1381,7 +1381,7 @@
   .time-separator {
     font-size: 1.25rem;
     font-weight: 600;
-    color: var(--gray-500);
+    color: var(--text-muted);
   }
 
   .ampm-toggle {
@@ -1391,9 +1391,9 @@
 
   .ampm-btn {
     padding: 0.5rem 0.75rem;
-    border: 2px solid var(--gray-300);
-    background: white;
-    color: var(--gray-600);
+    border: 2px solid var(--border-color-strong);
+    background: var(--bg-card);
+    color: var(--text-secondary);
     font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
@@ -1402,22 +1402,22 @@
 
   .ampm-btn:first-child {
     border-radius: 0.375rem 0 0 0.375rem;
-    border-right: 1px solid var(--gray-300);
+    border-right: 1px solid var(--border-color-strong);
   }
 
   .ampm-btn:last-child {
     border-radius: 0 0.375rem 0.375rem 0;
-    border-left: 1px solid var(--gray-300);
+    border-left: 1px solid var(--border-color-strong);
   }
 
   .ampm-btn:hover {
-    background: var(--gray-50);
+    background: var(--bg-hover);
   }
 
   .ampm-btn.selected {
     border-color: var(--primary);
     background: var(--primary);
-    color: white;
+    color: #ffffff;
   }
 
   .time-error {
@@ -1439,10 +1439,10 @@
     justify-content: center;
     width: 3rem;
     height: 2.5rem;
-    border: 2px solid var(--gray-300);
+    border: 2px solid var(--border-color-strong);
     border-radius: 0.5rem;
-    background: white;
-    color: var(--gray-600);
+    background: var(--bg-card);
+    color: var(--text-secondary);
     font-size: 0.75rem;
     font-weight: 600;
     cursor: pointer;
@@ -1457,7 +1457,7 @@
   .day-btn.selected {
     border-color: var(--primary);
     background: var(--primary);
-    color: white;
+    color: #ffffff;
   }
 
   .checkbox-label {
@@ -1493,44 +1493,44 @@
 
   .badge-primary {
     background: var(--primary);
-    color: white;
+    color: #ffffff;
   }
 
   .badge-info {
-    background: #3b82f6;
-    color: white;
+    background: var(--primary);
+    color: #ffffff;
   }
 
   .badge-success {
-    background: #22c55e;
-    color: white;
+    background: var(--success);
+    color: #ffffff;
   }
 
   .badge-warning {
-    background: #f59e0b;
-    color: white;
+    background: var(--warning);
+    color: #ffffff;
   }
 
   .badge-danger {
-    background: #ef4444;
-    color: white;
+    background: var(--danger);
+    color: #ffffff;
   }
 
   .badge-gray {
-    background: var(--gray-300);
-    color: var(--gray-700);
+    background: var(--border-color-strong);
+    color: var(--text-secondary);
   }
 
   .badge-running {
-    background: #3b82f6;
-    color: white;
+    background: var(--primary);
+    color: #ffffff;
   }
 
   .spinner-sm {
     width: 0.75rem;
     height: 0.75rem;
     border: 2px solid rgba(255, 255, 255, 0.3);
-    border-top-color: white;
+    border-top-color: #ffffff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }
@@ -1542,11 +1542,11 @@
   }
 
   .text-success {
-    color: #22c55e;
+    color: var(--success);
   }
 
   .text-danger {
-    color: #ef4444;
+    color: var(--danger);
   }
 
   .text-xs {
@@ -1571,6 +1571,6 @@
 
   .retention-hint {
     font-size: 0.8125rem;
-    color: var(--gray-500);
+    color: var(--text-muted);
   }
 </style>

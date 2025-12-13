@@ -116,8 +116,71 @@ export interface ScheduleRunHistoryEntry {
 
 // App settings
 export type TimeFormat = '12h' | '24h';
+export type Theme = 'light' | 'dark' | 'auto';
 
 export interface AppSettings {
   timezone: string;
   timeFormat: TimeFormat;
+  theme: Theme;
+}
+
+// Notification types
+export type NotificationProviderType = 'smtp' | 'telegram' | 'discord' | 'slack';
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  username?: string;
+  password?: string;
+  fromAddress: string;
+  toAddress: string;
+}
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+}
+
+export interface DiscordConfig {
+  webhookUrl: string;
+}
+
+export interface SlackConfig {
+  webhookUrl: string;
+}
+
+export type ProviderConfig = SmtpConfig | TelegramConfig | DiscordConfig | SlackConfig;
+
+export interface NotificationProvider {
+  id: string;
+  name: string;
+  type: NotificationProviderType;
+  enabled: boolean;
+  config: ProviderConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotificationProviderInput {
+  name: string;
+  type: NotificationProviderType;
+  enabled: boolean;
+  config: ProviderConfig;
+}
+
+export interface NotificationGlobalSettings {
+  notifyOnStart: boolean;
+  notifyOnComplete: boolean;
+  notifyOnCompleteWithErrors: boolean;
+  notifyOnFailure: boolean;
+  includeLogsInEmail: boolean;
+}
+
+// Version info
+export interface VersionInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
 }

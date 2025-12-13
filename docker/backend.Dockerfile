@@ -28,6 +28,9 @@ RUN npm install --omit=dev
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy VERSION file for version info endpoint
+COPY VERSION ./VERSION
+
 # Expose port
 EXPOSE 6002
 
