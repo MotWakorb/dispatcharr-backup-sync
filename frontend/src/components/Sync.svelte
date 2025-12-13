@@ -367,7 +367,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -377,7 +377,7 @@
 
   .overlay-card {
     width: min(700px, 100%);
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
     padding: 1rem;
@@ -386,7 +386,7 @@
   .logs-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.4);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -397,7 +397,7 @@
   .logs-modal {
     width: min(800px, 100%);
     max-height: 80vh;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.25);
     padding: 1rem;
@@ -407,8 +407,8 @@
   }
 
   .logs-body {
-    background: var(--gray-50);
-    border: 1px solid var(--gray-200);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     padding: 0.75rem;
     overflow-y: auto;
@@ -421,7 +421,7 @@
     display: flex;
     gap: 0.5rem;
     padding: 0.25rem 0;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .log-line:last-child {
@@ -429,11 +429,11 @@
   }
 
   .log-time {
-    color: var(--gray-500);
+    color: var(--text-muted);
     min-width: 4.5rem;
   }
 
   .log-msg {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 </style>

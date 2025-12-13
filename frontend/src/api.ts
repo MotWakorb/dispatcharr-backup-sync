@@ -18,6 +18,7 @@ import type {
   NotificationProvider,
   NotificationProviderInput,
   NotificationGlobalSettings,
+  VersionInfo,
 } from './types';
 
 const api = axios.create({
@@ -377,5 +378,11 @@ export async function getNotificationSettings(): Promise<NotificationGlobalSetti
 
 export async function updateNotificationSettings(settings: Partial<NotificationGlobalSettings>): Promise<NotificationGlobalSettings> {
   const response = await api.put<ApiResponse<NotificationGlobalSettings>>('/notifications/settings', settings);
+  return response.data.data!;
+}
+
+// Version info API
+export async function getVersionInfo(): Promise<VersionInfo> {
+  const response = await api.get<ApiResponse<VersionInfo>>('/info');
   return response.data.data!;
 }

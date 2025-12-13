@@ -10,7 +10,7 @@
     updateSettings,
     getTimezones,
   } from '../api';
-  import type { SavedConnection, SavedConnectionInput, AppSettings, TimeFormat } from '../types';
+  import type { SavedConnection, SavedConnectionInput, AppSettings, TimeFormat, Theme } from '../types';
 
   let savedConnections: SavedConnection[] = [];
   let loadingList = false;
@@ -52,9 +52,18 @@
   let availableTimezones: string[] = [];
   let selectedTimezone: string = 'UTC';
   let selectedTimeFormat: TimeFormat = '12h';
+  let selectedTheme: Theme = 'auto';
   let savingSettings = false;
   let settingsSuccess: string | null = null;
   let settingsError: string | null = null;
+
+  // Apply theme to document
+  function applyTheme(theme: Theme) {
+    document.documentElement.classList.remove('light', 'dark');
+    if (theme !== 'auto') {
+      document.documentElement.classList.add(theme);
+    }
+  }
 
   onMount(async () => {
     await loadConnections();
@@ -69,6 +78,8 @@
       ]);
       selectedTimezone = appSettings.timezone;
       selectedTimeFormat = appSettings.timeFormat || '12h';
+      selectedTheme = appSettings.theme || 'auto';
+      applyTheme(selectedTheme);
     } catch (err: any) {
       // Settings load error - non-critical
       console.error('Failed to load settings:', err);
@@ -78,8 +89,9 @@
   async function handleSaveSettings() {
     const timezoneChanged = selectedTimezone !== appSettings?.timezone;
     const timeFormatChanged = selectedTimeFormat !== appSettings?.timeFormat;
+    const themeChanged = selectedTheme !== appSettings?.theme;
 
-    if (!timezoneChanged && !timeFormatChanged) return;
+    if (!timezoneChanged && !timeFormatChanged && !themeChanged) return;
 
     savingSettings = true;
     settingsError = null;
@@ -88,17 +100,25 @@
       const updates: Partial<AppSettings> = {};
       if (timezoneChanged) updates.timezone = selectedTimezone;
       if (timeFormatChanged) updates.timeFormat = selectedTimeFormat;
+      if (themeChanged) updates.theme = selectedTheme;
 
       appSettings = await updateSettings(updates);
+
+      // Apply theme immediately
+      if (themeChanged) {
+        applyTheme(selectedTheme);
+      }
 
       const messages: string[] = [];
       if (timezoneChanged) messages.push(`Timezone updated to ${selectedTimezone}`);
       if (timeFormatChanged) messages.push(`Time format updated to ${selectedTimeFormat === '12h' ? '12-hour' : '24-hour'}`);
+      if (themeChanged) messages.push(`Theme updated to ${selectedTheme}`);
       settingsSuccess = messages.join('. ') + '.';
     } catch (err: any) {
       settingsError = err.response?.data?.error || err.message || 'Failed to update settings';
       selectedTimezone = appSettings?.timezone || 'UTC';
       selectedTimeFormat = appSettings?.timeFormat || '12h';
+      selectedTheme = appSettings?.theme || 'auto';
     } finally {
       savingSettings = false;
     }
@@ -494,12 +514,47 @@
       </div>
 
       <div class="setting-row mt-3">
+        <div class="setting-info">
+          <label class="form-label">Theme</label>
+          <p class="text-sm text-gray">Choose light, dark, or auto (follows system preference).</p>
+        </div>
+        <div class="setting-control">
+          <div class="toggle-buttons-inline">
+            <button
+              type="button"
+              class="toggle-btn {selectedTheme === 'light' ? 'selected' : ''}"
+              on:click={() => selectedTheme = 'light'}
+              disabled={savingSettings}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              class="toggle-btn {selectedTheme === 'dark' ? 'selected' : ''}"
+              on:click={() => selectedTheme = 'dark'}
+              disabled={savingSettings}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              class="toggle-btn {selectedTheme === 'auto' ? 'selected' : ''}"
+              on:click={() => selectedTheme = 'auto'}
+              disabled={savingSettings}
+            >
+              Auto
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="setting-row mt-3">
         <div></div>
         <div class="setting-control">
           <button
             class="btn btn-primary"
             on:click={handleSaveSettings}
-            disabled={savingSettings || (selectedTimezone === appSettings?.timezone && selectedTimeFormat === appSettings?.timeFormat)}
+            disabled={savingSettings || (selectedTimezone === appSettings?.timezone && selectedTimeFormat === appSettings?.timeFormat && selectedTheme === appSettings?.theme)}
           >
             {#if savingSettings}
               <span class="spinner"></span>
@@ -743,7 +798,7 @@
   th, td {
     padding: 0.75rem;
     text-align: left;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .actions {
@@ -760,7 +815,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -770,7 +825,7 @@
 
   .modal {
     width: min(720px, 100%);
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     padding: 1.25rem;
@@ -801,7 +856,7 @@
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .modal-footer {
@@ -872,12 +927,12 @@
     align-items: center;
     justify-content: center;
     padding: 0.5rem 1rem;
-    border: 2px solid var(--gray-300);
+    border: 2px solid var(--border-color-strong);
     border-radius: 0.5rem;
-    background: white;
+    background: var(--bg-card);
     font-size: 0.875rem;
     font-weight: 500;
-    color: var(--gray-600);
+    color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.15s ease;
     user-select: none;
@@ -885,18 +940,18 @@
 
   .toggle-btn:hover:not(:disabled) {
     border-color: var(--gray-400);
-    background: var(--gray-50);
+    background: var(--bg-hover);
   }
 
   .toggle-btn.selected {
     border-color: var(--primary);
-    background: #dbeafe;
-    color: var(--primary-dark);
+    background: var(--bg-selected);
+    color: var(--primary);
   }
 
   .toggle-btn.selected:hover:not(:disabled) {
     border-color: var(--primary-dark);
-    background: #bfdbfe;
+    background: var(--bg-info-hover);
   }
 
   .toggle-btn:disabled {

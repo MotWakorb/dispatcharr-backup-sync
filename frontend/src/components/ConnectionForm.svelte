@@ -258,7 +258,7 @@
 <style>
   .connection-form {
     padding: 1rem;
-    background: var(--gray-50);
+    background: var(--bg-hover);
     border-radius: 0.5rem;
   }
 
@@ -271,14 +271,14 @@
   .save-block {
     margin-top: 1rem;
     padding: 0.75rem;
-    background: #fff;
-    border: 1px solid var(--gray-200);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
   }
 
   .saved-summary {
-    background: #fff;
-    border: 1px solid var(--gray-200);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
     border-radius: 0.5rem;
     padding: 0.75rem;
   }

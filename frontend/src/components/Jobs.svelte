@@ -376,7 +376,7 @@
   th, td {
     padding: 0.75rem;
     text-align: left;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
   }
   th:nth-last-child(2),
@@ -396,11 +396,11 @@
     font-size: 0.75rem;
     text-transform: capitalize;
   }
-  .badge-running { background: #dbeafe; color: var(--primary); }
-  .badge-pending { background: var(--gray-200); color: var(--gray-700); }
-  .badge-completed { background: #d1fae5; color: var(--success); }
-  .badge-failed { background: #fee2e2; color: var(--danger); }
-  .badge-cancelled { background: #e5e7eb; color: #6b7280; }
+  .badge-running { background: var(--bg-info); color: var(--primary); }
+  .badge-pending { background: var(--border-color); color: var(--text-secondary); }
+  .badge-completed { background: var(--bg-success); color: var(--success); }
+  .badge-failed { background: var(--bg-error); color: var(--danger); }
+  .badge-cancelled { background: var(--border-color); color: var(--text-secondary); }
   .mono { font-family: Menlo, Monaco, Consolas, monospace; font-size: 0.8rem; }
 
   .jobs-header {
@@ -438,7 +438,7 @@
 
   .progress-bar {
     width: 100%;
-    background: var(--gray-200);
+    background: var(--border-color);
     border-radius: 0.4rem;
     overflow: hidden;
     height: 0.9rem;
@@ -469,7 +469,7 @@
   .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -480,7 +480,7 @@
   .logs-modal {
     width: min(800px, 95%);
     max-height: 85vh;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     display: flex;
@@ -493,7 +493,7 @@
     justify-content: space-between;
     align-items: flex-start;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .modal-header h3 {
@@ -518,14 +518,14 @@
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .logs-body {
     padding: 1rem 1.25rem;
     overflow-y: auto;
     flex: 1;
-    background: var(--gray-50);
+    background: var(--bg-hover);
     font-family: Menlo, Monaco, Consolas, monospace;
     font-size: 0.85rem;
     max-height: 60vh;
@@ -535,7 +535,7 @@
     display: flex;
     gap: 0.75rem;
     padding: 0.35rem 0;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .log-line:last-child {
@@ -543,13 +543,13 @@
   }
 
   .log-time {
-    color: var(--gray-500);
+    color: var(--text-muted);
     min-width: 5rem;
     flex-shrink: 0;
   }
 
   .log-msg {
-    color: var(--gray-800);
+    color: var(--text-primary);
     word-break: break-word;
   }
 
@@ -592,14 +592,14 @@
   }
 
   .toast-success {
-    background: #d1fae5;
-    color: var(--success);
+    background: var(--bg-success);
+    color: var(--text-success);
     border: 1px solid var(--success);
   }
 
   .toast-error {
-    background: #fee2e2;
-    color: var(--danger);
+    background: var(--bg-error);
+    color: var(--text-error);
     border: 1px solid var(--danger);
   }
 

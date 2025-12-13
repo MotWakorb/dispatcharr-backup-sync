@@ -116,10 +116,12 @@ export interface ScheduleRunHistoryEntry {
 
 // App settings
 export type TimeFormat = '12h' | '24h';
+export type Theme = 'light' | 'dark' | 'auto';
 
 export interface AppSettings {
   timezone: string;
   timeFormat: TimeFormat;
+  theme: Theme;
 }
 
 // Notification types
@@ -173,4 +175,12 @@ export interface NotificationGlobalSettings {
   notifyOnCompleteWithErrors: boolean;
   notifyOnFailure: boolean;
   includeLogsInEmail: boolean;
+}
+
+// Version info
+export interface VersionInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
 }

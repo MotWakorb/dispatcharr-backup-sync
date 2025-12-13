@@ -2,10 +2,12 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 export type TimeFormat = '12h' | '24h';
+export type Theme = 'light' | 'dark' | 'auto';
 
 export interface AppSettings {
   timezone: string;
   timeFormat: TimeFormat;
+  theme: Theme;
 }
 
 const DATA_DIR = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
@@ -17,6 +19,7 @@ const DEFAULT_TIMEZONE = process.env.TZ || 'UTC';
 const DEFAULT_SETTINGS: AppSettings = {
   timezone: DEFAULT_TIMEZONE,
   timeFormat: '12h',
+  theme: 'auto',
 };
 
 async function ensureStorage(): Promise<void> {

@@ -834,7 +834,7 @@
   th, td {
     padding: 0.75rem;
     text-align: left;
-    border-bottom: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--border-color);
   }
 
   .actions {
@@ -857,19 +857,19 @@
   }
 
   .status-active {
-    background: #dcfce7;
-    color: #166534;
+    background: var(--bg-success);
+    color: var(--text-success);
   }
 
   .status-inactive {
-    background: var(--gray-100);
-    color: var(--gray-600);
+    background: var(--border-color);
+    color: var(--text-secondary);
   }
 
   .overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--bg-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -881,7 +881,7 @@
     width: min(600px, 100%);
     max-height: 90vh;
     overflow-y: auto;
-    background: #fff;
+    background: var(--bg-card);
     border-radius: 0.75rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
     padding: 1.25rem;
@@ -912,7 +912,7 @@
   }
 
   .close-btn:hover {
-    color: var(--gray-800);
+    color: var(--text-primary);
   }
 
   .modal-footer {
