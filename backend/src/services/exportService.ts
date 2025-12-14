@@ -51,21 +51,31 @@ export class ExportService {
     return allResults;
   }
 
+  // Weights for progress calculation - logos takes much longer due to individual file downloads
+  private readonly optionWeights: Record<string, number> = {
+    syncChannelGroups: 1,
+    syncChannelProfiles: 1,
+    syncChannels: 1,
+    syncM3USources: 1,
+    syncStreamProfiles: 1,
+    syncUserAgents: 1,
+    syncCoreSettings: 1,
+    syncEPGSources: 2, // EPG sources + EPG data
+    syncPlugins: 1,
+    syncDVRRules: 1,
+    syncComskipConfig: 1,
+    syncUsers: 1,
+    syncLogos: 5, // Logos take significantly longer - each file is downloaded individually
+  };
+
   private countEnabledOptions(options: ExportOptions): number {
-    let count = 0;
-    if (options.syncChannelGroups) count++;
-    if (options.syncChannelProfiles) count++;
-    if (options.syncChannels) count++;
-    if (options.syncM3USources) count++;
-    if (options.syncStreamProfiles) count++;
-    if (options.syncUserAgents) count++;
-    if (options.syncCoreSettings) count++;
-    if (options.syncEPGSources) count += 2; // EPG sources + EPG data
-    if (options.syncPlugins) count++;
-    if (options.syncDVRRules) count++;
-    if (options.syncComskipConfig) count++;
-    if (options.syncUsers) count++;
-    return count;
+    return Object.entries(options)
+      .filter(([key, value]) => value === true && key in this.optionWeights)
+      .reduce((sum, [key]) => sum + (this.optionWeights[key] || 1), 0);
+  }
+
+  private getOptionWeight(optionKey: string): number {
+    return this.optionWeights[optionKey] || 1;
   }
 
   async export(request: ExportRequest, jobId: string): Promise<string> {
@@ -84,10 +94,10 @@ export class ExportService {
       await client.authenticate();
       jobManager.addLog(jobId, 'Authenticated to source instance');
 
-      // Calculate step-based progress (like sync/import)
+      // Calculate weighted progress (logos take longer due to individual file downloads)
       let currentProgress = 10;
-      const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
-      const progressPerStep = 85 / totalSteps; // 85% for export steps, 10% for auth, 5% for finalize
+      const totalWeight = Math.max(this.countEnabledOptions(request.options), 1);
+      const progressPerWeight = 85 / totalWeight; // 85% for export steps, 10% for auth, 5% for finalize
 
       const exportData: any = {
         exported_at: new Date().toISOString(),
@@ -104,7 +114,7 @@ export class ExportService {
           ? allGroups.filter((group: any) => !group.m3u_account_count || group.m3u_account_count === 0)
           : allGroups;
         exportData.data.channelGroups = manualGroups;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannelGroups');
         jobManager.addLog(jobId, `Exported ${Array.isArray(manualGroups) ? manualGroups.length : 0} channel groups`);
       }
 
@@ -125,7 +135,7 @@ export class ExportService {
         });
 
         exportData.data.channelProfiles = profilesWithChannels;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannelProfiles');
         jobManager.addLog(jobId, `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles with channel associations`);
       }
 
@@ -193,7 +203,7 @@ export class ExportService {
         }
 
         exportData.data.channels = channelsWithStreams;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannels');
         jobManager.addLog(jobId, `Exported ${manualChannels.length} channels`);
       }
 
@@ -231,7 +241,7 @@ export class ExportService {
             ...(password ? { password } : {}),
           };
         });
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncM3USources');
         jobManager.addLog(jobId, `Exported ${accounts.length} M3U sources`);
       }
 
@@ -244,7 +254,7 @@ export class ExportService {
           '/api/core/streamprofiles/',
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncStreamProfiles');
         jobManager.addLog(jobId, `Exported ${exportData.data.streamProfiles.length} stream profiles`);
       }
 
@@ -257,7 +267,7 @@ export class ExportService {
           '/api/core/useragents/',
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncUserAgents');
         jobManager.addLog(jobId, `Exported ${exportData.data.userAgents.length} user agents`);
       }
 
@@ -271,21 +281,20 @@ export class ExportService {
             ? [coreSettingsResp]
             : [];
         exportData.data.coreSettings = coreSettings;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncCoreSettings');
         jobManager.addLog(jobId, `Exported ${coreSettings.length || 0} core settings`);
       }
 
-      // Export EPG Sources
+      // Export EPG Sources (weight of 2 covers both EPG sources and EPG data)
       if (request.options.syncEPGSources) {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting EPG sources...');
         exportData.data.epgSources = await this.getAllPaginated(client, '/api/epg/sources/', jobId);
-        currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${exportData.data.epgSources.length || 0} EPG sources`);
 
         // Export EPG data rows so channel mappings stay intact
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting EPG data...');
         exportData.data.epgData = await this.getAllPaginated(client, '/api/epg/epgdata/', jobId);
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncEPGSources');
         const epgDataCount = exportData.data.epgData.length || 0;
         jobManager.addLog(jobId, `Exported ${epgDataCount} EPG data rows`);
 
@@ -303,7 +312,7 @@ export class ExportService {
         // API returns {"plugins": [...]} - extract the array
         const plugins = Array.isArray(pluginsResp) ? pluginsResp : (pluginsResp?.plugins || []);
         exportData.data.plugins = plugins;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncPlugins');
         jobManager.addLog(jobId, `Exported ${plugins.length} plugins`);
       }
 
@@ -312,7 +321,7 @@ export class ExportService {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting DVR rules...');
         const dvrRules = await client.get('/api/channels/recurring-rules/');
         exportData.data.dvrRules = dvrRules;
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncDVRRules');
         jobManager.addLog(jobId, `Exported ${Array.isArray(dvrRules) ? dvrRules.length : 0} DVR rules`);
       }
 
@@ -320,7 +329,7 @@ export class ExportService {
       if (request.options.syncComskipConfig) {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting comskip config...');
         exportData.data.comskipConfig = await client.get('/api/channels/dvr/comskip-config/');
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncComskipConfig');
         jobManager.addLog(jobId, 'Exported comskip config');
       }
 
@@ -332,8 +341,118 @@ export class ExportService {
         exportData.data.users = allUsers.sort((a: any, b: any) =>
           (a.username || '').localeCompare(b.username || '')
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncUsers');
         jobManager.addLog(jobId, `Exported ${exportData.data.users.length} users`);
+      }
+
+      // Export Logos
+      if (request.options.syncLogos) {
+        jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting logos...');
+
+        // Get all logos from the logos API - export ALL logos
+        // The logos API contains manually uploaded logos that should all be backed up
+        // (Channels reference logos by URL, not by logo_id, so filtering by channel references doesn't work)
+        const allLogos = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
+
+        jobManager.addLog(jobId, `Found ${allLogos.length} logos to export`);
+
+        // Store logo metadata and buffers for later file writing
+        const logoMetadata: any[] = [];
+        const logoBuffers: Map<string, Buffer> = new Map();
+
+        for (const logo of allLogos) {
+          if (!logo?.url) continue;
+          try {
+            // Check if URL is external (starts with http) vs local path
+            const isExternalUrl = logo.url.startsWith('http://') || logo.url.startsWith('https://');
+
+            let buffer: Buffer;
+            if (isExternalUrl) {
+              // For external URLs, use axios directly with User-Agent header to avoid 403s
+              const axios = (await import('axios')).default;
+              const response = await axios.get(logo.url, {
+                responseType: 'arraybuffer',
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (compatible; DBAS/1.0; +https://github.com/motwakorb/dispatcharr-backup-sync)',
+                },
+                timeout: 30000,
+              });
+              buffer = Buffer.from(response.data);
+            } else {
+              // For local paths, try multiple URL patterns since Dispatcharr stores internal paths
+              // The stored path might be /data/logos/X but served from /media/logos/X or /logos/X
+              const pathsToTry = [logo.url];
+
+              // Transform /data/logos/X to other common serving paths
+              if (logo.url.startsWith('/data/logos/')) {
+                const filename = logo.url.replace('/data/logos/', '');
+                pathsToTry.push(`/media/logos/${filename}`);
+                pathsToTry.push(`/logos/${filename}`);
+                pathsToTry.push(`/static/logos/${filename}`);
+              }
+
+              // Also try fetching by logo ID if available
+              if (logo.id) {
+                pathsToTry.push(`/api/channels/logos/${logo.id}/file/`);
+                pathsToTry.push(`/api/channels/logos/${logo.id}/download/`);
+              }
+
+              let downloaded = false;
+              let lastError: any = null;
+
+              for (const tryPath of pathsToTry) {
+                try {
+                  const response = await client.get(tryPath, { responseType: 'arraybuffer' });
+                  buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
+                  downloaded = true;
+                  break;
+                } catch (err) {
+                  lastError = err;
+                  // Continue to next path
+                }
+              }
+
+              if (!downloaded) {
+                throw lastError || new Error('All download paths failed');
+              }
+            }
+
+            // Determine file extension from URL
+            const urlLower = logo.url.toLowerCase();
+            let ext = 'png';
+            if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) {
+              ext = 'jpg';
+            } else if (urlLower.includes('.webp')) {
+              ext = 'webp';
+            } else if (urlLower.includes('.gif')) {
+              ext = 'gif';
+            } else if (urlLower.includes('.svg')) {
+              ext = 'svg';
+            }
+
+            // Create safe filename
+            const logoName = String(logo.name || logo.id).replace(/[^a-zA-Z0-9_-]/g, '_');
+            const filename = `${logoName}.${ext}`;
+
+            logoMetadata.push({
+              id: logo.id, // Original logo ID for mapping during import
+              name: logo.name || logo.id,
+              filename: filename,
+            });
+            logoBuffers.set(filename, buffer);
+          } catch (e: any) {
+            const errMsg = e?.response?.status
+              ? `HTTP ${e.response.status}`
+              : e?.message || 'Unknown error';
+            jobManager.addLog(jobId, `Warning: Failed to download logo "${logo.name || logo.id}" (URL: ${logo.url}) - ${errMsg}`);
+          }
+        }
+
+        // Store logo metadata (not the actual data) - files will be written separately
+        exportData.data.logos = logoMetadata;
+        exportData._logoBuffers = logoBuffers; // Temporary storage for file writing
+        currentProgress += progressPerWeight * this.getOptionWeight('syncLogos');
+        jobManager.addLog(jobId, `Exported ${logoMetadata.length} logos`);
       }
 
       if (request.dryRun) {
@@ -351,11 +470,26 @@ export class ExportService {
       const workDir = path.join(this.backupDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
+      // Write logo files to logos/ subdirectory if we have any
+      const logoBuffers = exportData._logoBuffers as Map<string, Buffer> | undefined;
+      if (logoBuffers && logoBuffers.size > 0) {
+        const logosDir = path.join(workDir, 'logos');
+        await mkdir(logosDir, { recursive: true });
+
+        for (const [filename, buffer] of logoBuffers) {
+          const logoPath = path.join(logosDir, filename);
+          await writeFile(logoPath, buffer);
+        }
+        jobManager.addLog(jobId, `Wrote ${logoBuffers.size} logo files to logos/ directory`);
+      }
+
+      // Remove temporary _logoBuffers before writing JSON
       const jsonPath = path.join(workDir, 'config.json');
       const configData = {
         ...exportData,
         data: { ...exportData.data },
       };
+      delete (configData as any)._logoBuffers;
 
       await writeFile(jsonPath, this.formatExportContent(configData), 'utf-8');
 
@@ -434,6 +568,9 @@ export class ExportService {
     if (exportData.data.users) {
       summary.counts.users = exportData.data.users.length;
     }
+    if (exportData.data.logos) {
+      summary.counts.logos = exportData.data.logos.length;
+    }
 
     return summary;
   }
@@ -453,6 +590,7 @@ export class ExportService {
       { key: 'dvrRules', label: 'DVR Rules' },
       { key: 'comskipConfig', label: 'Comskip Config' },
       { key: 'users', label: 'Users' },
+      { key: 'logos', label: 'Logos' },
     ];
 
     // Insert marker keys so the JSON stays valid but shows section boundaries
