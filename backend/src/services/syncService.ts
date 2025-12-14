@@ -1,5 +1,6 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
+import FormData from 'form-data';
 import type { SyncRequest, SyncOptions } from '../types/index.js';
 
 export class SyncService {
@@ -440,8 +441,8 @@ export class SyncService {
       };
 
       let currentProgress = 15;
-      const totalSteps = Math.max(this.countEnabledOptions(request.options), 1);
-      const progressPerStep = 80 / totalSteps; // 80% for sync steps, 20% for auth/complete
+      const totalWeight = Math.max(this.countEnabledOptions(request.options), 1);
+      const progressPerWeight = 80 / totalWeight; // 80% for sync steps, 20% for auth/complete
 
       // Order matches importService.ts for proper dependency handling:
       // 1. M3U Sources (needed for streams)
@@ -467,7 +468,7 @@ export class SyncService {
           request.dryRun,
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncM3USources');
       }
 
       // 2. Sync EPG Sources
@@ -479,7 +480,7 @@ export class SyncService {
           request.dryRun,
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncEPGSources');
 
         // Trigger EPG refresh to force sources to download fresh data
         // (existing sources may not auto-refresh when updated via PUT)
@@ -504,7 +505,7 @@ export class SyncService {
           destClient,
           request.dryRun
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannelProfiles');
       }
 
       // 4. Sync Channel Groups
@@ -516,7 +517,7 @@ export class SyncService {
           request.dryRun,
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannelGroups');
       }
 
       // 5. Sync Stream Profiles
@@ -527,19 +528,42 @@ export class SyncService {
           destClient,
           request.dryRun
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncStreamProfiles');
       }
 
-      // 6. Sync Channels
+      // 6. Sync Logos BEFORE channels so we can map logo IDs
+      let logoIdMap: Record<number, number> = {};
+      let logoUrlMap: Record<string, number> = {};
+      if (request.options.syncLogos) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
+        const logoResult = await this.syncLogos(
+          sourceClient,
+          destClient,
+          request.dryRun,
+          jobId
+        );
+        results.synced.logos = {
+          synced: logoResult.synced,
+          skipped: logoResult.skipped,
+          errors: logoResult.errors,
+        };
+        logoIdMap = logoResult.logoIdMap;
+        logoUrlMap = logoResult.logoUrlMap;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncLogos');
+      }
+
+      // 7. Sync Channels
       if (request.options.syncChannels) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing channels...');
         results.synced.channels = await this.syncChannels(
           sourceClient,
           destClient,
           request.dryRun,
-          jobId
+          jobId,
+          logoIdMap,
+          logoUrlMap
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncChannels');
 
         // Assign EPG to channels IMMEDIATELY after channel sync
         // (matches import order: channels → EPG assignment → channel profile associations)
@@ -566,7 +590,7 @@ export class SyncService {
           destClient,
           request.dryRun
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncUserAgents');
       }
 
       // 8. Sync Core Settings
@@ -577,14 +601,14 @@ export class SyncService {
           destClient,
           request.dryRun
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncCoreSettings');
       }
 
       // 9. Sync Plugins
       if (request.options.syncPlugins) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing plugins...');
         results.synced.plugins = await this.syncPlugins(sourceClient, destClient, request.dryRun);
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncPlugins');
       }
 
       // 10. Sync DVR Rules
@@ -595,7 +619,7 @@ export class SyncService {
           destClient,
           request.dryRun
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncDVRRules');
       }
 
       // 11. Sync Comskip Config
@@ -607,30 +631,22 @@ export class SyncService {
           request.dryRun,
           jobId
         );
-        currentProgress += progressPerStep;
+        currentProgress += progressPerWeight * this.getOptionWeight('syncComskipConfig');
       }
 
       // 12. Sync Users
       if (request.options.syncUsers) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
-        results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun);
-        currentProgress += progressPerStep;
+        results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun, jobId);
+        currentProgress += progressPerWeight * this.getOptionWeight('syncUsers');
       }
 
-      // 13. Sync Logos
-      if (request.options.syncLogos) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
-        results.synced.logos = await this.syncLogos(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
-        currentProgress += progressPerStep;
-      }
+      // Note: logos are synced earlier (before channels) to support logo ID mapping
 
-      // 14. Trigger EPG refresh after sync to ensure EPG data is assigned to channels
-      // (matches import order: final step to toggle EPG sources and trigger re-download)
-      if (request.options.syncEPGSources && !request.dryRun) {
+      // 13. Trigger EPG refresh after sync to ensure EPG data is assigned to channels
+      // Trigger whenever channels or EPG sources were synced to ensure proper EPG assignment
+      const shouldRefreshEpg = (request.options.syncChannels || request.options.syncEPGSources) && !request.dryRun;
+      if (shouldRefreshEpg) {
         jobManager.setProgress(jobId, 95, 'Triggering EPG refresh to assign data to channels...');
         try {
           await this.triggerEpgRefresh(destClient, jobId);
@@ -646,24 +662,31 @@ export class SyncService {
     }
   }
 
-  private countEnabledOptions(options: SyncOptions): number {
-    const supportedKeys = new Set([
-      'syncChannelGroups',
-      'syncChannelProfiles',
-      'syncChannels',
-      'syncM3USources',
-      'syncStreamProfiles',
-      'syncUserAgents',
-      'syncCoreSettings',
-      'syncEPGSources',
-      'syncUsers',
-      'syncPlugins',
-      'syncDVRRules',
-      'syncComskipConfig',
-      'syncLogos',
-    ]);
+  // Weights for progress calculation - logos takes much longer due to individual file downloads/uploads
+  private readonly optionWeights: Record<string, number> = {
+    syncChannelGroups: 1,
+    syncChannelProfiles: 1,
+    syncChannels: 1,
+    syncM3USources: 1,
+    syncStreamProfiles: 1,
+    syncUserAgents: 1,
+    syncCoreSettings: 1,
+    syncEPGSources: 1,
+    syncUsers: 1,
+    syncPlugins: 1,
+    syncDVRRules: 1,
+    syncComskipConfig: 1,
+    syncLogos: 5, // Logos take significantly longer - each file is downloaded and re-uploaded
+  };
 
-    return Object.entries(options).filter(([key, value]) => value === true && supportedKeys.has(key)).length;
+  private countEnabledOptions(options: SyncOptions): number {
+    return Object.entries(options)
+      .filter(([key, value]) => value === true && key in this.optionWeights)
+      .reduce((sum, [key]) => sum + (this.optionWeights[key] || 1), 0);
+  }
+
+  private getOptionWeight(optionKey: string): number {
+    return this.optionWeights[optionKey] || 1;
   }
 
   private async syncChannelGroups(
@@ -822,7 +845,9 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean,
-    jobId?: string
+    jobId?: string,
+    logoIdMap?: Record<number, number>,
+    logoUrlMap?: Record<string, number>
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     const sourceChannels = await source.get('/api/channels/channels/');
     const destChannels = await dest.get('/api/channels/channels/');
@@ -1001,6 +1026,28 @@ export class SyncService {
           channelData.stream_profile_id = profileMap[channel.stream_profile_id];
         }
 
+        // Map logo_id from source to destination using the logoIdMap or logoUrlMap
+        // First try to map by logo_id, then fall back to mapping by logo URL
+        let mappedLogoId: number | undefined;
+
+        // Try mapping by logo_id first
+        if (channel.logo_id != null && logoIdMap) {
+          mappedLogoId = logoIdMap[channel.logo_id] ?? logoIdMap[Number(channel.logo_id)];
+        }
+
+        // If no match by ID, try mapping by logo URL
+        if (mappedLogoId == null && channel.logo && logoUrlMap) {
+          mappedLogoId = logoUrlMap[channel.logo];
+        }
+
+        if (mappedLogoId != null) {
+          channelData.logo_id = mappedLogoId;
+          if (jobId && debugLogged < debugLimit) {
+            const sourceRef = channel.logo_id ?? channel.logo;
+            jobManager.addLog(jobId, `Channel "${channel.name}" logo: source=${sourceRef} -> dest_id=${mappedLogoId}`);
+          }
+        }
+
         // Match streams using lookup tables (similar to importService logic)
         const matchedStreams = new Set<number>();
 
@@ -1163,24 +1210,70 @@ export class SyncService {
   private async syncUsers(
     source: DispatcharrClient,
     dest: DispatcharrClient,
-    dryRun?: boolean
+    dryRun?: boolean,
+    jobId?: string
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     const sourceUsers = await source.get('/api/accounts/users/');
     const destUsers = await dest.get('/api/accounts/users/');
 
-    // Filter out admin users
-    const filteredUsers = sourceUsers.filter(
-      (u: any) => !u.is_staff && u.user_level !== 0
+    // Count admin vs non-admin users for logging
+    // Match import logic: admin is determined by user_level === 'admin' or is_superuser === true
+    const adminUsers = sourceUsers.filter(
+      (u: any) => u.user_level === 'admin' || u.is_superuser === true
     );
+    const nonAdminUsers = sourceUsers.filter(
+      (u: any) => u.user_level !== 'admin' && u.is_superuser !== true
+    );
+
+    if (jobId) {
+      jobManager.addLog(jobId, `Users: ${sourceUsers.length} total on source (${adminUsers.length} admin, ${nonAdminUsers.length} non-admin)`);
+    }
 
     let synced = 0;
     let skipped = 0;
     let errors = 0;
 
-    for (const user of filteredUsers) {
+    for (const user of sourceUsers) {
       try {
-        const existing = destUsers.find((u: any) => u.username === user.username);
+        const existingUser = destUsers.find((u: any) => u.username === user.username);
+        // Match import logic: admin is user_level === 'admin' or is_superuser === true (or existing user is superuser)
+        const isAdmin = user.user_level === 'admin' || user.is_superuser === true || existingUser?.is_superuser === true;
 
+        // For admin users that already exist on destination, only sync custom_properties (XC password)
+        // Never create new admin users - they should be created manually
+        if (isAdmin) {
+          if (existingUser) {
+            if (user.custom_properties) {
+              if (dryRun) {
+                if (jobId) {
+                  jobManager.addLog(jobId, `User "${user.username}": Admin - would update custom_properties only`);
+                }
+                synced++;
+                continue;
+              }
+              await dest.patch(`/api/accounts/users/${existingUser.id}/`, {
+                custom_properties: user.custom_properties,
+              });
+              if (jobId) {
+                jobManager.addLog(jobId, `User "${user.username}": Admin - updated custom_properties (XC password)`);
+              }
+              synced++;
+            } else {
+              if (jobId) {
+                jobManager.addLog(jobId, `User "${user.username}": Admin - skipped (no custom_properties to sync)`);
+              }
+              skipped++;
+            }
+          } else {
+            if (jobId) {
+              jobManager.addLog(jobId, `User "${user.username}": Admin - skipped (admin users are not created, only updated)`);
+            }
+            skipped++;
+          }
+          continue;
+        }
+
+        // Non-admin users: sync normally (create or update)
         if (dryRun) {
           synced++;
           continue;
@@ -1197,16 +1290,18 @@ export class SyncService {
           userData.custom_properties = user.custom_properties;
         }
 
-        if (existing) {
-          await dest.put(`/api/accounts/users/${existing.id}/`, userData);
+        if (existingUser) {
+          await dest.put(`/api/accounts/users/${existingUser.id}/`, userData);
         } else {
-          if (user.password) {
-            userData.password = user.password;
-          }
+          // Always supply a password for new users (required on create)
+          userData.password = user.password || `TempPass-${user.username || 'User'}`;
           await dest.post('/api/accounts/users/', userData);
         }
         synced++;
-      } catch (error) {
+      } catch (error: any) {
+        if (jobId) {
+          jobManager.addLog(jobId, `Failed to sync user "${user.username}": ${error?.message || 'Unknown error'}`);
+        }
         errors++;
       }
     }
@@ -1798,10 +1893,36 @@ export class SyncService {
   private async syncLogos(
     source: DispatcharrClient,
     dest: DispatcharrClient,
-    dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
-    const logos = await source.get('/api/channels/logos/');
-    const logoList = Array.isArray(logos) ? logos : logos.results || [];
+    dryRun?: boolean,
+    jobId?: string
+  ): Promise<{ synced: number; skipped: number; errors: number; logoIdMap: Record<number, number>; logoUrlMap: Record<string, number> }> {
+    const logoIdMap: Record<number, number> = {}; // sourceLogoId -> destLogoId
+    const logoUrlMap: Record<string, number> = {}; // sourceLogoUrl -> destLogoId
+
+    // Get all logos from source - sync ALL logos like import does
+    // The logos API contains manually uploaded logos that should all be synced
+    // (Channels reference logos by URL, not by logo_id, so filtering by channel references doesn't work)
+    // Use getAllPaginated to ensure we get ALL logos, not just the first page
+    const logoList = await this.getAllPaginated(source, '/api/channels/logos/');
+
+    if (jobId) {
+      jobManager.addLog(jobId, `Found ${logoList.length} logos to sync from source`);
+    }
+
+    // Fetch existing logos on destination to avoid duplicates and for ID mapping
+    // Use getAllPaginated to ensure we get ALL existing logos
+    let existingLogos: any[] = [];
+    try {
+      existingLogos = await this.getAllPaginated(dest, '/api/channels/logos/');
+    } catch (e) {
+      // Destination may not have any logos yet
+    }
+    const existingByName: Record<string, number> = {};
+    for (const l of existingLogos) {
+      if (l.name && l.id) {
+        existingByName[l.name.toLowerCase()] = l.id;
+      }
+    }
 
     let synced = 0;
     let skipped = 0;
@@ -1814,26 +1935,144 @@ export class SyncService {
         continue;
       }
 
+      const name = logo.name || logo.id || `logo-${i}`;
+      const nameLower = name.toString().toLowerCase();
+
+      // Skip if logo with same name already exists on destination
+      if (existingByName[nameLower]) {
+        // Map source logo ID and URL to existing destination logo ID
+        const destLogoId = existingByName[nameLower];
+        if (logo.id != null) {
+          logoIdMap[logo.id] = destLogoId;
+        }
+        if (logo.url) {
+          logoUrlMap[logo.url] = destLogoId;
+        }
+        skipped++;
+        continue;
+      }
+
       if (dryRun) {
         synced++;
         continue;
       }
 
       try {
-        const response = await source.get(logo.url, { responseType: 'arraybuffer' });
-        const buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
-        const name = logo.name || logo.id || `logo-${i}`;
-        await dest.post('/api/channels/logos/upload/', {
-          name,
-          url: `data:image/png;base64,${buffer.toString('base64')}`,
+        // Check if URL is external (starts with http) vs local path
+        const isExternalUrl = logo.url.startsWith('http://') || logo.url.startsWith('https://');
+
+        let buffer: Buffer;
+        if (isExternalUrl) {
+          // For external URLs, use axios directly with User-Agent header to avoid 403s from Wikipedia etc.
+          const axios = (await import('axios')).default;
+          const response = await axios.get(logo.url, {
+            responseType: 'arraybuffer',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; DBAS/1.0; +https://github.com/motwakorb/dispatcharr-backup-sync)',
+            },
+            timeout: 30000,
+          });
+          buffer = Buffer.from(response.data);
+        } else {
+          // For local paths, try multiple URL patterns since Dispatcharr stores internal paths
+          // The stored path might be /data/logos/X but served from /media/logos/X or /logos/X
+          const pathsToTry = [logo.url];
+
+          // Transform /data/logos/X to other common serving paths
+          if (logo.url.startsWith('/data/logos/')) {
+            const filename = logo.url.replace('/data/logos/', '');
+            pathsToTry.push(`/media/logos/${filename}`);
+            pathsToTry.push(`/logos/${filename}`);
+            pathsToTry.push(`/static/logos/${filename}`);
+          }
+
+          // Also try fetching by logo ID if available
+          if (logo.id) {
+            pathsToTry.push(`/api/channels/logos/${logo.id}/file/`);
+            pathsToTry.push(`/api/channels/logos/${logo.id}/download/`);
+          }
+
+          let downloaded = false;
+          let lastError: any = null;
+
+          for (const tryPath of pathsToTry) {
+            try {
+              const response = await source.get(tryPath, { responseType: 'arraybuffer' });
+              buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
+              downloaded = true;
+              break;
+            } catch (err) {
+              lastError = err;
+              // Continue to next path
+            }
+          }
+
+          if (!downloaded) {
+            throw lastError || new Error('All download paths failed');
+          }
+        }
+
+        // Detect content type from URL or default to PNG
+        let contentType = 'image/png';
+        let ext = 'png';
+        const urlLower = logo.url.toLowerCase();
+        if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) {
+          contentType = 'image/jpeg';
+          ext = 'jpg';
+        } else if (urlLower.includes('.webp')) {
+          contentType = 'image/webp';
+          ext = 'webp';
+        } else if (urlLower.includes('.gif')) {
+          contentType = 'image/gif';
+          ext = 'gif';
+        } else if (urlLower.includes('.svg')) {
+          contentType = 'image/svg+xml';
+          ext = 'svg';
+        }
+
+        // Upload using FormData (multipart/form-data)
+        const formData = new FormData();
+        formData.append('name', name.toString());
+        formData.append('file', buffer, {
+          filename: `${name}.${ext}`,
+          contentType,
         });
+
+        const result = await dest.post('/api/channels/logos/upload/', formData, {
+          headers: formData.getHeaders(),
+        });
+
+        // Map source logo ID and URL to new destination logo ID
+        if (result?.id != null) {
+          if (logo.id != null) {
+            logoIdMap[logo.id] = result.id;
+          }
+          if (logo.url) {
+            logoUrlMap[logo.url] = result.id;
+          }
+        }
+
         synced++;
-      } catch (error) {
+        existingByName[nameLower] = result?.id;
+      } catch (error: any) {
+        const errMsg = error?.response?.status
+          ? `HTTP ${error.response.status}`
+          : error?.message || 'Unknown error';
+        if (jobId) {
+          jobManager.addLog(jobId, `Warning: Failed to sync logo "${name}" (URL: ${logo.url}) - ${errMsg}`);
+        }
         errors++;
       }
     }
 
-    return { synced, skipped, errors };
+    if (jobId && Object.keys(logoIdMap).length > 0) {
+      jobManager.addLog(jobId, `Logo ID mapping: ${Object.keys(logoIdMap).length} mappings created`);
+    }
+    if (jobId && Object.keys(logoUrlMap).length > 0) {
+      jobManager.addLog(jobId, `Logo URL mapping: ${Object.keys(logoUrlMap).length} mappings created`);
+    }
+
+    return { synced, skipped, errors, logoIdMap, logoUrlMap };
   }
 
   private async triggerEpgRefresh(

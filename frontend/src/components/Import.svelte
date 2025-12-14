@@ -57,8 +57,7 @@
     { key: 'dvrRules', label: 'DVR Rules', optionKey: 'syncDVRRules' },
     { key: 'comskipConfig', label: 'Comskip Config', optionKey: 'syncComskipConfig' },
     { key: 'users', label: 'Users', optionKey: 'syncUsers' },
-    // Logos disabled for v1.0 release - code remains in backend
-    // { key: 'logos', label: 'Logos', optionKey: 'syncLogos' },
+    { key: 'logos', label: 'Logos', optionKey: 'syncLogos' },
   ];
 
   onMount(loadSavedConnections);

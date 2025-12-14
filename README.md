@@ -22,6 +22,7 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 | Channel Groups | Yes | Yes | Yes |
 | Channel Profiles | Yes | Yes | Yes |
 | Channels | Yes | Yes | Yes |
+| Logos | Yes | Yes | Yes |
 | M3U Sources | Yes | Yes | Yes |
 | Stream Profiles | Yes | Yes | Yes |
 | User Agents | Yes | Yes | Yes |
@@ -220,11 +221,36 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `/api/notifications/settings` | GET/PUT | Manage notification settings |
 | `/api/info` | GET | Get version info and update availability |
 
+## Sync Behavior
+
+### Logo Sync
+
+Logo sync downloads all uploaded logos from the source instance and uploads them to the destination. Some logos may fail to sync if:
+- The original URL is no longer accessible (external logos from websites that are down)
+- Network timeouts for slow external servers
+- 404 errors for logos that were deleted at the source URL
+
+Failed logos are logged as warnings but don't stop the sync process. Channel-logo associations are properly mapped so that channels on the destination correctly reference their synced logos.
+
+**Note**: Including logos significantly increases sync time as each logo must be downloaded and re-uploaded individually.
+
+### User Sync
+
+User sync handles admin and non-admin users differently:
+- **Admin users** (user_level='admin' or is_superuser=true): Only their `custom_properties` (XC password) are synced to existing admin accounts on the destination. New admin users are never created automatically - they should be set up manually on the destination.
+- **Non-admin users** (streamers, etc.): Fully synced - created if they don't exist, updated if they do.
+
+This behavior prevents accidental creation of admin accounts on the destination instance.
+
+### Custom Streams
+
+Channels with direct URL streams (not from M3U sources) are handled specially during sync. The tool will attempt to create custom streams for these channels on the destination. This works for channels like weather feeds or other hand-configured streams with direct URLs.
+
+### Comskip Config
+
+If no comskip configuration exists on the source instance, it will be reported as "skipped" rather than synced. This is expected behavior - there's nothing to sync if no config exists.
+
 ## Known Issues
-
-### Logos Not Synced
-
-Logo synchronization is currently **not supported**. The Dispatcharr API endpoint for uploading logos expects a specific content type that differs from standard JSON, making programmatic logo sync unreliable. Logos will need to be manually uploaded to your destination instance.
 
 ### M3U Auto Channel Sync Limitation
 
@@ -234,14 +260,6 @@ When syncing M3U sources, the **auto channel sync** feature cannot be properly p
 1. Go to your destination Dispatcharr instance
 2. Navigate to M3U Sources
 3. Edit each M3U source and configure the auto channel sync settings as desired
-
-### Custom Streams for Non-M3U Channels
-
-Channels with direct URL streams (not from M3U sources) are handled specially during sync. The tool will attempt to create custom streams for these channels on the destination. This works for channels like weather feeds or other hand-configured streams with direct URLs.
-
-### Comskip Config
-
-If no comskip configuration exists on the source instance, it will be reported as "skipped" rather than synced. This is expected behavior - there's nothing to sync if no config exists.
 
 ## Data Persistence
 

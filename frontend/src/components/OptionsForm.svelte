@@ -27,8 +27,7 @@
     { key: 'syncDVRRules', label: 'DVR Rules' },
     { key: 'syncComskipConfig', label: 'Comskip Config' },
     { key: 'syncUsers', label: 'Users' },
-    // Logos disabled for v1.0 release - code remains in backend
-    // { key: 'syncLogos', label: 'Logos (includes images)' },
+    { key: 'syncLogos', label: 'Logos' },
   ];
 
   function toggleAll() {
@@ -61,6 +60,12 @@
       </button>
     {/each}
   </div>
+
+  {#if options.syncLogos}
+    <div class="alert alert-warning logos-warning">
+      <strong>Note:</strong> Including logos will significantly increase operation time. Each logo must be downloaded and re-uploaded individually.
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -68,5 +73,10 @@
     padding: 1rem;
     background: var(--gray-50);
     border-radius: 0.5rem;
+  }
+
+  .logos-warning {
+    margin-top: 1rem;
+    margin-bottom: 0;
   }
 </style>
