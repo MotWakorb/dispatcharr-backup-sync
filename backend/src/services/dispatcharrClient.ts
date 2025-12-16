@@ -143,19 +143,21 @@ export class DispatcharrClient {
     }
   }
 
-  async delete<T = any>(endpoint: string): Promise<T> {
+  async delete<T = any>(endpoint: string, data?: any): Promise<T> {
     if (!this.authenticated) {
       await this.authenticate();
     }
 
     try {
-      const response = await this.client.delete(endpoint);
+      const config = data ? { data } : undefined;
+      const response = await this.client.delete(endpoint, config);
       return response.data;
     } catch (error: any) {
       if (error.response?.status === 401) {
         this.authenticated = false;
         await this.authenticate();
-        const response = await this.client.delete(endpoint);
+        const config = data ? { data } : undefined;
+        const response = await this.client.delete(endpoint, config);
         return response.data;
       }
       throw error;

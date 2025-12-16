@@ -27,8 +27,7 @@
     { key: 'syncDVRRules', label: 'DVR Rules' },
     { key: 'syncComskipConfig', label: 'Comskip Config' },
     { key: 'syncUsers', label: 'Users' },
-    // Logos disabled for v1.0 release - code remains in backend
-    // { key: 'syncLogos', label: 'Logos (includes images)' },
+    { key: 'syncLogos', label: 'Logos' },
   ];
 
   function toggleAll() {

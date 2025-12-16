@@ -330,6 +330,7 @@
         syncDVRRules: true,
         syncComskipConfig: true,
         syncUsers: true,
+        syncLogos: true,
       },
       schedulePreset: 'daily',
       cronExpression: undefined,

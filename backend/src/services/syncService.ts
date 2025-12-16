@@ -449,14 +449,14 @@ export class SyncService {
       // 3. Channel Profiles (needed for channel associations)
       // 4. Channel Groups (needed for channel assignment)
       // 5. Stream Profiles (needed for channel stream_profile_id)
-      // 6. Channels (depends on groups and stream profiles)
-      // 7. User Agents
-      // 8. Core Settings
-      // 9. Plugins
-      // 10. DVR Rules
-      // 11. Comskip Config
-      // 12. Users
-      // 13. Logos
+      // 6. Logos (needed for channel logo_id mapping)
+      // 7. Channels (depends on groups, stream profiles, and logos)
+      // 8. User Agents
+      // 9. Core Settings
+      // 10. Plugins
+      // 11. DVR Rules
+      // 12. Comskip Config
+      // 13. Users
 
       // 1. Sync M3U Sources
       if (request.options.syncM3USources) {
@@ -530,14 +530,30 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // 6. Sync Channels
+      // 6. Sync Logos BEFORE channels so we can map logo IDs
+      let logoMap: Record<string, number> = {};
+      if (request.options.syncLogos) {
+        jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
+        const logoResult = await this.syncLogos(
+          sourceClient,
+          destClient,
+          request.dryRun,
+          jobId
+        );
+        results.synced.logos = { synced: logoResult.synced, skipped: logoResult.skipped, errors: logoResult.errors };
+        logoMap = logoResult.logoMap;
+        currentProgress += progressPerStep;
+      }
+
+      // 7. Sync Channels
       if (request.options.syncChannels) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing channels...');
         results.synced.channels = await this.syncChannels(
           sourceClient,
           destClient,
           request.dryRun,
-          jobId
+          jobId,
+          logoMap
         );
         currentProgress += progressPerStep;
 
@@ -558,7 +574,7 @@ export class SyncService {
         }
       }
 
-      // 7. Sync User Agents
+      // 8. Sync User Agents
       if (request.options.syncUserAgents) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing user agents...');
         results.synced.userAgents = await this.syncUserAgents(
@@ -569,7 +585,7 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // 8. Sync Core Settings
+      // 9. Sync Core Settings
       if (request.options.syncCoreSettings) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing core settings...');
         results.synced.coreSettings = await this.syncCoreSettings(
@@ -580,14 +596,14 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // 9. Sync Plugins
+      // 10. Sync Plugins
       if (request.options.syncPlugins) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing plugins...');
         results.synced.plugins = await this.syncPlugins(sourceClient, destClient, request.dryRun);
         currentProgress += progressPerStep;
       }
 
-      // 10. Sync DVR Rules
+      // 11. Sync DVR Rules
       if (request.options.syncDVRRules) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing DVR rules...');
         results.synced.dvrRules = await this.syncDVRRules(
@@ -598,7 +614,7 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // 11. Sync Comskip Config
+      // 12. Sync Comskip Config
       if (request.options.syncComskipConfig) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing comskip config...');
         results.synced.comskipConfig = await this.syncComskipConfig(
@@ -610,21 +626,10 @@ export class SyncService {
         currentProgress += progressPerStep;
       }
 
-      // 12. Sync Users
+      // 13. Sync Users
       if (request.options.syncUsers) {
         jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
         results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun);
-        currentProgress += progressPerStep;
-      }
-
-      // 13. Sync Logos
-      if (request.options.syncLogos) {
-        jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
-        results.synced.logos = await this.syncLogos(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
         currentProgress += progressPerStep;
       }
 
@@ -822,7 +827,8 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean,
-    jobId?: string
+    jobId?: string,
+    logoMap?: Record<string, number>
   ): Promise<{ synced: number; skipped: number; errors: number }> {
     const sourceChannels = await source.get('/api/channels/channels/');
     const destChannels = await dest.get('/api/channels/channels/');
@@ -858,6 +864,25 @@ export class SyncService {
     for (const g of destGroupList) {
       if (g?.id != null && g?.name) {
         destGroupNameToId[g.name.toLowerCase()] = g.id;
+      }
+    }
+
+    // Build source logo ID -> name mapping for channel logo assignment
+    const sourceLogoIdToName: Record<number, string> = {};
+    if (logoMap && Object.keys(logoMap).length > 0) {
+      try {
+        const sourceLogos = await source.get('/api/channels/logos/');
+        const logoList = Array.isArray(sourceLogos) ? sourceLogos : sourceLogos.results || [];
+        for (const logo of logoList) {
+          if (logo?.id != null && logo?.name) {
+            sourceLogoIdToName[logo.id] = logo.name;
+          }
+        }
+        if (jobId) {
+          jobManager.addLog(jobId, `Built source logo ID->name mapping with ${Object.keys(sourceLogoIdToName).length} entries`);
+        }
+      } catch (e) {
+        // Ignore errors fetching source logos
       }
     }
 
@@ -999,6 +1024,24 @@ export class SyncService {
         // Map stream profile ID if present
         if (channel.stream_profile_id && profileMap[channel.stream_profile_id]) {
           channelData.stream_profile_id = profileMap[channel.stream_profile_id];
+        }
+
+        // Map logo ID using logoMap (source logo name -> dest logo ID)
+        if (logoMap && Object.keys(logoMap).length > 0) {
+          // Get source logo name from source logo ID
+          const sourceLogoId = channel.logo_id || channel.logo;
+          if (sourceLogoId != null && typeof sourceLogoId === 'number') {
+            const logoName = sourceLogoIdToName[sourceLogoId];
+            if (logoName) {
+              const destLogoId = logoMap[logoName.toLowerCase()];
+              if (destLogoId) {
+                channelData.logo_id = destLogoId;
+                if (debugLogged < debugLimit && jobId) {
+                  jobManager.addLog(jobId, `Channel "${channel.name}" logo: "${logoName}" (src=${sourceLogoId}) -> dest=${destLogoId}`);
+                }
+              }
+            }
+          }
         }
 
         // Match streams using lookup tables (similar to importService logic)
@@ -1798,10 +1841,46 @@ export class SyncService {
   private async syncLogos(
     source: DispatcharrClient,
     dest: DispatcharrClient,
-    dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+    dryRun?: boolean,
+    jobId?: string
+  ): Promise<{ synced: number; skipped: number; errors: number; logoMap: Record<string, number> }> {
+    // logoMap: source logo name (lowercase) -> destination logo ID
+    const logoMap: Record<string, number> = {};
+
+    // First, get all channels from source to find which logos are actually used by channels
+    const sourceChannels = await source.get('/api/channels/channels/').catch(() => []);
+    const channelsList = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
+    const channelLogoIds = new Set<number>();
+    for (const ch of channelsList) {
+      if (ch.logo_id != null) channelLogoIds.add(ch.logo_id);
+      if (ch.logo != null && typeof ch.logo === 'number') channelLogoIds.add(ch.logo);
+    }
+
+    // Now fetch all logos and filter to only channel logos (exclude VOD posters)
     const logos = await source.get('/api/channels/logos/');
-    const logoList = Array.isArray(logos) ? logos : logos.results || [];
+    const allLogos = Array.isArray(logos) ? logos : logos.results || [];
+    const logoList = allLogos.filter((l: any) => channelLogoIds.has(l.id));
+
+    if (jobId) {
+      jobManager.addLog(jobId, `Found ${allLogos.length} total logos, ${logoList.length} are channel logos (excluded ${allLogos.length - logoList.length} VOD posters)`);
+    }
+
+    // Fetch existing logos on destination to avoid duplicates
+    let existingLogos: any[] = [];
+    try {
+      const destLogos = await dest.get('/api/channels/logos/');
+      existingLogos = Array.isArray(destLogos) ? destLogos : destLogos.results || [];
+    } catch (e) {
+      // Destination may not have any logos yet
+    }
+    const existingByName: Record<string, number> = {};
+    for (const l of existingLogos) {
+      if (l.name && l.id) {
+        existingByName[l.name.toLowerCase()] = l.id;
+        // Also add existing logos to logoMap for channel assignment
+        logoMap[l.name.toLowerCase()] = l.id;
+      }
+    }
 
     let synced = 0;
     let skipped = 0;
@@ -1809,31 +1888,109 @@ export class SyncService {
 
     for (let i = 0; i < logoList.length; i++) {
       const logo = logoList[i];
-      if (!logo?.url) {
+      const logoName = logo.name || logo.id || `logo-${i}`;
+
+      if (!logo?.id) {
         skipped++;
+        if (jobId) {
+          jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" - no ID`);
+        }
+        continue;
+      }
+
+      // Skip if logo with same name already exists on destination
+      const existingDestId = existingByName[logoName.toString().toLowerCase()];
+      if (existingDestId) {
+        skipped++;
+        if (jobId) {
+          jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (src=${logo.id}, dest=${existingDestId}) - already exists on destination`);
+        }
         continue;
       }
 
       if (dryRun) {
         synced++;
+        if (jobId) {
+          jobManager.addLog(jobId, `[DRY] Logo "${logoName}" (id=${logo.id}) - would sync`);
+        }
         continue;
       }
 
       try {
-        const response = await source.get(logo.url, { responseType: 'arraybuffer' });
-        const buffer = Buffer.isBuffer(response) ? response : Buffer.from(response);
-        const name = logo.name || logo.id || `logo-${i}`;
-        await dest.post('/api/channels/logos/upload/', {
-          name,
-          url: `data:image/png;base64,${buffer.toString('base64')}`,
+        // Download logo using the cache endpoint with timeout
+        const response = await source.get(`/api/channels/logos/${logo.id}/cache/`, {
+          responseType: 'arraybuffer',
+          headers: { Accept: '*/*' },
+          timeout: 15000,
         });
+
+        const buffer = Buffer.isBuffer(response.data ?? response)
+          ? (response.data ?? response)
+          : Buffer.from(response.data ?? response);
+
+        if (buffer.length < 100) {
+          if (jobId) {
+            jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
+          }
+          skipped++;
+          continue;
+        }
+
+        // Determine file extension from URL
+        let ext = 'png';
+        let contentType = 'image/png';
+        const urlLower = (logo.url || '').toLowerCase();
+        if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) {
+          ext = 'jpg';
+          contentType = 'image/jpeg';
+        } else if (urlLower.includes('.webp')) {
+          ext = 'webp';
+          contentType = 'image/webp';
+        } else if (urlLower.includes('.gif')) {
+          ext = 'gif';
+          contentType = 'image/gif';
+        } else if (urlLower.includes('.svg')) {
+          ext = 'svg';
+          contentType = 'image/svg+xml';
+        }
+
+        // Upload using FormData
+        const FormData = (await import('form-data')).default;
+        const formData = new FormData();
+        formData.append('name', logoName.toString());
+        formData.append('file', buffer, {
+          filename: `${logoName}.${ext}`,
+          contentType,
+        });
+
+        const uploadResult = await dest.post('/api/channels/logos/upload/', formData, {
+          headers: formData.getHeaders(),
+        });
+
+        // Extract new destination ID from response
+        const newDestId = uploadResult?.id || uploadResult?.data?.id;
         synced++;
-      } catch (error) {
+        // Add to logoMap for channel assignment
+        if (newDestId && typeof newDestId === 'number') {
+          logoMap[logoName.toString().toLowerCase()] = newDestId;
+        }
+        if (jobId) {
+          jobManager.addLog(jobId, `[OK] Logo "${logoName}" (src=${logo.id} -> dest=${newDestId}) - ${buffer.length} bytes synced`);
+        }
+      } catch (error: any) {
         errors++;
+        if (jobId) {
+          jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (src=${logo.id}) - ${error.message}`);
+        }
       }
     }
 
-    return { synced, skipped, errors };
+    if (jobId) {
+      jobManager.addLog(jobId, `Logos: ${synced} synced, ${skipped} skipped, ${errors} failed`);
+      jobManager.addLog(jobId, `Logo map has ${Object.keys(logoMap).length} entries for channel assignment`);
+    }
+
+    return { synced, skipped, errors, logoMap };
   }
 
   private async triggerEpgRefresh(
