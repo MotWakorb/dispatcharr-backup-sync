@@ -462,12 +462,13 @@
                   {allImportOptionsSelected ? 'Deselect All' : 'Select All'}
                 </button>
               </div>
-              <div class="toggle-buttons">
+              <div class="toggle-buttons" role="group" aria-label="Restore options">
                 {#each availableSections as section}
                   <button
                     type="button"
                     class="toggle-btn {importOptions[section.optionKey] ? 'selected' : ''}"
                     on:click={() => toggleImportOption(section.optionKey)}
+                    aria-pressed={importOptions[section.optionKey] || false}
                   >
                     {section.label}
                   </button>

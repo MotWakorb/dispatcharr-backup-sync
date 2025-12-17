@@ -492,12 +492,13 @@
           <p class="text-sm text-gray">Display times in 12-hour (AM/PM) or 24-hour format.</p>
         </div>
         <div class="setting-control">
-          <div class="toggle-buttons-inline">
+          <div class="toggle-buttons-inline" role="group" aria-label="Time format">
             <button
               type="button"
               class="toggle-btn {selectedTimeFormat === '12h' ? 'selected' : ''}"
               on:click={() => selectedTimeFormat = '12h'}
               disabled={savingSettings}
+              aria-pressed={selectedTimeFormat === '12h'}
             >
               12-hour
             </button>
@@ -506,6 +507,7 @@
               class="toggle-btn {selectedTimeFormat === '24h' ? 'selected' : ''}"
               on:click={() => selectedTimeFormat = '24h'}
               disabled={savingSettings}
+              aria-pressed={selectedTimeFormat === '24h'}
             >
               24-hour
             </button>
@@ -519,12 +521,13 @@
           <p class="text-sm text-gray">Choose light, dark, or auto (follows system preference).</p>
         </div>
         <div class="setting-control">
-          <div class="toggle-buttons-inline">
+          <div class="toggle-buttons-inline" role="group" aria-label="Theme">
             <button
               type="button"
               class="toggle-btn {selectedTheme === 'light' ? 'selected' : ''}"
               on:click={() => selectedTheme = 'light'}
               disabled={savingSettings}
+              aria-pressed={selectedTheme === 'light'}
             >
               Light
             </button>
@@ -533,6 +536,7 @@
               class="toggle-btn {selectedTheme === 'dark' ? 'selected' : ''}"
               on:click={() => selectedTheme = 'dark'}
               disabled={savingSettings}
+              aria-pressed={selectedTheme === 'dark'}
             >
               Dark
             </button>
@@ -541,6 +545,7 @@
               class="toggle-btn {selectedTheme === 'auto' ? 'selected' : ''}"
               on:click={() => selectedTheme = 'auto'}
               disabled={savingSettings}
+              aria-pressed={selectedTheme === 'auto'}
             >
               Auto
             </button>
