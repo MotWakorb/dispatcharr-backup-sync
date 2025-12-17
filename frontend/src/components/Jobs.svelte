@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
+  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, cancelSync, cancelImport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
   import type { JobStatus, JobLogEntry } from '../types';
   import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS } from '../constants';
   import { toastStore } from '../stores/toastStore';
@@ -110,10 +110,18 @@
     }
   }
 
-  async function cancel(job: JobStatus) {
-    if (job.jobType !== 'backup' || job.status !== 'running') return;
+  async function cancel(event: Event, job: JobStatus) {
+    event.stopPropagation(); // Prevent row click from triggering
+    if (job.status !== 'running' && job.status !== 'pending') return;
     try {
-      await cancelExport(job.jobId);
+      if (job.jobType === 'backup') {
+        await cancelExport(job.jobId);
+      } else if (job.jobType === 'sync') {
+        await cancelSync(job.jobId);
+      } else if (job.jobType === 'restore') {
+        await cancelImport(job.jobId);
+      }
+      toastStore.info(`${job.jobType} job cancelled`);
       await loadJobs();
     } catch (err: unknown) {
       error = getErrorMessage(err, ERRORS.CANCEL_JOB);
@@ -196,6 +204,7 @@
               <th>Message</th>
               <th>Progress</th>
               <th>Started</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -224,6 +233,19 @@
                   {/if}
                 </td>
                 <td class="text-sm">{new Date(job.startedAt).toLocaleString()}</td>
+                <td class="actions">
+                  {#if job.status === 'running' || job.status === 'pending'}
+                    <button
+                      class="btn btn-danger btn-sm"
+                      on:click={(e) => cancel(e, job)}
+                      title="Cancel job"
+                    >
+                      Cancel
+                    </button>
+                  {:else}
+                    -
+                  {/if}
+                </td>
               </tr>
             {/each}
           </tbody>

@@ -162,6 +162,34 @@ syncRouter.get('/status/:jobId', (req, res) => {
   }
 });
 
+// Cancel sync job
+syncRouter.post('/cancel/:jobId', (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      });
+    }
+
+    jobManager.cancelJob(jobId, 'Cancelled by user');
+
+    res.json({
+      success: true,
+      message: 'Sync job cancelled',
+    });
+  } catch (error: any) {
+    log.error({ err: error }, 'Error cancelling sync job');
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to cancel sync job',
+    });
+  }
+});
+
 // Get all jobs
 syncRouter.get('/jobs', (req, res) => {
   try {

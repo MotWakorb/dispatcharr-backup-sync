@@ -155,6 +155,14 @@ export async function cancelExport(jobId: string): Promise<void> {
   await api.post<ApiResponse>(`/export/cancel/${jobId}`);
 }
 
+export async function cancelSync(jobId: string): Promise<void> {
+  await api.post<ApiResponse>(`/sync/cancel/${jobId}`);
+}
+
+export async function cancelImport(jobId: string): Promise<void> {
+  await api.post<ApiResponse>(`/import/cancel/${jobId}`);
+}
+
 // Jobs
 export async function listJobs(): Promise<JobStatus[]> {
   const response = await api.get<ApiResponse<JobStatus[]>>('/jobs');

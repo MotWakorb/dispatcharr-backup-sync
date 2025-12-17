@@ -261,3 +261,31 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
     });
   }
 });
+
+// Cancel import job
+importRouter.post('/cancel/:jobId', (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      });
+    }
+
+    jobManager.cancelJob(jobId, 'Cancelled by user');
+
+    res.json({
+      success: true,
+      message: 'Import job cancelled',
+    });
+  } catch (error: any) {
+    log.error({ err: error }, 'Error cancelling import job');
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to cancel import job',
+    });
+  }
+});
