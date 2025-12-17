@@ -10,8 +10,6 @@
   import { getVersionInfo } from './api';
   import type { VersionInfo } from './types';
 
-  console.log('App component init');
-
   let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' | 'schedules' | 'notifications' = 'sync';
 
   let versionInfo: VersionInfo | null = null;

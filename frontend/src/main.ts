@@ -23,7 +23,6 @@ async function initApp() {
   }
 
   const target = document.getElementById('app');
-  console.log('Mounting App', { targetExists: !!target });
 
   if (target) {
     mount(App, { target });

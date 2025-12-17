@@ -31,6 +31,7 @@
   let logs: JobLogEntry[] = [];
   let showLogs = false;
   let logsPoll: number | null = null;
+  let logsError: string | null = null;
   let detectedPlugins: PluginInfo[] = [];
   let showImportModal = false;
   let pluginDragging = false;
@@ -302,8 +303,9 @@
   async function loadLogs(jobId: string) {
     try {
       logs = await getJobLogs(jobId);
+      logsError = null;
     } catch (err: any) {
-      // ignore log load errors for now
+      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
     }
   }
 
@@ -629,7 +631,9 @@
           <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
         </div>
         <div class="logs-body">
-          {#if logs.length === 0}
+          {#if logsError}
+            <p class="text-sm text-error">{logsError}</p>
+          {:else if logs.length === 0}
             <p class="text-sm text-gray">No logs yet.</p>
           {:else}
             {#each logs as log (log.timestamp + log.message)}
