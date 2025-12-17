@@ -21,6 +21,20 @@ import type {
 } from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
 import { createLogger } from './logger.js';
+import {
+  DEFAULT_PAGE_SIZE,
+  EPG_PAGE_SIZE,
+  ERROR_TRUNCATE_LENGTH,
+  TEMP_FILE_MAX_AGE_MS,
+  EPG_WAIT_TIMEOUT_MS,
+  EPG_DATA_APPEARANCE_TIMEOUT_MS,
+  EPG_MIN_OBSERVATION_TIME_MS,
+  EPG_POLL_INTERVAL_MS,
+  STREAM_WAIT_TIMEOUT_MS,
+  STREAM_POLL_INTERVAL_MS,
+  M3U_REFRESH_WAIT_MS,
+  POST_REFRESH_DELAY_MS,
+} from '../constants.js';
 
 const log = createLogger('import');
 
@@ -117,7 +131,7 @@ export class ImportService {
   private async getAllPaginated(
     client: DispatcharrClient,
     endpoint: string,
-    pageSize = 1000,
+    pageSize = DEFAULT_PAGE_SIZE,
     jobId?: string
   ): Promise<any[]> {
     let page = 1;
@@ -217,7 +231,7 @@ export class ImportService {
         if (trimmed.startsWith('<!doctype html')) {
           return trimmed.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         }
-        const truncated = trimmed.length > 1000 ? `${trimmed.slice(0, 1000)}...` : trimmed;
+        const truncated = trimmed.length > ERROR_TRUNCATE_LENGTH ? `${trimmed.slice(0, ERROR_TRUNCATE_LENGTH)}...` : trimmed;
         return this.redactString(truncated);
       }
       if (data && typeof data === 'object') return this.redact(data);
@@ -1847,7 +1861,7 @@ export class ImportService {
             }
 
             // Wait for Dispatcharr to process the group changes before triggering refresh
-            await new Promise((resolve) => globalThis.setTimeout(resolve, 3000));
+            await new Promise((resolve) => globalThis.setTimeout(resolve, M3U_REFRESH_WAIT_MS));
 
             // Trigger refresh to pull streams for enabled groups
             let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
@@ -2866,7 +2880,7 @@ export class ImportService {
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
-            await new Promise((resolve) => globalThis.setTimeout(resolve, 1000));
+            await new Promise((resolve) => globalThis.setTimeout(resolve, POST_REFRESH_DELAY_MS));
 
             // Toggle back on
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: true });
@@ -2908,21 +2922,21 @@ export class ImportService {
   private async waitForEpgDataReady(
     client: DispatcharrClient,
     jobId: string,
-    timeoutMs: number = 600000, // 10 minutes - EPG downloads and parsing can take time
-    intervalMs: number = 10000, // Check every 10 seconds (less frequent polling)
+    timeoutMs: number = EPG_WAIT_TIMEOUT_MS, // EPG downloads and parsing can take time
+    intervalMs: number = EPG_POLL_INTERVAL_MS, // Less frequent polling
     stabilityChecks: number = 12 // Wait for count to be stable for 12 checks (2 minutes of stability)
   ): Promise<void> {
     const start = Date.now();
     let previousCount = 0;
     let stableCount = 0;
-    const dataAppearanceTimeout = 360000; // 6 minutes to wait for data to appear
-    const minObservationTime = 180000; // Minimum 3 minutes observation after first growth
+    const dataAppearanceTimeout = EPG_DATA_APPEARANCE_TIMEOUT_MS;
+    const minObservationTime = EPG_MIN_OBSERVATION_TIME_MS;
 
     jobManager.addLog(jobId, 'Waiting for EPG data to be downloaded and parsed...');
 
     // Get initial count - use a large page size to detect more entries
     try {
-      const initialResp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+      const initialResp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
       // Handle both array responses and paginated responses
       if (Array.isArray(initialResp)) {
         // If it's an array, it might be the full dataset - check length
@@ -2949,7 +2963,7 @@ export class ImportService {
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
         this.throwIfCancelled(jobId);
         try {
-          const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+          const resp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
           let currentCount = 0;
           if (Array.isArray(resp)) {
             currentCount = resp.length;
@@ -2989,7 +3003,7 @@ export class ImportService {
     while (Date.now() - start < timeoutMs) {
       this.throwIfCancelled(jobId);
       try {
-        const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+        const resp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
         let currentCount = 0;
         if (Array.isArray(resp)) {
           currentCount = resp.length;
@@ -3029,8 +3043,8 @@ export class ImportService {
   private async waitForStreams(
     client: DispatcharrClient,
     jobId: string,
-    timeoutMs: number = 120000,
-    intervalMs: number = 3000
+    timeoutMs: number = STREAM_WAIT_TIMEOUT_MS,
+    intervalMs: number = STREAM_POLL_INTERVAL_MS
   ): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -3070,7 +3084,7 @@ export class ImportService {
   /**
    * Cleanup stale temp files older than maxAgeMs (default: 1 hour)
    */
-  async cleanupStaleTempFiles(maxAgeMs: number = 60 * 60 * 1000): Promise<{ deleted: string[]; errors: string[] }> {
+  async cleanupStaleTempFiles(maxAgeMs: number = TEMP_FILE_MAX_AGE_MS): Promise<{ deleted: string[]; errors: string[] }> {
     const deleted: string[] = [];
     const errors: string[] = [];
     const now = Date.now();

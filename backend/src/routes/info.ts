@@ -3,6 +3,7 @@ import axios from 'axios';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createLogger } from '../services/logger.js';
+import { CACHE_TTL_MS, GITHUB_TIMEOUT_MS } from '../constants.js';
 
 const log = createLogger('info-route');
 
@@ -20,7 +21,7 @@ let releaseCache: {
   fetchedAt: number;
 } | null = null;
 
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// CACHE_TTL_MS imported from constants
 
 async function getCurrentVersion(): Promise<string> {
   // First try environment variable (set at Docker build time)
@@ -70,7 +71,7 @@ async function getLatestRelease(): Promise<{
         Accept: 'application/vnd.github.v3+json',
         'User-Agent': 'dispatcharr-backup-sync',
       },
-      timeout: 5000,
+      timeout: GITHUB_TIMEOUT_MS,
     });
 
     const tagName = response.data.tag_name as string;

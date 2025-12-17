@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { JobStatus, JobLogEntry } from '../types/index.js';
 import { createLogger } from './logger.js';
+import { CLEANUP_INTERVAL_MS } from '../constants.js';
 
 const logger = createLogger('jobs');
 const DATA_DIR = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
@@ -27,7 +28,7 @@ class JobManager {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
     }
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    this.cleanupInterval = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
     // Ensure the interval doesn't prevent process exit
     if (this.cleanupInterval.unref) {
       this.cleanupInterval.unref();
@@ -226,7 +227,7 @@ class JobManager {
 
   // Clean up old jobs (completed > 1 hour ago)
   cleanup(): void {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const oneHourAgo = new Date(Date.now() - CLEANUP_INTERVAL_MS);
     let cleaned = false;
     for (const [jobId, job] of this.jobs.entries()) {
       if (job.completedAt && job.completedAt < oneHourAgo) {

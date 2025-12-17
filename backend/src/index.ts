@@ -14,6 +14,7 @@ import { schedulerService } from './services/schedulerService.js';
 import { jobManager } from './services/jobManager.js';
 import { importService } from './services/importService.js';
 import { createLogger } from './services/logger.js';
+import { CLEANUP_INTERVAL_MS } from './constants.js';
 
 const log = createLogger('server');
 
@@ -92,7 +93,7 @@ app.listen(PORT, () => {
     importService.cleanupStaleTempFiles().catch((error) => {
       log.error({ err: error }, 'Periodic temp cleanup failed');
     });
-  }, 60 * 60 * 1000); // 1 hour
+  }, CLEANUP_INTERVAL_MS);
   if (tempCleanupInterval.unref) {
     tempCleanupInterval.unref(); // Don't prevent process exit
   }

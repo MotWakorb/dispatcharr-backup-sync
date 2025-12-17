@@ -4,7 +4,7 @@
   import JobProgress from './JobProgress.svelte';
   import { startImport, getImportStatus, listSavedConnections, inspectImportFile, getJobLogs, uploadPluginFiles } from '../api';
   import type { DispatcharrConnection, ImportOptions, JobStatus, SavedConnection, JobLogEntry, PluginInfo } from '../types';
-  import { ERRORS, STATUS, LABELS, VALIDATION, getErrorMessage } from '../constants';
+  import { ERRORS, STATUS, LABELS, VALIDATION, getErrorMessage, STATUS_POLL_INTERVAL_MS, LOG_POLL_INTERVAL_MS } from '../constants';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -313,7 +313,7 @@
   function startLogPolling(jobId: string) {
     stopLogPolling();
     loadLogs(jobId);
-    logsPoll = window.setInterval(() => loadLogs(jobId), 1000);
+    logsPoll = window.setInterval(() => loadLogs(jobId), LOG_POLL_INTERVAL_MS);
   }
 
   function stopLogPolling() {
@@ -329,7 +329,7 @@
       currentJob = job;
 
       if (job.status === 'running' || job.status === 'pending') {
-        pollInterval = window.setTimeout(() => pollJobStatus(jobId), 1000);
+        pollInterval = window.setTimeout(() => pollJobStatus(jobId), STATUS_POLL_INTERVAL_MS);
       } else {
         if (pollInterval) {
           clearTimeout(pollInterval);

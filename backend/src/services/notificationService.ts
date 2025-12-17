@@ -12,6 +12,7 @@ import type {
 import { notificationStore } from './notificationStore.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
+import { NOTIFICATION_DURATION_MS } from '../constants.js';
 
 const log = createLogger('notifications');
 import type { JobLogEntry } from '../types/index.js';
@@ -86,7 +87,7 @@ class NotificationService {
       jobType: 'backup',
       jobId: 'TEST-' + Date.now(),
       timestamp: new Date().toISOString(),
-      duration: 125000, // 2m 5s
+      duration: NOTIFICATION_DURATION_MS, // 2m 5s for test notification
     };
 
     // Create a temporary provider object for testing

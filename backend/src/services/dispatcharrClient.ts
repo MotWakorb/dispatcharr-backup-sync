@@ -3,6 +3,7 @@ import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
 import type { DispatcharrConnection, TestConnectionResponse } from '../types/index.js';
 import { createLogger } from './logger.js';
+import { HTTP_TIMEOUT_MS } from '../constants.js';
 
 const log = createLogger('http-client');
 
@@ -162,7 +163,7 @@ export class DispatcharrClient {
     this.cookieJar = new CookieJar();
     this.client = wrapper(axios.create({
       baseURL: connection.url,
-      timeout: 120000, // allow large imports
+      timeout: HTTP_TIMEOUT_MS, // allow large imports
       // Do not force Content-Type globally; set per-request so form uploads work
       headers: {
         Accept: 'application/json',

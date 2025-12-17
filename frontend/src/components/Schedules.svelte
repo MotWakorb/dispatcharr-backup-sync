@@ -21,6 +21,7 @@
     ScheduledJobType,
     TimeFormat,
   } from '../types';
+  import { SCHEDULE_POLL_INTERVAL_MS } from '../constants';
 
   // State
   let schedules: Schedule[] = [];
@@ -374,7 +375,7 @@
       } catch {
         // Ignore polling errors
       }
-    }, 10000);
+    }, SCHEDULE_POLL_INTERVAL_MS);
   }
 
   function stopPolling() {

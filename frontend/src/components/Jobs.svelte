@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
   import type { JobStatus, JobLogEntry } from '../types';
-  import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage } from '../constants';
+  import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS, TOAST_TIMEOUT_MS } from '../constants';
 
   let jobs: JobStatus[] = [];
   let history: JobStatus[] = [];
@@ -29,7 +29,7 @@
   onMount(() => {
     loadJobs(true);
     loadHistory();
-    pollInterval = window.setInterval(() => loadJobs(false), 3000);
+    pollInterval = window.setInterval(() => loadJobs(false), JOB_POLL_INTERVAL_MS);
   });
 
   onDestroy(() => {
@@ -46,7 +46,7 @@
     toast = { message, type };
     toastTimeout = window.setTimeout(() => {
       toast = null;
-    }, 5000);
+    }, TOAST_TIMEOUT_MS);
   }
 
   function dismissToast() {

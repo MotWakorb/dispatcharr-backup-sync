@@ -6,6 +6,7 @@
   import PluginUploadModal from './PluginUploadModal.svelte';
   import { startSync, getSyncStatus, listSavedConnections, comparePlugins, getJobLogs } from '../api';
   import type { DispatcharrConnection, SyncOptions, JobStatus, SavedConnection, PluginInfo } from '../types';
+  import { STATUS_POLL_INTERVAL_MS, LOG_POLL_INTERVAL_MS } from '../constants';
 
   let sourceConnection: DispatcharrConnection = {
     url: '',
@@ -56,6 +57,7 @@
   let showLogs = false;
   let logs: { timestamp: string; message: string }[] = [];
   let logsPoll: number | null = null;
+  let logsError: string | null = null;
 
   onMount(loadSavedConnections);
 
@@ -141,7 +143,7 @@
       }
 
       if (job.status === 'running' || job.status === 'pending') {
-        pollInterval = window.setTimeout(() => pollJobStatus(jobId), 1000);
+        pollInterval = window.setTimeout(() => pollJobStatus(jobId), STATUS_POLL_INTERVAL_MS);
       } else {
         if (pollInterval) {
           clearTimeout(pollInterval);
@@ -169,15 +171,16 @@
   async function loadLogs(jobId: string) {
     try {
       logs = await getJobLogs(jobId);
+      logsError = null;
     } catch (err: any) {
-      // ignore log load errors for now
+      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
     }
   }
 
   function startLogPolling(jobId: string) {
     stopLogPolling();
     loadLogs(jobId);
-    logsPoll = window.setInterval(() => loadLogs(jobId), 1000);
+    logsPoll = window.setInterval(() => loadLogs(jobId), LOG_POLL_INTERVAL_MS);
   }
 
   function stopLogPolling() {
@@ -322,7 +325,9 @@
           <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
         </div>
         <div class="logs-body">
-          {#if logs.length === 0}
+          {#if logsError}
+            <p class="text-sm text-error">{logsError}</p>
+          {:else if logs.length === 0}
             <p class="text-sm text-gray">No logs yet.</p>
           {:else}
             {#each logs as log (log.timestamp + log.message)}

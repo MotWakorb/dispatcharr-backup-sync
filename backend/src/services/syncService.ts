@@ -2,6 +2,18 @@ import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
 import type { SyncRequest, SyncOptions, SyncResult, SyncResultWithLogoMap, AssignmentResult } from '../types/index.js';
+import {
+  DEFAULT_PAGE_SIZE,
+  EPG_PAGE_SIZE,
+  EPG_WAIT_TIMEOUT_MS,
+  EPG_DATA_APPEARANCE_TIMEOUT_MS,
+  EPG_MIN_OBSERVATION_TIME_MS,
+  EPG_POLL_INTERVAL_MS,
+  STREAM_WAIT_TIMEOUT_MS,
+  STREAM_POLL_INTERVAL_MS,
+  LOGO_TIMEOUT_MS,
+  POST_REFRESH_DELAY_MS,
+} from '../constants.js';
 
 const log = createLogger('sync');
 
@@ -39,7 +51,7 @@ export class SyncService {
   private async getAllPaginated(client: any, endpoint: string, jobId?: string): Promise<any[]> {
     let allResults: any[] = [];
     let page = 1;
-    const pageSize = 1000;
+    const pageSize = DEFAULT_PAGE_SIZE;
 
     try {
       while (true) {
@@ -313,21 +325,21 @@ export class SyncService {
   private async waitForEpgData(
     client: DispatcharrClient,
     jobId: string,
-    timeoutMs: number = 600000, // 10 minutes - EPG downloads and parsing can take time
-    intervalMs: number = 10000, // Check every 10 seconds
+    timeoutMs: number = EPG_WAIT_TIMEOUT_MS, // EPG downloads and parsing can take time
+    intervalMs: number = EPG_POLL_INTERVAL_MS, // Less frequent polling
     stabilityChecks: number = 12 // Wait for count to be stable for 12 checks (2 minutes of stability)
   ): Promise<void> {
     const start = Date.now();
     let previousCount = 0;
     let stableCount = 0;
-    const dataAppearanceTimeout = 360000; // 6 minutes to wait for data to appear
-    const minObservationTime = 180000; // Minimum 3 minutes observation after first growth
+    const dataAppearanceTimeout = EPG_DATA_APPEARANCE_TIMEOUT_MS;
+    const minObservationTime = EPG_MIN_OBSERVATION_TIME_MS;
 
     jobManager.addLog(jobId, 'Waiting for EPG data to be downloaded and parsed...');
 
     // Get initial count
     try {
-      const initialResp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+      const initialResp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
       if (Array.isArray(initialResp)) {
         previousCount = initialResp.length;
       } else if (initialResp?.count != null) {
@@ -350,7 +362,7 @@ export class SyncService {
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
         this.throwIfCancelled(jobId);
         try {
-          const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+          const resp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
           let currentCount = 0;
           if (Array.isArray(resp)) {
             currentCount = resp.length;
@@ -390,7 +402,7 @@ export class SyncService {
     while (Date.now() - start < timeoutMs) {
       this.throwIfCancelled(jobId);
       try {
-        const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
+        const resp = await client.get(`/api/epg/epgdata/?page=1&page_size=${EPG_PAGE_SIZE}`);
         let currentCount = 0;
         if (Array.isArray(resp)) {
           currentCount = resp.length;
@@ -430,8 +442,8 @@ export class SyncService {
   private async waitForStreams(
     client: DispatcharrClient,
     jobId: string,
-    timeoutMs: number = 120000,
-    intervalMs: number = 3000
+    timeoutMs: number = STREAM_WAIT_TIMEOUT_MS,
+    intervalMs: number = STREAM_POLL_INTERVAL_MS
   ): Promise<void> {
     const start = Date.now();
     let lastCount = 0;
@@ -1988,7 +2000,7 @@ export class SyncService {
         const response = await source.get(`/api/channels/logos/${logo.id}/cache/`, {
           responseType: 'arraybuffer',
           headers: { Accept: '*/*' },
-          timeout: 15000,
+          timeout: LOGO_TIMEOUT_MS,
         });
 
         const buffer = Buffer.isBuffer(response.data ?? response)
@@ -2089,7 +2101,7 @@ export class SyncService {
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
-            await new Promise((resolve) => globalThis.setTimeout(resolve, 1000));
+            await new Promise((resolve) => globalThis.setTimeout(resolve, POST_REFRESH_DELAY_MS));
 
             // Toggle back on
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: true });

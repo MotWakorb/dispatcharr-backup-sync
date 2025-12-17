@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import type { ExportRequest, ExportOptions, CleanupResult } from '../types/index.js';
+import { DEFAULT_PAGE_SIZE, LOGO_TIMEOUT_MS } from '../constants.js';
 
 const log = createLogger('export');
 
@@ -28,7 +29,7 @@ export class ExportService {
   private async getAllPaginated(client: any, endpoint: string, jobId?: string): Promise<any[]> {
     let allResults: any[] = [];
     let page = 1;
-    const pageSize = 1000;
+    const pageSize = DEFAULT_PAGE_SIZE;
 
     while (true) {
       if (jobId) {
@@ -482,7 +483,7 @@ export class ExportService {
             const response = await client.get(`/api/channels/logos/${logo.id}/cache/`, {
               responseType: 'arraybuffer',
               headers: { Accept: '*/*' },
-              timeout: 15000, // 15 second timeout per logo
+              timeout: LOGO_TIMEOUT_MS, // timeout per logo
             });
 
             const buffer = Buffer.isBuffer(response.data ?? response)

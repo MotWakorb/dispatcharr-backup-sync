@@ -17,7 +17,7 @@
     JobStatus,
     SavedConnection,
   } from '../types';
-  import { ERRORS, STATUS, getErrorMessage } from '../constants';
+  import { ERRORS, STATUS, getErrorMessage, STATUS_POLL_INTERVAL_MS, LOG_POLL_INTERVAL_MS } from '../constants';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -102,7 +102,7 @@
       }
 
       if (job.status === 'running' || job.status === 'pending') {
-        pollInterval = window.setTimeout(() => pollJobStatus(jobId), 1000);
+        pollInterval = window.setTimeout(() => pollJobStatus(jobId), STATUS_POLL_INTERVAL_MS);
       } else {
         if (pollInterval) {
           clearTimeout(pollInterval);
@@ -158,7 +158,7 @@
   function startLogPolling(jobId: string) {
     stopLogPolling();
     loadLogs(jobId);
-    logsPoll = window.setInterval(() => loadLogs(jobId), 1000);
+    logsPoll = window.setInterval(() => loadLogs(jobId), LOG_POLL_INTERVAL_MS);
   }
 
   function stopLogPolling() {

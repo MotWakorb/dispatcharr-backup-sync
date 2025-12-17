@@ -1,7 +1,17 @@
 /**
- * Centralized UI strings to avoid duplication across components.
+ * Centralized UI strings and constants to avoid duplication across components.
  * This also makes future i18n easier if needed.
  */
+
+// Timing constants (milliseconds)
+export const JOB_POLL_INTERVAL_MS = 3000; // 3 seconds for job list polling
+export const STATUS_POLL_INTERVAL_MS = 1000; // 1 second for job status polling
+export const LOG_POLL_INTERVAL_MS = 1000; // 1 second for log polling
+export const SCHEDULE_POLL_INTERVAL_MS = 10000; // 10 seconds for schedule polling
+export const TOAST_TIMEOUT_MS = 5000; // 5 seconds for toast notifications
+
+// Z-index values
+export const Z_INDEX_OVERLAY = 1000;
 
 // Generic error messages
 export const ERRORS = {
