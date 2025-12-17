@@ -50,8 +50,13 @@
         }
       }
     }
-    // Update tracked statuses
-    previousJobStatuses = new Map(newJobs.map(j => [j.jobId, j.status]));
+    // Update tracked statuses - only track active jobs (pending/running)
+    // Completed/failed/cancelled jobs won't change status, so no need to track them
+    previousJobStatuses = new Map(
+      newJobs
+        .filter(j => j.status === 'pending' || j.status === 'running')
+        .map(j => [j.jobId, j.status])
+    );
   }
 
   async function loadJobs(manual: boolean = false) {
@@ -63,8 +68,12 @@
       if (initialized) {
         checkForCompletions(newJobs);
       } else {
-        // Initial load - just track statuses
-        previousJobStatuses = new Map(newJobs.map(j => [j.jobId, j.status]));
+        // Initial load - only track active jobs (pending/running)
+        previousJobStatuses = new Map(
+          newJobs
+            .filter(j => j.status === 'pending' || j.status === 'running')
+            .map(j => [j.jobId, j.status])
+        );
       }
       jobs = newJobs;
     } catch (err: unknown) {
