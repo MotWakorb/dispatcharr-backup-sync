@@ -379,7 +379,7 @@
     {/if}
 
     {#if loadingList}
-      <p>Loading saved connections...</p>
+      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading saved connections...</span></div>
     {:else if savedConnections.length === 0}
       <div class="empty-state">
         <p class="text-gray">No saved connections yet.</p>

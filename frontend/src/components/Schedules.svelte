@@ -230,7 +230,7 @@
     {/if}
 
     {#if loading}
-      <p>Loading schedules...</p>
+      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading schedules...</span></div>
     {:else if schedules.length === 0}
       <div class="empty-state">
         <p class="text-gray">No schedules yet.</p>

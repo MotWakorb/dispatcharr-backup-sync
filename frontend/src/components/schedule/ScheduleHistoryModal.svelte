@@ -43,7 +43,7 @@
       </div>
 
       {#if loading}
-        <p>Loading history...</p>
+        <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading history...</span></div>
       {:else if entries.length === 0}
         <div class="empty-state">
           <p class="text-gray">No run history yet.</p>

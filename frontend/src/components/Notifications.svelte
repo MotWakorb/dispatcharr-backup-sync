@@ -293,7 +293,7 @@
     {/if}
 
     {#if loadingList}
-      <p>Loading notification providers...</p>
+      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading notification providers...</span></div>
     {:else if providers.length === 0}
       <div class="empty-state">
         <p class="text-gray">No notification providers configured.</p>
@@ -425,7 +425,7 @@
         </div>
       </div>
     {:else}
-      <p>Loading settings...</p>
+      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading settings...</span></div>
     {/if}
   </div>
 
