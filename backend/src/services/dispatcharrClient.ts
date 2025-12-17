@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
-import type { DispatcharrConnection } from '../types/index.js';
+import type { DispatcharrConnection, TestConnectionResponse } from '../types/index.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('http-client');
@@ -335,7 +335,7 @@ export class DispatcharrClient {
     }
   }
 
-  async testConnection(): Promise<{ success: boolean; message: string; version?: string }> {
+  async testConnection(): Promise<TestConnectionResponse> {
     try {
       log.debug({ url: this.connection.url }, 'Testing connection');
       await this.authenticate();

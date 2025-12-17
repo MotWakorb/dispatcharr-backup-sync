@@ -5,7 +5,7 @@ import archiver from 'archiver';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
-import type { ExportRequest, ExportOptions } from '../types/index.js';
+import type { ExportRequest, ExportOptions, CleanupResult } from '../types/index.js';
 
 const log = createLogger('export');
 
@@ -702,7 +702,7 @@ export class ExportService {
    * Cleanup old backups based on retention policy
    * @param jobIdsToDelete Array of job IDs whose backup files should be deleted
    */
-  async cleanupOldBackups(jobIdsToDelete: string[]): Promise<{ deleted: string[]; errors: string[] }> {
+  async cleanupOldBackups(jobIdsToDelete: string[]): Promise<CleanupResult> {
     const deleted: string[] = [];
     const errors: string[] = [];
 

@@ -1,7 +1,7 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
-import type { SyncRequest, SyncOptions } from '../types/index.js';
+import type { SyncRequest, SyncOptions, SyncResult, SyncResultWithLogoMap, AssignmentResult } from '../types/index.js';
 
 const log = createLogger('sync');
 
@@ -78,7 +78,7 @@ export class SyncService {
     sourceClient: DispatcharrClient,
     destClient: DispatcharrClient,
     jobId: string
-  ): Promise<{ assigned: number; skipped: number; errors: number }> {
+  ): Promise<AssignmentResult> {
     let assigned = 0;
     let skipped = 0;
     let errors = 0;
@@ -742,7 +742,7 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean,
     jobId?: string
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceGroups = await source.get('/api/channels/groups/');
     // Fetch current dest groups - M3U refresh may have already created many of them
     const destGroups = await dest.get('/api/channels/groups/');
@@ -792,7 +792,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceProfiles = await source.get('/api/channels/profiles/');
     const destProfiles = await dest.get('/api/channels/profiles/');
 
@@ -895,7 +895,7 @@ export class SyncService {
     dryRun?: boolean,
     jobId?: string,
     logoMap?: Record<string, number>
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceChannels = await source.get('/api/channels/channels/');
     const destChannels = await dest.get('/api/channels/channels/');
 
@@ -1273,7 +1273,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceUsers = await source.get('/api/accounts/users/');
     const destUsers = await dest.get('/api/accounts/users/');
 
@@ -1327,7 +1327,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourcePluginsResp = await source.get('/api/plugins/plugins/');
     const destPluginsResp = await dest.get('/api/plugins/plugins/');
 
@@ -1377,7 +1377,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceRules = await source.get('/api/channels/recurring-rules/');
     const destRules = await dest.get('/api/channels/recurring-rules/');
 
@@ -1428,7 +1428,7 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean,
     jobId?: string
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceAccounts = await source.get('/api/m3u/accounts/');
     const destAccounts = await dest.get('/api/m3u/accounts/');
 
@@ -1651,7 +1651,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceProfiles = await source.get('/api/core/streamprofiles/');
     const destProfiles = await dest.get('/api/core/streamprofiles/');
 
@@ -1691,7 +1691,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceAgents = await source.get('/api/core/useragents/');
     const destAgents = await dest.get('/api/core/useragents/');
 
@@ -1731,7 +1731,7 @@ export class SyncService {
     source: DispatcharrClient,
     dest: DispatcharrClient,
     dryRun?: boolean
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     try {
       const sourceResp = await source.get('/api/core/settings/');
       const sourceList = Array.isArray(sourceResp)
@@ -1805,7 +1805,7 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean,
     jobId?: string
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     const sourceSources = await source.get('/api/epg/sources/');
     const destSources = await dest.get('/api/epg/sources/');
 
@@ -1859,7 +1859,7 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean,
     jobId?: string
-  ): Promise<{ synced: number; skipped: number; errors: number }> {
+  ): Promise<SyncResult> {
     try {
       const config = await source.get('/api/channels/dvr/comskip-config/');
 
@@ -1910,7 +1910,7 @@ export class SyncService {
     dest: DispatcharrClient,
     dryRun?: boolean,
     jobId?: string
-  ): Promise<{ synced: number; skipped: number; errors: number; logoMap: Record<string, number> }> {
+  ): Promise<SyncResultWithLogoMap> {
     // logoMap: source logo name (lowercase) -> destination logo ID
     const logoMap: Record<string, number> = {};
 

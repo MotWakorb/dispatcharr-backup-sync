@@ -8,7 +8,17 @@ import FormData from 'form-data';
 import AdmZip from 'adm-zip';
 import tar from 'tar';
 import { v4 as uuidv4 } from 'uuid';
-import type { ImportOptions, ImportRequest } from '../types/index.js';
+import type {
+  ImportOptions,
+  ImportRequest,
+  ImportResult,
+  ImportResultWithIdMap,
+  ImportResultWithLogoMap,
+  InspectResult,
+  ExtractResult,
+  CachedUpload,
+  LogoFileData,
+} from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
 import { createLogger } from './logger.js';
 
@@ -622,7 +632,7 @@ export class ImportService {
     return undefined;
   }
 
-  private async extractZip(zipPath: string): Promise<{ configPath: string; baseDir: string }> {
+  private async extractZip(zipPath: string): Promise<ExtractResult> {
     const extractDir = path.join(this.tempDir, 'zip-' + Date.now());
     await mkdir(extractDir, { recursive: true });
 
@@ -654,7 +664,7 @@ export class ImportService {
     return { configPath, baseDir: extractDir };
   }
 
-  private async extractTarGz(tarPath: string): Promise<{ configPath: string; baseDir: string }> {
+  private async extractTarGz(tarPath: string): Promise<ExtractResult> {
     const extractDir = path.join(this.tempDir, 'extract-' + Date.now());
     await mkdir(extractDir, { recursive: true });
 
@@ -671,7 +681,7 @@ export class ImportService {
     return { configPath, baseDir: extractDir };
   }
 
-  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<{ name: string; data: string; ext: string; original_name?: string }[]> {
+  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<LogoFileData[]> {
     const logosDir = path.join(baseDir, 'logos');
     try {
       const files = await fsp.readdir(logosDir, { withFileTypes: true });
@@ -776,7 +786,7 @@ export class ImportService {
     }
   }
 
-  async inspect(request: ImportRequest): Promise<{ sections: string[]; uploadId?: string; plugins?: any[] }> {
+  async inspect(request: ImportRequest): Promise<InspectResult> {
     // Reuse the import flow up to parsing so the UI can offer section toggles for archives
     let tempFilePath: string | null = null;
     let configFilePath: string | null = null;
@@ -853,7 +863,7 @@ export class ImportService {
     }
   }
 
-  async getCachedUpload(uploadId: string): Promise<{ buffer: Buffer; fileName: string }> {
+  async getCachedUpload(uploadId: string): Promise<CachedUpload> {
     const cacheFile = path.join(this.cacheDir, `${uploadId}`);
     const metaFile = `${cacheFile}.meta`;
     const [buffer, metaRaw] = await Promise.all([fsp.readFile(cacheFile), fsp.readFile(metaFile)]);
@@ -890,7 +900,7 @@ export class ImportService {
   private async importChannelGroups(
     client: DispatcharrClient,
     groups: any[]
-  ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
+  ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/channels/groups/');
     let imported = 0;
     let skipped = 0;
@@ -929,7 +939,7 @@ export class ImportService {
   private async importChannelProfiles(
     client: DispatcharrClient,
     profiles: any[]
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existing = await client.get('/api/channels/profiles/');
     let imported = 0;
     let skipped = 0;
@@ -1050,7 +1060,7 @@ export class ImportService {
       channelGroupMap?: Record<string | number, number>;
       logoMap?: Record<string, number>;
     }
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existingChannels = await client.get('/api/channels/channels/').catch(this.warnOnFail('/api/channels/channels/', [], jobId));
     const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const existingProfiles = await client.get('/api/channels/profiles/').catch(this.warnOnFail('/api/channels/profiles/', [], jobId));
@@ -1518,7 +1528,7 @@ export class ImportService {
     client: DispatcharrClient,
     sources: any[],
     jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existing = await client.get('/api/m3u/accounts/').catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
     const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const groupByName: Record<string, number> = Array.isArray(existingGroups)
@@ -1872,7 +1882,7 @@ export class ImportService {
     client: DispatcharrClient,
     profiles: any[],
     jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
+  ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
     let imported = 0;
     let skipped = 0;
@@ -1910,7 +1920,7 @@ export class ImportService {
     client: DispatcharrClient,
     agents: any[],
     jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
+  ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/core/useragents/').catch(this.warnOnFail('/api/core/useragents/', [], jobId));
     let imported = 0;
     let skipped = 0;
@@ -1947,7 +1957,7 @@ export class ImportService {
   private async importEPGSources(
     client: DispatcharrClient,
     sources: any[]
-  ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
+  ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/epg/sources/');
     let imported = 0;
     let skipped = 0;
@@ -1993,7 +2003,7 @@ export class ImportService {
     epgData: any[],
     jobId: string,
     opts?: { epgSourceMap?: Record<string | number, number> }
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existing = await this.getAllPaginated(client, '/api/epg/epgdata/', 1000, jobId);
     const byTvg: Record<string, any> = {};
     const byName: Record<string, any> = {};
@@ -2056,7 +2066,7 @@ export class ImportService {
   private async importPlugins(
     client: DispatcharrClient,
     plugins: any
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existingResponse = await client.get('/api/plugins/plugins/');
     const existingList = Array.isArray(existingResponse)
       ? existingResponse
@@ -2100,7 +2110,7 @@ export class ImportService {
   private async importDVRRules(
     client: DispatcharrClient,
     rules: any[]
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existing = await client.get('/api/channels/recurring-rules/');
     let imported = 0;
     let skipped = 0;
@@ -2141,7 +2151,7 @@ export class ImportService {
     client: DispatcharrClient,
     users: any[],
     jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     const existing = await client.get('/api/accounts/users/');
     let imported = 0;
     let skipped = 0;
@@ -2204,7 +2214,7 @@ export class ImportService {
       streamProfileMap?: Record<string | number, number>;
       userAgentMap?: Record<string | number, number>;
     }
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     try {
       const items = (Array.isArray(settings) ? settings : [settings]).filter(
         (s) => s && typeof s === 'object'
@@ -2298,7 +2308,7 @@ export class ImportService {
     client: DispatcharrClient,
     config: any,
     jobId: string
-  ): Promise<{ imported: number; skipped: number; errors: number }> {
+  ): Promise<ImportResult> {
     try {
       const value = typeof config === 'string' ? config : config?.config || '';
       if (!value || typeof value !== 'string' || value.toLowerCase().includes('<!doctype html')) {
@@ -2323,7 +2333,7 @@ export class ImportService {
     client: DispatcharrClient,
     logos: any[],
     jobId?: string
-  ): Promise<{ imported: number; skipped: number; errors: number; logoMap: Record<string, number> }> {
+  ): Promise<ImportResultWithLogoMap> {
     let imported = 0;
     let skipped = 0;
     let errors = 0;

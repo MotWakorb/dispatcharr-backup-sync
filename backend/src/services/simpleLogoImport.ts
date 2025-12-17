@@ -1,6 +1,7 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import FormData from 'form-data';
 import { createLogger } from './logger.js';
+import type { SimpleLogoImportResult } from '../types/index.js';
 
 const log = createLogger('logo-import');
 
@@ -35,7 +36,7 @@ export async function simpleImportLogos(
   client: DispatcharrClient,
   logos: Array<{ original_name?: string; name?: string; source_id?: number; data: string; ext?: string }>,
   jobId?: string
-): Promise<{ imported: number; errors: number; logoMap: Record<string, number> }> {
+): Promise<SimpleLogoImportResult> {
   let imported = 0;
   let errors = 0;
   const logoMap: Record<string, number> = {};

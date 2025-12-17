@@ -126,3 +126,107 @@ export interface ScheduleRunHistoryEntry {
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   error?: string;
 }
+
+// ============================================
+// Service Result Interfaces
+// ============================================
+
+/**
+ * Base result for import operations
+ */
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
+ * Import result with ID mapping (for entities that need to track old->new ID mappings)
+ */
+export interface ImportResultWithIdMap extends ImportResult {
+  idMap: Record<string | number, number>;
+}
+
+/**
+ * Import result with logo mapping
+ */
+export interface ImportResultWithLogoMap extends ImportResult {
+  logoMap: Record<string, number>;
+}
+
+/**
+ * Base result for sync operations
+ */
+export interface SyncResult {
+  synced: number;
+  skipped: number;
+  errors: number;
+}
+
+/**
+ * Sync result with logo mapping
+ */
+export interface SyncResultWithLogoMap extends SyncResult {
+  logoMap: Record<string, number>;
+}
+
+/**
+ * Result from file inspection before import
+ */
+export interface InspectResult {
+  sections: string[];
+  uploadId?: string;
+  plugins?: any[];
+}
+
+/**
+ * Result from archive extraction (zip/tar.gz)
+ */
+export interface ExtractResult {
+  configPath: string;
+  baseDir: string;
+}
+
+/**
+ * Cached file upload data
+ */
+export interface CachedUpload {
+  buffer: Buffer;
+  fileName: string;
+}
+
+/**
+ * Result from backup cleanup operations
+ */
+export interface CleanupResult {
+  deleted: string[];
+  errors: string[];
+}
+
+/**
+ * Logo file data structure
+ */
+export interface LogoFileData {
+  name: string;
+  data: string;
+  ext: string;
+  original_name?: string;
+}
+
+/**
+ * Result from logo import in simpleLogoImport
+ */
+export interface SimpleLogoImportResult {
+  imported: number;
+  errors: number;
+  logoMap: Record<string, number>;
+}
+
+/**
+ * Result for EPG/channel assignment operations
+ */
+export interface AssignmentResult {
+  assigned: number;
+  skipped: number;
+  errors: number;
+}
