@@ -309,7 +309,6 @@
     { key: 'syncDVRRules' as keyof SyncOptions, label: 'DVR Rules' },
     { key: 'syncComskipConfig' as keyof SyncOptions, label: 'Comskip Config' },
     { key: 'syncUsers' as keyof SyncOptions, label: 'Users' },
-    { key: 'syncLogos' as keyof SyncOptions, label: 'Logos' },
   ];
 
   function getDefaultFormData(): ScheduleInput {
@@ -331,7 +330,7 @@
         syncDVRRules: true,
         syncComskipConfig: true,
         syncUsers: true,
-        syncLogos: false, // Off by default due to performance impact
+        syncLogos: true,
       },
       schedulePreset: 'daily',
       cronExpression: undefined,
@@ -606,7 +605,6 @@
       syncDVRRules: newValue,
       syncComskipConfig: newValue,
       syncUsers: newValue,
-      syncLogos: newValue,
     };
   }
 
