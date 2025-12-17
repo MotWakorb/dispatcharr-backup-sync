@@ -420,104 +420,124 @@ export class ExportService {
       const workDir = path.join(this.backupDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
-      // Download logos to logos/ directory
+      // Process logos - separate local files from URL-based logos
       if (logosToExport.length > 0) {
-        // Logo download gets 35% of progress (from 60% to 95%)
         const logoStartProgress = 60;
         const logoEndProgress = 95;
-        jobManager.setProgress(jobId, logoStartProgress, `Downloading ${logosToExport.length} logos...`);
+
+        // Separate logos into local files vs URL-based
+        const localLogos = logosToExport.filter((l: any) => {
+          const url = l.url || '';
+          // Local files start with /data/logos or don't start with http
+          return url.startsWith('/data/logos') || (!url.startsWith('http://') && !url.startsWith('https://'));
+        });
+        const urlLogos = logosToExport.filter((l: any) => {
+          const url = l.url || '';
+          return url.startsWith('http://') || url.startsWith('https://');
+        });
+
+        jobManager.addLog(jobId, `Found ${localLogos.length} local file logos and ${urlLogos.length} URL-based logos`);
+
         const logosDir = path.join(workDir, 'logos');
         await mkdir(logosDir, { recursive: true });
 
+        // Save URL-based logos to a JSON file (no download needed)
+        if (urlLogos.length > 0) {
+          const urlLogoData = urlLogos.map((l: any) => ({
+            source_id: l.id,
+            name: l.name,
+            url: l.url,
+          }));
+          const urlLogosPath = path.join(logosDir, 'url_logos.json');
+          await writeFile(urlLogosPath, JSON.stringify(urlLogoData, null, 2));
+          jobManager.addLog(jobId, `Saved ${urlLogos.length} URL-based logos to url_logos.json`);
+        }
+
+        // Download only local file logos
         let downloaded = 0;
         let failed = 0;
         let tooSmall = 0;
 
-        // Track used filenames to avoid collisions, and store metadata
-        const usedFilenames = new Set<string>();
-        const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
+        if (localLogos.length > 0) {
+          jobManager.setProgress(jobId, logoStartProgress, `Downloading ${localLogos.length} local logos...`);
 
-        for (let i = 0; i < logosToExport.length; i++) {
-          const logo = logosToExport[i];
-          if (!logo?.id) continue;
+          const usedFilenames = new Set<string>();
+          const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
 
-          // Update progress every 50 logos
-          if (i % 50 === 0) {
-            const logoProgress = logoStartProgress + ((i / logosToExport.length) * (logoEndProgress - logoStartProgress));
-            jobManager.setProgress(jobId, Math.round(logoProgress), `Downloading logos: ${i + 1}/${logosToExport.length}...`);
-          }
+          for (let i = 0; i < localLogos.length; i++) {
+            const logo = localLogos[i];
+            if (!logo?.id) continue;
 
-          // Log every 500 logos
-          if ((i + 1) % 500 === 0) {
-            jobManager.addLog(jobId, `Downloading logos: ${i + 1}/${logosToExport.length}...`);
-          }
-
-          const logoName = logo.name || `logo-${logo.id}`;
-          try {
-            // Download logo using the cache endpoint with timeout
-            const response = await client.get(`/api/channels/logos/${logo.id}/cache/`, {
-              responseType: 'arraybuffer',
-              headers: { Accept: '*/*' },
-              timeout: 15000, // 15 second timeout per logo
-            });
-
-            const buffer = Buffer.isBuffer(response.data ?? response)
-              ? (response.data ?? response)
-              : Buffer.from(response.data ?? response);
-
-            if (buffer.length < 100) {
-              tooSmall++;
-              jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
-              continue;
+            if (i % 50 === 0) {
+              const logoProgress = logoStartProgress + ((i / localLogos.length) * (logoEndProgress - logoStartProgress));
+              jobManager.setProgress(jobId, Math.round(logoProgress), `Downloading local logos: ${i + 1}/${localLogos.length}...`);
             }
 
-            // Determine file extension from content type or URL
-            let ext = 'png';
-            const urlLower = (logo.url || '').toLowerCase();
-            if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) ext = 'jpg';
-            else if (urlLower.includes('.webp')) ext = 'webp';
-            else if (urlLower.includes('.gif')) ext = 'gif';
-            else if (urlLower.includes('.svg')) ext = 'svg';
-
-            // Use logo name or ID as filename, handle collisions
-            let safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
-            let filename = `${safeName}.${ext}`;
-            let suffix = 2;
-
-            // Handle filename collisions by adding a numeric suffix
-            while (usedFilenames.has(filename.toLowerCase())) {
-              filename = `${safeName}_${suffix}.${ext}`;
-              suffix++;
+            if ((i + 1) % 100 === 0) {
+              jobManager.addLog(jobId, `Downloading local logos: ${i + 1}/${localLogos.length}...`);
             }
-            usedFilenames.add(filename.toLowerCase());
 
-            const filePath = path.join(logosDir, filename);
-            await writeFile(filePath, buffer);
+            const logoName = logo.name || `logo-${logo.id}`;
+            try {
+              const response = await client.get(`/api/channels/logos/${logo.id}/cache/`, {
+                responseType: 'arraybuffer',
+                headers: { Accept: '*/*' },
+                timeout: 15000,
+              });
 
-            // Store metadata mapping original name to filename
-            logoMetadata.push({
-              original_name: logoName,
-              filename: filename,
-              source_id: logo.id,
-            });
+              const buffer = Buffer.isBuffer(response.data ?? response)
+                ? (response.data ?? response)
+                : Buffer.from(response.data ?? response);
 
-            downloaded++;
-            jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`);
-          } catch (error: any) {
-            failed++;
-            jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`);
+              if (buffer.length < 100) {
+                tooSmall++;
+                jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
+                continue;
+              }
+
+              let ext = 'png';
+              const urlLower = (logo.url || '').toLowerCase();
+              if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) ext = 'jpg';
+              else if (urlLower.includes('.webp')) ext = 'webp';
+              else if (urlLower.includes('.gif')) ext = 'gif';
+              else if (urlLower.includes('.svg')) ext = 'svg';
+
+              let safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
+              let filename = `${safeName}.${ext}`;
+              let suffix = 2;
+
+              while (usedFilenames.has(filename.toLowerCase())) {
+                filename = `${safeName}_${suffix}.${ext}`;
+                suffix++;
+              }
+              usedFilenames.add(filename.toLowerCase());
+
+              const filePath = path.join(logosDir, filename);
+              await writeFile(filePath, buffer);
+
+              logoMetadata.push({
+                original_name: logoName,
+                filename: filename,
+                source_id: logo.id,
+              });
+
+              downloaded++;
+              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`);
+            } catch (error: any) {
+              failed++;
+              jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`);
+            }
+          }
+
+          if (logoMetadata.length > 0) {
+            const metadataPath = path.join(logosDir, 'metadata.json');
+            await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
+            jobManager.addLog(jobId, `Saved logo metadata for ${logoMetadata.length} local logos`);
           }
         }
 
-        // Save logo metadata for import to use
-        if (logoMetadata.length > 0) {
-          const metadataPath = path.join(logosDir, 'metadata.json');
-          await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
-          jobManager.addLog(jobId, `Saved logo metadata for ${logoMetadata.length} logos`);
-        }
-
-        jobManager.addLog(jobId, `Logos: ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`);
-        exportData.data.logos = { count: downloaded, failed, tooSmall };
+        jobManager.addLog(jobId, `Logos: ${downloaded} local downloaded, ${urlLogos.length} URL-based saved, ${failed} failed, ${tooSmall} too small`);
+        exportData.data.logos = { count: downloaded, urlBased: urlLogos.length, failed, tooSmall };
       }
 
       const jsonPath = path.join(workDir, 'config.json');
