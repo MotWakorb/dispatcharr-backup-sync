@@ -2,6 +2,9 @@ import { Router } from 'express';
 import axios from 'axios';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('info-route');
 
 const router = Router();
 
@@ -84,7 +87,7 @@ async function getLatestRelease(): Promise<{
 
     return { latestVersion, releaseUrl };
   } catch (error) {
-    console.warn('Failed to fetch latest release from GitHub:', error);
+    log.warn({ err: error }, 'Failed to fetch latest release from GitHub');
     return { latestVersion: null, releaseUrl: null };
   }
 }
@@ -127,7 +130,7 @@ router.get('/', async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('Error getting version info:', error);
+    log.error({ err: error }, 'Error getting version info');
     res.status(500).json({
       success: false,
       error: 'Failed to get version info',

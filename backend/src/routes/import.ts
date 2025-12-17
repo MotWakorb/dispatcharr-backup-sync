@@ -5,6 +5,9 @@ import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import multer from 'multer';
 import FormData from 'form-data';
 import type { ImportRequest, DispatcharrConnection } from '../types/index.js';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('import-route');
 
 export const importRouter = Router();
 
@@ -19,6 +22,7 @@ const upload = multer({
 // Start a new import job
 importRouter.post('/inspect', upload.single('file'), async (req, res) => {
   try {
+    log.debug({ filename: req.file?.originalname }, 'Inspect route received file');
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'File is required' });
     }
@@ -31,10 +35,12 @@ importRouter.post('/inspect', upload.single('file'), async (req, res) => {
       format,
     };
 
+    log.debug('Calling importService.inspect');
     const result = await importService.inspect(request);
+    log.debug({ sections: Object.keys(result.sections || {}) }, 'Inspect result');
     res.json({ success: true, data: result });
   } catch (error: any) {
-    console.error('Error inspecting import file:', error);
+    log.error({ err: error }, 'Error inspecting import file');
     res.status(400).json({
       success: false,
       error: error.message || 'Failed to inspect file',
@@ -118,7 +124,7 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
     importService
       .import(request, jobId)
       .catch((error) => {
-        console.error(`Import job ${jobId} failed:`, error);
+        log.error({ jobId, err: error }, 'Import job failed');
       });
 
     // Return job ID immediately
@@ -130,7 +136,7 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('Error starting import:', error);
+    log.error({ err: error }, 'Error starting import');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to start import job',
@@ -156,7 +162,7 @@ importRouter.get('/status/:jobId', (req, res) => {
       data: status,
     });
   } catch (error: any) {
-    console.error('Error getting job status:', error);
+    log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get job status',
@@ -218,13 +224,13 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
         });
 
         results.uploaded++;
-        console.log(`Successfully uploaded plugin: ${file.originalname}`);
+        log.info({ plugin: file.originalname }, 'Successfully uploaded plugin');
       } catch (error: any) {
         const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || 'Unknown error';
         const statusCode = error.response?.status;
         const errorLower = errorMsg.toLowerCase();
 
-        console.log(`Plugin upload error for ${file.originalname}: status=${statusCode}, message="${errorMsg}"`);
+        log.debug({ plugin: file.originalname, statusCode, errorMsg }, 'Plugin upload error');
 
         // Check if this is an "already exists" error - treat as skipped, not error
         // Must be a 409 Conflict OR specifically mention plugin/version already exists
@@ -235,10 +241,10 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
 
         if (isAlreadyExists) {
           results.skipped.push(file.originalname);
-          console.log(`Plugin already installed: ${file.originalname}`);
+          log.info({ plugin: file.originalname }, 'Plugin already installed');
         } else {
           results.errors.push(`${file.originalname}: ${errorMsg}`);
-          console.error(`Failed to upload plugin ${file.originalname}:`, errorMsg);
+          log.error({ plugin: file.originalname, errorMsg }, 'Failed to upload plugin');
         }
       }
     }
@@ -248,7 +254,7 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
       data: results,
     });
   } catch (error: any) {
-    console.error('Error uploading plugins:', error);
+    log.error({ err: error }, 'Error uploading plugins');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload plugins',

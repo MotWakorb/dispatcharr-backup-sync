@@ -1,10 +1,13 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
+import { createLogger } from './logger.js';
 import archiver from 'archiver';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import type { ExportRequest, ExportOptions } from '../types/index.js';
+
+const log = createLogger('export');
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
@@ -381,24 +384,32 @@ export class ExportService {
       }
 
       // Export Logos - only channel logos, not VOD posters
+      // Also exclude logos from auto-created channels (M3U auto-channel sync)
       let logosToExport: any[] = [];
       if (request.options.syncLogos) {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Fetching logo metadata...');
 
-        // First, get all channels to find which logos are actually used by channels
+        // First, get all channels to find which logos are actually used by MANUAL channels
         const channels = await this.getAllPaginated(client, '/api/channels/channels/', jobId);
+
+        // Filter to only manual channels (exclude auto_created from M3U auto-sync)
+        const manualChannels = channels.filter((ch: any) => !ch.auto_created);
+
         const channelLogoIds = new Set<number>();
-        for (const ch of channels) {
+        for (const ch of manualChannels) {
           if (ch.logo_id != null) channelLogoIds.add(ch.logo_id);
           if (ch.logo != null && typeof ch.logo === 'number') channelLogoIds.add(ch.logo);
         }
 
-        // Now fetch all logos and filter to only channel logos
+        // Now fetch all logos and filter to only manual channel logos
         const allLogos = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
         logosToExport = allLogos.filter((l: any) => channelLogoIds.has(l.id));
 
         currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Found ${allLogos.length} total logos, ${logosToExport.length} are channel logos (excluded ${allLogos.length - logosToExport.length} VOD posters)`);
+        const autoCreatedCount = channels.length - manualChannels.length;
+        const excludedLogos = allLogos.length - logosToExport.length;
+        jobManager.addLog(jobId, `Found ${channels.length} channels (${manualChannels.length} manual, ${autoCreatedCount} auto-created)`);
+        jobManager.addLog(jobId, `Found ${allLogos.length} total logos, ${logosToExport.length} are manual channel logos (excluded ${excludedLogos} VOD/auto-created logos)`);
       }
 
       if (request.dryRun) {
@@ -420,124 +431,126 @@ export class ExportService {
       const workDir = path.join(this.backupDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
-      // Process logos - separate local files from URL-based logos
+      // Download logos to logos/ directory
       if (logosToExport.length > 0) {
+        // Logo download gets 35% of progress (from 60% to 95%)
         const logoStartProgress = 60;
         const logoEndProgress = 95;
-
-        // Separate logos into local files vs URL-based
-        const localLogos = logosToExport.filter((l: any) => {
-          const url = l.url || '';
-          // Local files start with /data/logos or don't start with http
-          return url.startsWith('/data/logos') || (!url.startsWith('http://') && !url.startsWith('https://'));
-        });
-        const urlLogos = logosToExport.filter((l: any) => {
-          const url = l.url || '';
-          return url.startsWith('http://') || url.startsWith('https://');
-        });
-
-        jobManager.addLog(jobId, `Found ${localLogos.length} local file logos and ${urlLogos.length} URL-based logos`);
-
+        jobManager.setProgress(jobId, logoStartProgress, `Downloading ${logosToExport.length} logos...`);
         const logosDir = path.join(workDir, 'logos');
         await mkdir(logosDir, { recursive: true });
 
-        // Save URL-based logos to a JSON file (no download needed)
-        if (urlLogos.length > 0) {
-          const urlLogoData = urlLogos.map((l: any) => ({
-            source_id: l.id,
-            name: l.name,
-            url: l.url,
-          }));
-          const urlLogosPath = path.join(logosDir, 'url_logos.json');
-          await writeFile(urlLogosPath, JSON.stringify(urlLogoData, null, 2));
-          jobManager.addLog(jobId, `Saved ${urlLogos.length} URL-based logos to url_logos.json`);
-        }
-
-        // Download only local file logos
         let downloaded = 0;
         let failed = 0;
         let tooSmall = 0;
 
-        if (localLogos.length > 0) {
-          jobManager.setProgress(jobId, logoStartProgress, `Downloading ${localLogos.length} local logos...`);
+        // Track used filenames to avoid collisions, and store metadata
+        const usedFilenames = new Set<string>();
+        const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
 
-          const usedFilenames = new Set<string>();
-          const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
-
-          for (let i = 0; i < localLogos.length; i++) {
-            const logo = localLogos[i];
-            if (!logo?.id) continue;
-
-            if (i % 50 === 0) {
-              const logoProgress = logoStartProgress + ((i / localLogos.length) * (logoEndProgress - logoStartProgress));
-              jobManager.setProgress(jobId, Math.round(logoProgress), `Downloading local logos: ${i + 1}/${localLogos.length}...`);
-            }
-
-            if ((i + 1) % 100 === 0) {
-              jobManager.addLog(jobId, `Downloading local logos: ${i + 1}/${localLogos.length}...`);
-            }
-
-            const logoName = logo.name || `logo-${logo.id}`;
-            try {
-              const response = await client.get(`/api/channels/logos/${logo.id}/cache/`, {
-                responseType: 'arraybuffer',
-                headers: { Accept: '*/*' },
-                timeout: 15000,
-              });
-
-              const buffer = Buffer.isBuffer(response.data ?? response)
-                ? (response.data ?? response)
-                : Buffer.from(response.data ?? response);
-
-              if (buffer.length < 100) {
-                tooSmall++;
-                jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
-                continue;
-              }
-
-              let ext = 'png';
-              const urlLower = (logo.url || '').toLowerCase();
-              if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) ext = 'jpg';
-              else if (urlLower.includes('.webp')) ext = 'webp';
-              else if (urlLower.includes('.gif')) ext = 'gif';
-              else if (urlLower.includes('.svg')) ext = 'svg';
-
-              let safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
-              let filename = `${safeName}.${ext}`;
-              let suffix = 2;
-
-              while (usedFilenames.has(filename.toLowerCase())) {
-                filename = `${safeName}_${suffix}.${ext}`;
-                suffix++;
-              }
-              usedFilenames.add(filename.toLowerCase());
-
-              const filePath = path.join(logosDir, filename);
-              await writeFile(filePath, buffer);
-
-              logoMetadata.push({
-                original_name: logoName,
-                filename: filename,
-                source_id: logo.id,
-              });
-
-              downloaded++;
-              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`);
-            } catch (error: any) {
-              failed++;
-              jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`);
-            }
-          }
-
-          if (logoMetadata.length > 0) {
-            const metadataPath = path.join(logosDir, 'metadata.json');
-            await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
-            jobManager.addLog(jobId, `Saved logo metadata for ${logoMetadata.length} local logos`);
+        // Log first 10 logos to verify order
+        if (logosToExport.length > 0) {
+          jobManager.addLog(jobId, `First 10 logos to export (in API order):`);
+          for (let i = 0; i < Math.min(10, logosToExport.length); i++) {
+            jobManager.addLog(jobId, `  [${i}] id=${logosToExport[i].id}, name="${logosToExport[i].name}"`);
           }
         }
 
-        jobManager.addLog(jobId, `Logos: ${downloaded} local downloaded, ${urlLogos.length} URL-based saved, ${failed} failed, ${tooSmall} too small`);
-        exportData.data.logos = { count: downloaded, urlBased: urlLogos.length, failed, tooSmall };
+        for (let i = 0; i < logosToExport.length; i++) {
+          const logo = logosToExport[i];
+          if (!logo?.id) continue;
+
+          // Update progress every 50 logos
+          if (i % 50 === 0) {
+            const logoProgress = logoStartProgress + ((i / logosToExport.length) * (logoEndProgress - logoStartProgress));
+            jobManager.setProgress(jobId, Math.round(logoProgress), `Downloading logos: ${i + 1}/${logosToExport.length}...`);
+          }
+
+          // Log every 500 logos
+          if ((i + 1) % 500 === 0) {
+            jobManager.addLog(jobId, `Downloading logos: ${i + 1}/${logosToExport.length}...`);
+          }
+
+          const logoName = logo.name || `logo-${logo.id}`;
+
+          // Debug: log first 10 downloads
+          if (i < 10) {
+            jobManager.addLog(jobId, `Downloading logo [${i}]: "${logoName}" (id=${logo.id})...`);
+          }
+          try {
+            // Download logo using the cache endpoint with timeout
+            const response = await client.get(`/api/channels/logos/${logo.id}/cache/`, {
+              responseType: 'arraybuffer',
+              headers: { Accept: '*/*' },
+              timeout: 15000, // 15 second timeout per logo
+            });
+
+            const buffer = Buffer.isBuffer(response.data ?? response)
+              ? (response.data ?? response)
+              : Buffer.from(response.data ?? response);
+
+            if (buffer.length < 100) {
+              tooSmall++;
+              jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
+              continue;
+            }
+
+            // Determine file extension from content type or URL
+            let ext = 'png';
+            const urlLower = (logo.url || '').toLowerCase();
+            if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) ext = 'jpg';
+            else if (urlLower.includes('.webp')) ext = 'webp';
+            else if (urlLower.includes('.gif')) ext = 'gif';
+            else if (urlLower.includes('.svg')) ext = 'svg';
+
+            // Use logo name or ID as filename, handle collisions
+            let safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            let filename = `${safeName}.${ext}`;
+            let suffix = 2;
+
+            // Handle filename collisions by adding a numeric suffix
+            while (usedFilenames.has(filename.toLowerCase())) {
+              filename = `${safeName}_${suffix}.${ext}`;
+              suffix++;
+            }
+            usedFilenames.add(filename.toLowerCase());
+
+            // Calculate checksum for verification
+            const checksum = buffer.slice(0, 100).reduce((sum, byte) => (sum + byte) & 0xFFFF, 0);
+
+            const filePath = path.join(logosDir, filename);
+            await writeFile(filePath, buffer);
+
+            // Store metadata mapping original name to filename
+            logoMetadata.push({
+              original_name: logoName,
+              filename: filename,
+              source_id: logo.id,
+            });
+
+            downloaded++;
+            if (downloaded <= 30) {
+              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes, checksum=${checksum.toString(16)} -> ${filename}`);
+            } else {
+              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`);
+            }
+          } catch (error: any) {
+            failed++;
+            jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`);
+          }
+        }
+
+        // Save logo metadata for import to use
+        if (logoMetadata.length > 0) {
+          // Sort metadata alphabetically by filename to match import sort order
+          logoMetadata.sort((a, b) => a.filename.localeCompare(b.filename));
+          const metadataPath = path.join(logosDir, 'metadata.json');
+          await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
+          jobManager.addLog(jobId, `Saved logo metadata for ${logoMetadata.length} logos (sorted alphabetically)`);
+        }
+
+        jobManager.addLog(jobId, `Logos: ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`);
+        exportData.data.logos = { count: downloaded, failed, tooSmall };
       }
 
       const jsonPath = path.join(workDir, 'config.json');
@@ -673,7 +686,7 @@ export class ExportService {
     try {
       await unlink(filePath);
     } catch (error) {
-      console.error('Failed to cleanup file:', error);
+      log.error({ err: error, filePath }, 'Failed to cleanup file');
     }
   }
 
@@ -681,7 +694,7 @@ export class ExportService {
     try {
       await fs.promises.rm(dirPath, { recursive: true, force: true });
     } catch (error) {
-      console.error('Failed to cleanup directory:', error);
+      log.error({ err: error, dirPath }, 'Failed to cleanup directory');
     }
   }
 
@@ -699,14 +712,14 @@ export class ExportService {
         await fs.promises.access(backupPath);
         await unlink(backupPath);
         deleted.push(jobId);
-        console.log(`Retention cleanup: Deleted backup file backup-${jobId}.zip`);
+        log.debug({ jobId }, 'Retention cleanup: Deleted backup file');
       } catch (error: any) {
         if (error.code === 'ENOENT') {
           // File doesn't exist, skip silently
-          console.log(`Retention cleanup: Backup file backup-${jobId}.zip not found, skipping`);
+          log.debug({ jobId }, 'Retention cleanup: Backup file not found, skipping');
         } else {
           errors.push(`Failed to delete backup-${jobId}.zip: ${error.message}`);
-          console.error(`Retention cleanup: Failed to delete backup-${jobId}.zip:`, error);
+          log.error({ err: error, jobId }, 'Retention cleanup: Failed to delete backup');
         }
       }
     }

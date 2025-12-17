@@ -3,6 +3,9 @@ import { syncService } from '../services/syncService.js';
 import { jobManager } from '../services/jobManager.js';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('sync-route');
 
 export const syncRouter = Router();
 
@@ -66,7 +69,7 @@ syncRouter.post('/compare-plugins', async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('Error comparing plugins:', error);
+    log.error({ err: error }, 'Error comparing plugins');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to compare plugins',
@@ -113,7 +116,7 @@ syncRouter.post('/', async (req, res) => {
     syncService
       .sync(request, jobId)
       .catch((error) => {
-        console.error(`Sync job ${jobId} failed:`, error);
+        log.error({ jobId, err: error }, 'Sync job failed');
       });
 
     // Return job ID immediately
@@ -125,7 +128,7 @@ syncRouter.post('/', async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('Error starting sync:', error);
+    log.error({ err: error }, 'Error starting sync');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to start sync job',
@@ -151,7 +154,7 @@ syncRouter.get('/status/:jobId', (req, res) => {
       data: status,
     });
   } catch (error: any) {
-    console.error('Error getting job status:', error);
+    log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get job status',
@@ -168,7 +171,7 @@ syncRouter.get('/jobs', (req, res) => {
       data: jobs,
     });
   } catch (error: any) {
-    console.error('Error getting jobs:', error);
+    log.error({ err: error }, 'Error getting jobs');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get jobs',

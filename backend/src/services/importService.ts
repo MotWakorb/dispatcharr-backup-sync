@@ -9,6 +9,10 @@ import AdmZip from 'adm-zip';
 import tar from 'tar';
 import { v4 as uuidv4 } from 'uuid';
 import type { ImportOptions, ImportRequest } from '../types/index.js';
+import { simpleImportLogos } from './simpleLogoImport.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('import');
 
 const mkdir = promisify(fs.mkdir);
 const writeFile = promisify(fs.writeFile);
@@ -37,6 +41,36 @@ export class ImportService {
   private tempDir = path.join(process.cwd(), 'temp');
   private cacheDir = path.join(this.tempDir, 'upload-cache');
 
+  /**
+   * Throws an error if the job has been cancelled by the user.
+   * Call this in long-running loops to respect cancellation requests.
+   */
+  private throwIfCancelled(jobId: string) {
+    const job = jobManager.getJob(jobId);
+    if (job?.status === 'cancelled') {
+      const err: any = new Error('Import cancelled by user');
+      err.cancelled = true;
+      throw err;
+    }
+  }
+
+  /**
+   * Creates an error handler for API calls that logs the error and returns a default value.
+   * Use with .catch() to prevent silent failures while still allowing graceful degradation.
+   */
+  private warnOnFail<T>(endpoint: string, defaultValue: T, jobId?: string): (error: any) => T {
+    return (error: any): T => {
+      const status = error?.response?.status || '';
+      const message = error?.response?.data?.detail || error?.message || 'Unknown error';
+      const warning = `API call to ${endpoint} failed${status ? ` (${status})` : ''}: ${message}`;
+      if (jobId) {
+        jobManager.addLog(jobId, `WARNING: ${warning}`);
+      }
+      log.warn({ endpoint, status, message }, 'API call failed');
+      return defaultValue;
+    };
+  }
+
   private normalizeKey(value: any): string | undefined {
     return typeof value === 'string' ? value.trim().toLowerCase() : undefined;
   }
@@ -44,15 +78,20 @@ export class ImportService {
   private async getAllPaginated(
     client: DispatcharrClient,
     endpoint: string,
-    pageSize = 1000
+    pageSize = 1000,
+    jobId?: string
   ): Promise<any[]> {
     let page = 1;
     let all: any[] = [];
 
     while (true) {
+      if (jobId) {
+        this.throwIfCancelled(jobId);
+      }
       // Use & if endpoint already has query params, otherwise use ?
       const separator = endpoint.includes('?') ? '&' : '?';
-      const response = await client.get(`${endpoint}${separator}page=${page}&page_size=${pageSize}`).catch(() => null);
+      const fullEndpoint = `${endpoint}${separator}page=${page}&page_size=${pageSize}`;
+      const response = await client.get(fullEndpoint).catch(this.warnOnFail(fullEndpoint, null, jobId));
       if (!response) {
         break;
       }
@@ -81,22 +120,41 @@ export class ImportService {
     } catch (e) {
       // no-op if logging fails
     }
-    console.error(`${section} failed`, label, details);
+    log.error({ section, label, details }, 'Import section failed');
   }
+
+  private static readonly SENSITIVE_KEYS = /password|passwd|pass|token|secret|apikey|api_key|api-key|auth|authorization|credential|bearer|jwt|session|cookie/i;
 
   private redact(obj: any): any {
     if (!obj || typeof obj !== 'object') return obj;
     const clone: any = Array.isArray(obj) ? [] : {};
     for (const [key, value] of Object.entries(obj)) {
-      if (/password|pass|token|secret/i.test(key)) {
+      if (ImportService.SENSITIVE_KEYS.test(key)) {
         clone[key] = '***redacted***';
       } else if (typeof value === 'object') {
         clone[key] = this.redact(value);
+      } else if (typeof value === 'string') {
+        clone[key] = this.redactString(value);
       } else {
         clone[key] = value;
       }
     }
     return clone;
+  }
+
+  private redactString(str: string): string {
+    // Try to parse as JSON and redact if it contains sensitive fields
+    if (str.startsWith('{') || str.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(str);
+        return JSON.stringify(this.redact(parsed));
+      } catch {
+        // Not valid JSON, continue with string redaction
+      }
+    }
+    // Redact common patterns in strings (e.g., "password=xxx" or "token: xxx")
+    return str
+      .replace(/(password|passwd|pass|token|secret|apikey|api_key|api-key|authorization|bearer|jwt)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1$2***redacted***');
   }
 
   private formatErrorDetails(error: any): string | Record<string, any> {
@@ -110,7 +168,7 @@ export class ImportService {
 
     const requestData = config?.data
       ? typeof config.data === 'string'
-        ? config.data.slice(0, 500)
+        ? this.redactString(config.data.slice(0, 500))
         : this.redact(config.data)
       : undefined;
 
@@ -120,7 +178,8 @@ export class ImportService {
         if (trimmed.startsWith('<!doctype html')) {
           return trimmed.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
         }
-        return trimmed.length > 1000 ? `${trimmed.slice(0, 1000)}...` : trimmed;
+        const truncated = trimmed.length > 1000 ? `${trimmed.slice(0, 1000)}...` : trimmed;
+        return this.redactString(truncated);
       }
       if (data && typeof data === 'object') return this.redact(data);
       return data;
@@ -236,11 +295,10 @@ export class ImportService {
       // If logos were provided as images in the archive, fold them into config data
       // Note: data.logos may be an object like { count: X } from export, not an array
       if (!data.logos || !Array.isArray(data.logos)) {
-        const { fileLogos, urlLogos } = await this.loadLogosFromFolder(path.dirname(configFilePath), jobId);
-        if (fileLogos.length || urlLogos.length) {
-          data.logos = fileLogos;  // File-based logos for upload
-          data.urlLogos = urlLogos;  // URL-based logos for POST creation
-          jobManager.addLog(jobId, `Loaded ${fileLogos.length} file logos and ${urlLogos.length} URL logos from archive logos/ folder`);
+        const logoFiles = await this.loadLogosFromFolder(path.dirname(configFilePath), jobId);
+        if (logoFiles.length) {
+          data.logos = logoFiles;
+          jobManager.addLog(jobId, `Loaded ${logoFiles.length} logos from archive logos/ folder`);
         } else {
           jobManager.addLog(jobId, `No logo files found in archive logos/ folder (data.logos was ${typeof data.logos}: ${JSON.stringify(data.logos)})`);
         }
@@ -262,6 +320,7 @@ export class ImportService {
 
       // Import M3U Sources
       if (data.m3uSources && this.isEnabled('m3uSources', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing M3U sources...');
         results.imported.m3uSources = await this.importM3USources(
           client,
@@ -273,6 +332,7 @@ export class ImportService {
 
       // Import EPG Sources
       if (data.epgSources && this.isEnabled('epgSources', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing EPG sources...');
         const epgSourcesResult = await this.importEPGSources(
           client,
@@ -301,6 +361,7 @@ export class ImportService {
 
       // Import Channel Profiles
       if (data.channelProfiles && this.isEnabled('channelProfiles', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing channel profiles...');
         results.imported.channelProfiles = await this.importChannelProfiles(
           client,
@@ -311,6 +372,7 @@ export class ImportService {
 
       // Import Channel Groups
       if (data.channelGroups && this.isEnabled('channelGroups', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing channel groups...');
         const channelGroupResult = await this.importChannelGroups(
           client,
@@ -329,7 +391,7 @@ export class ImportService {
         // so that channels can be assigned to the correct groups
         jobManager.addLog(jobId, 'Building channel group ID mapping (groups not being imported but needed for channel assignment)...');
         channelGroupMap = {}; // Initialize the map
-        const existingGroups = await client.get('/api/channels/groups/').catch(() => []);
+        const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
         const groupByName: Record<string, number> = Array.isArray(existingGroups)
           ? Object.fromEntries(existingGroups.map((g: any) => [g.name, g.id]))
           : {};
@@ -345,6 +407,7 @@ export class ImportService {
 
       // Stream profiles should be in place before channels
       if (data.streamProfiles && this.isEnabled('streamProfiles', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing stream profiles...');
         const streamProfileResult = await this.importStreamProfiles(
           client,
@@ -358,7 +421,7 @@ export class ImportService {
         // Even if not importing stream profiles (they already exist), build the mapping for channel assignment
         jobManager.addLog(jobId, 'Building stream profile ID mapping (profiles not being imported but needed for channel assignment)...');
         streamProfileMap = {}; // Initialize the map
-        const existingProfiles = await client.get('/api/core/streamprofiles/').catch(() => []);
+        const existingProfiles = await client.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
         const profileByName: Record<string, number> = Array.isArray(existingProfiles)
           ? Object.fromEntries(existingProfiles.map((p: any) => [p.name, p.id]))
           : {};
@@ -372,18 +435,23 @@ export class ImportService {
         jobManager.addLog(jobId, `Stream profile ID mapping (existing profiles): ${JSON.stringify(streamProfileMap)}`);
       }
 
+      // Everything else follows the new prerequisites
+
       // Import Logos BEFORE channels so we can map logo IDs
       let logoMap: Record<string, number> = {};
-      if ((data.logos || data.urlLogos) && this.isEnabled('logos', request.options)) {
+      if (data.logos && this.isEnabled('logos', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing logos...');
-        const logoResult = await this.importLogos(client, data.logos || [], data.urlLogos || [], jobId);
-        results.imported.logos = { imported: logoResult.imported, skipped: logoResult.skipped, errors: logoResult.errors };
+        jobManager.addLog(jobId, '[SIMPLE IMPORT] Using new simple logo import implementation');
+        const logoResult = await simpleImportLogos(client, data.logos, jobId);
+        results.imported.logos = { imported: logoResult.imported, skipped: 0, errors: logoResult.errors };
         logoMap = logoResult.logoMap;
         currentProgress += progressPerStep;
       }
 
       // Import Channels
       if (data.channels && this.isEnabled('channels', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing channels...');
         results.imported.channels = await this.importChannels(client, data.channels, jobId, {
           streamProfileMap,
@@ -412,6 +480,7 @@ export class ImportService {
 
       // Import User Agents
       if (data.userAgents && this.isEnabled('userAgents', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing user agents...');
         const userAgentResult = await this.importUserAgents(
           client,
@@ -424,6 +493,7 @@ export class ImportService {
       }
 
       if (data.coreSettings && this.isEnabled('coreSettings', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing core settings...');
         results.imported.coreSettings = await this.importCoreSettings(
           client,
@@ -439,6 +509,7 @@ export class ImportService {
 
       // Import Plugins
       if (data.plugins && this.isEnabled('plugins', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing plugins...');
         results.imported.plugins = await this.importPlugins(client, data.plugins);
         currentProgress += progressPerStep;
@@ -446,12 +517,14 @@ export class ImportService {
 
       // Import DVR Rules
       if (data.dvrRules && this.isEnabled('dvrRules', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing DVR rules...');
         results.imported.dvrRules = await this.importDVRRules(client, data.dvrRules);
         currentProgress += progressPerStep;
       }
 
       if (data.comskipConfig && this.isEnabled('comskipConfig', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing comskip config...');
         results.imported.comskipConfig = await this.importComskipConfig(
           client,
@@ -463,6 +536,7 @@ export class ImportService {
 
       // Import Users
       if (data.users && this.isEnabled('users', request.options)) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing users...');
         results.imported.users = await this.importUsers(client, data.users, jobId);
         currentProgress += progressPerStep;
@@ -490,12 +564,17 @@ export class ImportService {
           await rm(extractedDir, { recursive: true, force: true } as any);
         }
       } catch (error) {
-        console.error('Failed to cleanup temp files:', error);
+        log.debug({ err: error }, 'Failed to cleanup temp files');
       }
 
       jobManager.completeJob(jobId, results);
     } catch (error: any) {
-      jobManager.failJob(jobId, error.message);
+      if (error?.cancelled) {
+        // Job was cancelled by user, don't mark as failed
+        jobManager.addLog(jobId, 'Import cancelled by user');
+      } else {
+        jobManager.failJob(jobId, error.message);
+      }
       throw error;
     }
   }
@@ -518,10 +597,18 @@ export class ImportService {
     const extractDir = path.join(this.tempDir, 'zip-' + Date.now());
     await mkdir(extractDir, { recursive: true });
 
+    // Resolve the extract directory to an absolute path for comparison
+    const resolvedExtractDir = path.resolve(extractDir);
+
     const zip = new AdmZip(zipPath);
     const zipEntries = zip.getEntries();
     for (const entry of zipEntries) {
       const targetPath = path.join(extractDir, entry.entryName);
+      // Resolve to absolute path and verify it's within extractDir (path traversal protection)
+      const resolvedTargetPath = path.resolve(targetPath);
+      if (!resolvedTargetPath.startsWith(resolvedExtractDir + path.sep) && resolvedTargetPath !== resolvedExtractDir) {
+        throw new Error(`Zip entry "${entry.entryName}" attempts path traversal outside extraction directory`);
+      }
       if (entry.isDirectory) {
         await mkdir(targetPath, { recursive: true });
       } else {
@@ -555,16 +642,8 @@ export class ImportService {
     return { configPath, baseDir: extractDir };
   }
 
-  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<{
-    fileLogos: { name: string; data: string; ext: string; original_name?: string; source_id?: number }[];
-    urlLogos: { name: string; url: string; source_id: number }[];
-  }> {
+  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<{ name: string; data: string; ext: string; original_name?: string }[]> {
     const logosDir = path.join(baseDir, 'logos');
-    const result = {
-      fileLogos: [] as { name: string; data: string; ext: string; original_name?: string; source_id?: number }[],
-      urlLogos: [] as { name: string; url: string; source_id: number }[],
-    };
-
     try {
       const files = await fsp.readdir(logosDir, { withFileTypes: true });
       const images = files.filter((f) =>
@@ -574,22 +653,7 @@ export class ImportService {
         jobManager.addLog(jobId, `Found ${files.length} files in logos folder, ${images.length} are image files`);
       }
 
-      // Try to load URL-based logos from url_logos.json
-      const urlLogosPath = path.join(logosDir, 'url_logos.json');
-      try {
-        const urlLogosContent = await readFile(urlLogosPath, 'utf-8');
-        result.urlLogos = JSON.parse(urlLogosContent);
-        if (jobId) {
-          jobManager.addLog(jobId, `Loaded ${result.urlLogos.length} URL-based logos from url_logos.json`);
-        }
-      } catch {
-        // No url_logos.json file (older backup format)
-        if (jobId) {
-          jobManager.addLog(jobId, `No url_logos.json found (older backup format or no URL logos)`);
-        }
-      }
-
-      // Try to read metadata.json for local file logo mapping
+      // Try to read metadata.json for original name mapping
       let metadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
       const metadataPath = path.join(logosDir, 'metadata.json');
       try {
@@ -599,12 +663,13 @@ export class ImportService {
           jobManager.addLog(jobId, `Loaded logo metadata with ${metadata.length} entries`);
         }
       } catch {
+        // No metadata file, will use filename as name (legacy behavior)
         if (jobId) {
           jobManager.addLog(jobId, `No logo metadata.json found, using filenames as logo names`);
         }
       }
 
-      // Build filename -> metadata lookup
+      // Build filename -> metadata lookup (original_name and source_id)
       const filenameToMetadata: Record<string, { original_name: string; source_id: number }> = {};
       for (const entry of metadata) {
         filenameToMetadata[entry.filename.toLowerCase()] = {
@@ -613,24 +678,54 @@ export class ImportService {
         };
       }
 
-      // Load local file logos
+      // Debug: log first 10 metadata mappings
+      if (jobId && metadata.length > 0) {
+        jobManager.addLog(jobId, `DEBUG METADATA: First 10 metadata entries:`);
+        for (let i = 0; i < Math.min(10, metadata.length); i++) {
+          const entry = metadata[i];
+          jobManager.addLog(jobId, `  "${entry.filename}" -> original_name="${entry.original_name}" (source_id=${entry.source_id})`);
+        }
+      }
+
+      const logos: { name: string; data: string; ext: string; original_name?: string; source_id?: number }[] = [];
+
+      // CRITICAL: Sort images by filename to ensure consistent order
+      // readdir() may return files in filesystem/inode order, not alphabetical
+      const sortedImages = images.sort((a, b) => a.name.localeCompare(b.name));
+
+      if (jobId) {
+        jobManager.addLog(jobId, `Loading ${sortedImages.length} logo files (sorted alphabetically)`);
+      }
+
       let loggedCount = 0;
-      for (const img of images) {
+      let missingMetadata = 0;
+
+      for (const img of sortedImages) {
         const fullPath = path.join(logosDir, img.name);
         const buffer = await readFile(fullPath);
-        const ext = path.extname(img.name).toLowerCase().slice(1);
+        const ext = path.extname(img.name).toLowerCase().slice(1); // Remove the dot
         const filenameWithoutExt = img.name.replace(/\.(png|jpe?g|webp|gif|svg)$/i, '');
 
+        // Use metadata if available, otherwise use filename
         const meta = filenameToMetadata[img.name.toLowerCase()];
         const originalName = meta?.original_name;
         const sourceId = meta?.source_id;
 
-        if (jobId && loggedCount < 10) {
-          jobManager.addLog(jobId, `DEBUG LOAD: file="${img.name}" -> name="${filenameWithoutExt}", original_name="${originalName || 'NONE'}", source_id=${sourceId || 'NONE'}`);
+        if (!meta) {
+          missingMetadata++;
+          if (jobId && missingMetadata <= 10) {
+            jobManager.addLog(jobId, `WARNING: No metadata found for file "${img.name}"`);
+          }
+        }
+
+        // Debug: log first 20 logos loaded with more detail
+        if (jobId && loggedCount < 20) {
+          const bufferChecksum = buffer.slice(0, 100).reduce((sum, byte) => (sum + byte) & 0xFFFF, 0);
+          jobManager.addLog(jobId, `DEBUG LOAD[${loggedCount}]: file="${img.name}", size=${buffer.length}, checksum=${bufferChecksum.toString(16)}, original_name="${originalName || 'NONE'}", source_id=${sourceId || 'NONE'}`);
           loggedCount++;
         }
 
-        result.fileLogos.push({
+        logos.push({
           name: filenameWithoutExt,
           data: buffer.toString('base64'),
           ext,
@@ -639,12 +734,16 @@ export class ImportService {
         });
       }
 
-      return result;
+      if (jobId && missingMetadata > 0) {
+        jobManager.addLog(jobId, `WARNING: ${missingMetadata} logo files had no metadata mapping`);
+      }
+
+      return logos;
     } catch (e: any) {
       if (jobId) {
         jobManager.addLog(jobId, `No logos folder found or error reading: ${e.message}`);
       }
-      return result;
+      return [];
     }
   }
 
@@ -687,15 +786,20 @@ export class ImportService {
       const data = (configData as any)?.data ?? {};
 
       // Load logo files from folder if data.logos is not an array (may be object like { count: X })
+      log.debug({ logosType: typeof data.logos, logos: data.logos }, 'data.logos before loading');
       if (!data.logos || !Array.isArray(data.logos)) {
-        const { fileLogos, urlLogos } = await this.loadLogosFromFolder(path.dirname(configFilePath));
-        if (fileLogos.length || urlLogos.length) {
-          data.logos = fileLogos;
-          data.urlLogos = urlLogos;
+        const logoFiles = await this.loadLogosFromFolder(path.dirname(configFilePath));
+        log.debug({ count: logoFiles.length }, 'Loaded logo files from folder');
+        if (logoFiles.length) {
+          data.logos = logoFiles;
+          log.debug({ count: logoFiles.length }, 'Set data.logos to array');
+        } else {
+          log.debug({ logos: data.logos }, 'No logo files found');
         }
       }
 
       const sections = Object.keys(data).filter((key) => key in SECTION_OPTION_MAP);
+      log.debug({ sections }, 'Detected sections');
 
       // Extract plugins list if present in the backup
       const plugins = Array.isArray(data.plugins) ? data.plugins : [];
@@ -918,19 +1022,19 @@ export class ImportService {
       logoMap?: Record<string, number>;
     }
   ): Promise<{ imported: number; skipped: number; errors: number }> {
-    const existingChannels = await client.get('/api/channels/channels/').catch(() => []);
-    const existingGroups = await client.get('/api/channels/groups/').catch(() => []);
-    const existingProfiles = await client.get('/api/channels/profiles/').catch(() => []);
-    const existingM3UAccounts = await client.get('/api/m3u/accounts/').catch(() => []);
+    const existingChannels = await client.get('/api/channels/channels/').catch(this.warnOnFail('/api/channels/channels/', [], jobId));
+    const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const existingProfiles = await client.get('/api/channels/profiles/').catch(this.warnOnFail('/api/channels/profiles/', [], jobId));
+    const existingM3UAccounts = await client.get('/api/m3u/accounts/').catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
 
     // If backup channels reference streams but none are present yet (refresh lag), wait briefly
     const backupHasStreams = Array.isArray(channels)
       ? channels.some((c) => Array.isArray(c?.streams) && c.streams.length > 0)
       : false;
-    let existingStreams = await this.getAllPaginated(client, '/api/channels/streams/').catch(() => []);
+    let existingStreams = await this.getAllPaginated(client, '/api/channels/streams/', 1000, jobId);
     if (backupHasStreams && (!Array.isArray(existingStreams) || existingStreams.length === 0)) {
       await this.waitForStreams(client, jobId);
-      existingStreams = await this.getAllPaginated(client, '/api/channels/streams/').catch(() => []);
+      existingStreams = await this.getAllPaginated(client, '/api/channels/streams/', 1000, jobId);
     }
 
     const existingList = Array.isArray(existingChannels)
@@ -1135,8 +1239,7 @@ export class ImportService {
 
         // Map logo using logoMap
         // Priority: 1) logo_source_id (most reliable), 2) logo_name, 3) sanitized name
-        // Skip logo assignment for auto-created channels (from auto channel groups)
-        if (opts?.logoMap && Object.keys(opts.logoMap).length > 0 && !channel.auto_created) {
+        if (opts?.logoMap && Object.keys(opts.logoMap).length > 0) {
           let mappedLogoId: number | undefined;
           let lookupMethod = '';
 
@@ -1387,8 +1490,8 @@ export class ImportService {
     sources: any[],
     jobId: string
   ): Promise<{ imported: number; skipped: number; errors: number }> {
-    const existing = await client.get('/api/m3u/accounts/').catch(() => []);
-    const existingGroups = await client.get('/api/channels/groups/').catch(() => []);
+    const existing = await client.get('/api/m3u/accounts/').catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
+    const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const groupByName: Record<string, number> = Array.isArray(existingGroups)
       ? Object.fromEntries(existingGroups.map((g: any) => [g.name, g.id]))
       : {};
@@ -1453,7 +1556,7 @@ export class ImportService {
           const message = acct?.last_message || '';
 
           // Get stream count for this M3U account
-          const streams = await this.getAllPaginated(client, `/api/channels/streams/?m3u_account=${accountId}`).catch(() => []);
+          const streams = await this.getAllPaginated(client, `/api/channels/streams/?m3u_account=${accountId}`, 1000, jobId);
           const streamCount = Array.isArray(streams) ? streams.length : 0;
 
           // Only log every 3rd poll to reduce noise
@@ -1617,9 +1720,9 @@ export class ImportService {
           } else {
             // Try toggling is_active as a workaround to trigger processing
             jobManager.addLog(jobId, `M3U ${source.name}: Trying is_active toggle to trigger processing...`);
-            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: false }).catch(() => null);
+            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: false }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (deactivate)`, null, jobId));
             await new Promise((res) => { const t = globalThis.setTimeout(res, 500); return t; });
-            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: true }).catch(() => null);
+            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: true }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (activate)`, null, jobId));
           }
 
           // Wait for refresh to complete before applying group settings
@@ -1633,7 +1736,7 @@ export class ImportService {
 
             // Fetch all channel groups to get ID -> name mapping
             // The M3U account's channel_groups only has IDs, not names
-            const allChannelGroups = await client.get('/api/channels/groups/').catch(() => []);
+            const allChannelGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
             const groupIdToName: Record<number, string> = {};
             if (Array.isArray(allChannelGroups)) {
               for (const g of allChannelGroups) {
@@ -1693,18 +1796,18 @@ export class ImportService {
               const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
               await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
                 channel_groups: autoSyncGroups,
-              }).catch(() => null);
+              }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
             }
 
             // Wait for Dispatcharr to process the group changes before triggering refresh
             await new Promise((resolve) => globalThis.setTimeout(resolve, 3000));
 
             // Trigger refresh to pull streams for enabled groups
-            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(() => null);
+            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
 
             // If account-specific refresh fails, try global refresh
             if (!refreshResult) {
-              refreshResult = await client.post(`/api/m3u/refresh/`).catch(() => null);
+              refreshResult = await client.post(`/api/m3u/refresh/`).catch(this.warnOnFail('/api/m3u/refresh/', null, jobId));
             }
 
             // Wait for streams to be loaded
@@ -1721,7 +1824,7 @@ export class ImportService {
                 const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
                 await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
                   channel_groups: autoSyncGroups,
-                }).catch(() => null);
+                }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
               }
             }
           }
@@ -1741,7 +1844,7 @@ export class ImportService {
     profiles: any[],
     jobId: string
   ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
-    const existing = await client.get('/api/core/streamprofiles/').catch(() => []);
+    const existing = await client.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
     let imported = 0;
     let skipped = 0;
     let errors = 0;
@@ -1779,7 +1882,7 @@ export class ImportService {
     agents: any[],
     jobId: string
   ): Promise<{ imported: number; skipped: number; errors: number; idMap: Record<string | number, number> }> {
-    const existing = await client.get('/api/core/useragents/').catch(() => []);
+    const existing = await client.get('/api/core/useragents/').catch(this.warnOnFail('/api/core/useragents/', [], jobId));
     let imported = 0;
     let skipped = 0;
     let errors = 0;
@@ -1862,7 +1965,7 @@ export class ImportService {
     jobId: string,
     opts?: { epgSourceMap?: Record<string | number, number> }
   ): Promise<{ imported: number; skipped: number; errors: number }> {
-    const existing = await this.getAllPaginated(client, '/api/epg/epgdata/').catch(() => []);
+    const existing = await this.getAllPaginated(client, '/api/epg/epgdata/', 1000, jobId);
     const byTvg: Record<string, any> = {};
     const byName: Record<string, any> = {};
 
@@ -2082,7 +2185,7 @@ export class ImportService {
         return { imported: 0, skipped: 1, errors: 0 };
       }
 
-      const existingResp = await client.get('/api/core/settings/').catch(() => []);
+      const existingResp = await client.get('/api/core/settings/').catch(this.warnOnFail('/api/core/settings/', [], jobId));
       const existingList = Array.isArray(existingResp)
         ? existingResp
         : existingResp
@@ -2189,8 +2292,7 @@ export class ImportService {
 
   private async importLogos(
     client: DispatcharrClient,
-    fileLogos: any[],
-    urlLogos: { name: string; url: string; source_id: number }[],
+    logos: any[],
     jobId?: string
   ): Promise<{ imported: number; skipped: number; errors: number; logoMap: Record<string, number> }> {
     let imported = 0;
@@ -2202,14 +2304,16 @@ export class ImportService {
     // - "file:abc" (filename lowercase) - fallback for sanitized names
     const logoMap: Record<string, number> = {};
 
-    // Validate fileLogos - default to empty array if not provided
-    const safeFileLogos = Array.isArray(fileLogos) ? fileLogos : [];
-    const safeUrlLogos = Array.isArray(urlLogos) ? urlLogos : [];
-    const totalLogos = safeFileLogos.length + safeUrlLogos.length;
-
-    if (totalLogos === 0) {
+    if (!Array.isArray(logos)) {
       if (jobId) {
-        jobManager.addLog(jobId, `No logos to import (0 file logos, 0 URL logos)`);
+        jobManager.addLog(jobId, `[ERROR] Logos data is not an array: ${typeof logos} = ${JSON.stringify(logos)}`);
+      }
+      return { imported, skipped: logos ? 0 : 1, errors: logos ? 1 : 0, logoMap };
+    }
+
+    if (logos.length === 0) {
+      if (jobId) {
+        jobManager.addLog(jobId, `No logos to import (empty array)`);
       }
       return { imported, skipped, errors, logoMap };
     }
@@ -2220,7 +2324,7 @@ export class ImportService {
       jobManager.addLog(jobId, `Clearing existing logos on destination to avoid conflicts...`);
     }
     try {
-      const existingLogos = await this.getAllPaginated(client, '/api/channels/logos/').catch(() => []);
+      const existingLogos = await this.getAllPaginated(client, '/api/channels/logos/', 1000, jobId);
       if (Array.isArray(existingLogos) && existingLogos.length > 0) {
         if (jobId) {
           jobManager.addLog(jobId, `Found ${existingLogos.length} existing logos on destination, using bulk delete...`);
@@ -2264,11 +2368,11 @@ export class ImportService {
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Found ${safeFileLogos.length} file logos and ${safeUrlLogos.length} URL logos to import`);
-      // Log first file logo structure for debugging
-      if (safeFileLogos[0]) {
-        const sample = safeFileLogos[0];
-        jobManager.addLog(jobId, `Sample file logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`);
+      jobManager.addLog(jobId, `Found ${logos.length} logos to import`);
+      // Log first logo structure for debugging
+      if (logos[0]) {
+        const sample = logos[0];
+        jobManager.addLog(jobId, `Sample logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`);
       }
     }
 
@@ -2276,11 +2380,13 @@ export class ImportService {
     // Use source_id if available, otherwise fall back to name
     const uploadedSourceIds = new Set<number>();
     const uploadedNames = new Set<string>();
-    const sentFilenames = new Set<string>();  // Track filenames sent to detect collisions
 
-    // === IMPORT FILE-BASED LOGOS ===
-    for (let i = 0; i < safeFileLogos.length; i++) {
-      const logo = safeFileLogos[i];
+    // Track unique counter to ensure no temp file collisions
+    let logoCounter = 0;
+
+    for (let i = 0; i < logos.length; i++) {
+      const logo = logos[i];
+      logoCounter++;
       // Use original_name from metadata if available (for new backups with metadata.json)
       // Otherwise fall back to filename-based name (legacy backups)
       const originalName = logo?.original_name;
@@ -2327,50 +2433,36 @@ export class ImportService {
         else if (ext === 'gif') contentType = 'image/gif';
         else if (ext === 'svg') contentType = 'image/svg+xml';
 
-        // Write to unique temp file and read back synchronously to ensure complete isolation
-        const uniqueId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        const tempPath = `/tmp/logo_${uniqueId}.${ext}`;
+        // Create isolated buffer copy to prevent FormData reference issues
+        // CRITICAL: Buffer.from() creates a NEW buffer (copies the data)
+        // Without this, FormData holds a reference that can point to wrong data
+        const bufferCopy = Buffer.from(buffer);
 
-        // Write buffer to temp file synchronously
-        fs.writeFileSync(tempPath, buffer);
-
-        // Read it back as a completely fresh buffer
-        const freshBuffer = fs.readFileSync(tempPath);
-
-        // Delete temp file immediately
-        try { fs.unlinkSync(tempPath); } catch {}
-
-        const fileSize = freshBuffer.length;
+        const fileSize = bufferCopy.length;
         if (jobId && imported < 20) {
           let checksum = 0;
-          for (let i = 0; i < freshBuffer.length; i++) {
-            checksum = (checksum + freshBuffer[i]) & 0xFFFF;
+          for (let i = 0; i < bufferCopy.length; i++) {
+            checksum = (checksum + bufferCopy[i]) & 0xFFFF;
           }
           jobManager.addLog(jobId, `DEBUG FILE: "${uploadName}" - ${fileSize} bytes, checksum: ${checksum.toString(16).padStart(4, '0')}`);
         }
 
-        // Create NEW FormData instance with the fresh buffer
+        // Use counter + timestamp + random to ensure absolutely unique filenames
+        const uniqueId = `${logoCounter}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        const uniqueFilename = `${uniqueId}.${ext}`;
+
+        // Create NEW FormData instance with buffer COPY
         const formData = new FormData();
         formData.append('name', uploadName.toString());
-        formData.append('file', freshBuffer, {
-          filename: `${filenameName}.${ext}`,
+        formData.append('file', bufferCopy, {
+          filename: uniqueFilename,
           contentType,
-          knownLength: freshBuffer.length,
+          knownLength: fileSize,
         });
-
-        const sentFilename = `${filenameName}.${ext}`;
-
-        // Check for filename collision
-        if (sentFilenames.has(sentFilename.toLowerCase())) {
-          if (jobId) {
-            jobManager.addLog(jobId, `WARNING: FILENAME COLLISION! "${sentFilename}" already sent! Logo "${uploadName}" will overwrite previous.`);
-          }
-        }
-        sentFilenames.add(sentFilename.toLowerCase());
 
         if (jobId) {
           const metadataInfo = originalName ? ` (original: "${originalName}")` : '';
-          jobManager.addLog(jobId, `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType}) -> filename="${sentFilename}"...`);
+          jobManager.addLog(jobId, `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType})...`);
         }
 
         const uploadResult = await client.post('/api/channels/logos/upload/', formData, {
@@ -2413,99 +2505,19 @@ export class ImportService {
           }
         }
         if (jobId) {
-          jobManager.addLog(jobId, `[OK] Logo "${uploadName}" (source_id=${sourceId}, dest=${newDestId}) - ${buffer.length} bytes imported`);
+          const returnedName = uploadResult?.name || uploadResult?.data?.name;
+          const returnedUrl = uploadResult?.url || uploadResult?.data?.url;
+          jobManager.addLog(jobId, `[OK] Logo "${uploadName}" (source_id=${sourceId}, dest=${newDestId}, returned_name="${returnedName}", url="${returnedUrl}") - ${fileSize} bytes imported`);
         }
       } catch (error: any) {
         const errData = error?.response?.data;
         const errStatus = error?.response?.status;
         const errMsg = errData?.detail || errData?.error || error?.message || 'Unknown error';
         // Log the full error response for debugging
-        console.error(`Failed to import logo "${uploadName}" (status=${errStatus}):`, JSON.stringify(errData) || error?.message);
+        log.error({ logoName: uploadName, status: errStatus, errData, errMsg }, 'Failed to import logo');
         errors++;
         if (jobId) {
           jobManager.addLog(jobId, `[FAIL] Logo "${uploadName}" - ${errMsg} (status=${errStatus}, response=${JSON.stringify(errData)})`);
-        }
-      }
-    }
-
-    // === IMPORT URL-BASED LOGOS ===
-    // URL logos are created via POST /api/channels/logos/ with {name, url}
-    // No file upload needed - just provide the remote URL
-    if (safeUrlLogos.length > 0) {
-      if (jobId) {
-        jobManager.addLog(jobId, `Starting URL logo import (${safeUrlLogos.length} logos)...`);
-      }
-
-      for (let i = 0; i < safeUrlLogos.length; i++) {
-        const urlLogo = safeUrlLogos[i];
-        const logoName = urlLogo.name;
-        const logoUrl = urlLogo.url;
-        const sourceId = urlLogo.source_id;
-
-        if (!logoName || !logoUrl) {
-          skipped++;
-          if (jobId) {
-            jobManager.addLog(jobId, `[SKIP] URL logo index ${i} - missing name or url`);
-          }
-          continue;
-        }
-
-        // Skip if we already uploaded this logo in THIS session
-        if (sourceId && uploadedSourceIds.has(sourceId)) {
-          skipped++;
-          if (jobId) {
-            jobManager.addLog(jobId, `[SKIP] URL logo "${logoName}" (source_id=${sourceId}) - duplicate source_id`);
-          }
-          continue;
-        }
-        if (!sourceId && uploadedNames.has(logoName.toLowerCase())) {
-          skipped++;
-          if (jobId) {
-            jobManager.addLog(jobId, `[SKIP] URL logo "${logoName}" - duplicate name`);
-          }
-          continue;
-        }
-
-        try {
-          if (jobId && imported < 20) {
-            jobManager.addLog(jobId, `Creating URL logo "${logoName}" -> ${logoUrl}`);
-          }
-
-          // Create logo via POST with name and url
-          const createResult = await client.post('/api/channels/logos/', {
-            name: logoName,
-            url: logoUrl,
-          });
-
-          const newDestId = createResult?.id || createResult?.data?.id;
-          imported++;
-
-          // Track that we created this logo in this session
-          if (sourceId) {
-            uploadedSourceIds.add(sourceId);
-          }
-          uploadedNames.add(logoName.toLowerCase());
-
-          // Add to logoMap for channel assignment
-          if (newDestId) {
-            if (sourceId) {
-              logoMap[`src:${sourceId}`] = newDestId;
-            }
-            logoMap[`name:${logoName.toLowerCase()}`] = newDestId;
-          }
-
-          if (jobId) {
-            jobManager.addLog(jobId, `[OK] URL logo "${logoName}" (source_id=${sourceId}, dest=${newDestId})`);
-          }
-        } catch (error: any) {
-          const errData = error?.response?.data;
-          const errStatus = error?.response?.status;
-          const errMsg = errData?.detail || errData?.error || error?.message || 'Unknown error';
-          console.error(`Failed to create URL logo "${logoName}" (status=${errStatus}):`, JSON.stringify(errData) || error?.message);
-          errors++;
-          if (jobId) {
-            jobManager.addLog(jobId, `[FAIL] URL logo "${logoName}" - ${errMsg} (status=${errStatus})`);
-          }
         }
       }
     }
@@ -2533,8 +2545,8 @@ export class ImportService {
   ): Promise<void> {
     try {
       const [channels, epgData] = await Promise.all([
-        this.getAllPaginated(client, '/api/channels/channels/').catch(() => []),
-        this.getAllPaginated(client, '/api/epg/epgdata/').catch(() => []),
+        this.getAllPaginated(client, '/api/channels/channels/', 1000, jobId),
+        this.getAllPaginated(client, '/api/epg/epgdata/', 1000, jobId),
       ]);
 
       if (!Array.isArray(channels) || !Array.isArray(epgData)) return;
@@ -2786,7 +2798,7 @@ export class ImportService {
       jobManager.addLog(jobId, 'Triggering EPG refresh by toggling EPG sources...');
 
       // Get all EPG sources
-      const epgSources = await client.get('/api/epg/sources/').catch(() => []);
+      const epgSources = await client.get('/api/epg/sources/').catch(this.warnOnFail('/api/epg/sources/', [], jobId));
 
       if (!Array.isArray(epgSources) || epgSources.length === 0) {
         jobManager.addLog(jobId, 'No EPG sources found to refresh');
@@ -2832,7 +2844,7 @@ export class ImportService {
     jobId: string
   ): Promise<void> {
     try {
-      const channels = await this.getAllPaginated(client, '/api/channels/channels/').catch(() => []);
+      const channels = await this.getAllPaginated(client, '/api/channels/channels/', 1000, jobId);
       const missing = Array.isArray(channels)
         ? channels.filter((c: any) => !c?.epg_data_id && c?.id).map((c: any) => c.id)
         : [];
@@ -2888,6 +2900,7 @@ export class ImportService {
       const phaseStart = Date.now();
       let checkCount = 0;
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
+        this.throwIfCancelled(jobId);
         try {
           const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
           let currentCount = 0;
@@ -2927,6 +2940,7 @@ export class ImportService {
     jobManager.addLog(jobId, `EPG data found (${previousCount} entries), waiting for parsing to complete...`);
     const observationStart = Date.now();
     while (Date.now() - start < timeoutMs) {
+      this.throwIfCancelled(jobId);
       try {
         const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
         let currentCount = 0;
@@ -2973,6 +2987,7 @@ export class ImportService {
   ): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
+      this.throwIfCancelled(jobId);
       try {
         const resp = await client.get('/api/channels/streams/?page=1&page_size=1');
         const count = Array.isArray(resp?.results) ? resp.results.length : Array.isArray(resp) ? resp.length : resp?.count || 0;

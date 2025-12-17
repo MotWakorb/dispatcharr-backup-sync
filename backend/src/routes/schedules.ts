@@ -3,6 +3,9 @@ import { scheduleStore } from '../services/scheduleStore.js';
 import { schedulerService } from '../services/schedulerService.js';
 import { savedConnectionStore } from '../services/savedConnectionStore.js';
 import type { ApiResponse, Schedule, ScheduleInput, ScheduleRunHistoryEntry } from '../types/index.js';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('schedules-route');
 
 export const schedulesRouter = Router();
 
@@ -297,7 +300,7 @@ schedulesRouter.post('/:id/run', async (req, res) => {
 
     // Execute asynchronously - don't wait for completion
     schedulerService.triggerManualRun(id).catch((error) => {
-      console.error(`Manual run failed for schedule ${id}:`, error);
+      log.error({ scheduleId: id, err: error }, 'Manual run failed for schedule');
     });
 
     res.json({

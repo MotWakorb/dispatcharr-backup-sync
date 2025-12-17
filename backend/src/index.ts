@@ -11,6 +11,9 @@ import { settingsRouter } from './routes/settings.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { infoRouter } from './routes/info.js';
 import { schedulerService } from './services/schedulerService.js';
+import { createLogger } from './services/logger.js';
+
+const log = createLogger('server');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -20,6 +23,12 @@ app.use(cors());
 // Accept larger payloads for import/export bundles
 app.use(express.json({ limit: '10gb' }));
 app.use(express.urlencoded({ extended: true, limit: '10gb' }));
+
+// Log all requests
+app.use((req, res, next) => {
+  log.debug({ method: req.method, url: req.url }, 'Request');
+  next();
+});
 
 // Health check
 app.get('/health', (req, res) => {
@@ -40,7 +49,7 @@ app.use('/api/info', infoRouter);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
+  log.error({ err, path: req.path }, 'Unhandled error');
   res.status(err.status || 500).json({
     success: false,
     error: err.message || 'Internal server error',
@@ -56,24 +65,24 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Dispatcharr Manager API running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
+  log.info({ port: PORT }, 'Dispatcharr Manager API running');
+  log.info({ url: `http://localhost:${PORT}/health` }, 'Health check endpoint');
 
   // Initialize scheduler after server starts
   schedulerService.initialize().catch((error) => {
-    console.error('Failed to initialize scheduler:', error);
+    log.error({ err: error }, 'Failed to initialize scheduler');
   });
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...');
+  log.info('SIGTERM received, shutting down');
   schedulerService.shutdown();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down...');
+  log.info('SIGINT received, shutting down');
   schedulerService.shutdown();
   process.exit(0);
 });

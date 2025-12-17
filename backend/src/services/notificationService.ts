@@ -11,6 +11,9 @@ import type {
 } from '../types/notifications.js';
 import { notificationStore } from './notificationStore.js';
 import { jobManager } from './jobManager.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('notifications');
 import type { JobLogEntry } from '../types/index.js';
 
 interface SendResult {
@@ -48,7 +51,7 @@ class NotificationService {
           providerName: provider.name,
         });
       } catch (error: any) {
-        console.error(`Failed to send notification via ${provider.name}:`, error.message);
+        log.error({ provider: provider.name, err: error }, 'Failed to send notification');
         results.push({
           success: false,
           message: error.message || 'Unknown error',

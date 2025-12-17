@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import type { JobStatus, JobLogEntry } from '../types/index.js';
+import { createLogger } from './logger.js';
 
+const logger = createLogger('jobs');
 const DATA_DIR = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
@@ -57,7 +59,7 @@ class JobManager {
           }
         }
 
-        console.log(`Loaded ${this.jobs.size} jobs and ${this.history.length} history entries from disk`);
+        logger.debug({ jobCount: this.jobs.size, historyCount: this.history.length }, 'Loaded jobs from disk');
       }
 
       // Load logs
@@ -68,10 +70,10 @@ class JobManager {
             this.logs.set(jobId, entries as JobLogEntry[]);
           }
         }
-        console.log(`Loaded logs for ${this.logs.size} jobs from disk`);
+        logger.debug({ logCount: this.logs.size }, 'Loaded job logs from disk');
       }
     } catch (error) {
-      console.error('Failed to load jobs from disk:', error);
+      logger.error({ err: error }, 'Failed to load jobs from disk');
     }
   }
 
@@ -96,7 +98,7 @@ class JobManager {
       }
       fs.writeFileSync(LOGS_FILE, JSON.stringify(logsData, null, 2));
     } catch (error) {
-      console.error('Failed to save jobs to disk:', error);
+      logger.error({ err: error }, 'Failed to save jobs to disk');
     }
   }
 
@@ -218,9 +220,9 @@ class JobManager {
       timestamp,
       message,
     });
-    // Mirror to console for docker logs visibility
+    // Mirror to structured logs for docker logs visibility
     const shortId = jobId.slice(0, 8);
-    console.log(`[${timestamp}] [${shortId}] ${message}`);
+    logger.debug({ jobId: shortId, message }, 'Job log entry');
     // Save logs periodically (every 10 entries to reduce I/O)
     if (log.length % 10 === 0) {
       this.saveToDisk();

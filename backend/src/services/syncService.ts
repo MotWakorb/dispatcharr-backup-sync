@@ -1,29 +1,74 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
+import { createLogger } from './logger.js';
 import type { SyncRequest, SyncOptions } from '../types/index.js';
 
+const log = createLogger('sync');
+
 export class SyncService {
-  private async getAllPaginated(client: any, endpoint: string): Promise<any[]> {
+  /**
+   * Throws an error if the job has been cancelled by the user.
+   * Call this in long-running loops to respect cancellation requests.
+   */
+  private throwIfCancelled(jobId: string) {
+    const job = jobManager.getJob(jobId);
+    if (job?.status === 'cancelled') {
+      const err: any = new Error('Sync cancelled by user');
+      err.cancelled = true;
+      throw err;
+    }
+  }
+
+  /**
+   * Creates an error handler for API calls that logs the error and returns a default value.
+   * Use with .catch() to prevent silent failures while still allowing graceful degradation.
+   */
+  private warnOnFail<T>(endpoint: string, defaultValue: T, jobId?: string): (error: any) => T {
+    return (error: any): T => {
+      const status = error?.response?.status || '';
+      const message = error?.response?.data?.detail || error?.message || 'Unknown error';
+      const warning = `API call to ${endpoint} failed${status ? ` (${status})` : ''}: ${message}`;
+      if (jobId) {
+        jobManager.addLog(jobId, `WARNING: ${warning}`);
+      }
+      log.warn({ endpoint, status, message }, 'API call failed');
+      return defaultValue;
+    };
+  }
+
+  private async getAllPaginated(client: any, endpoint: string, jobId?: string): Promise<any[]> {
     let allResults: any[] = [];
     let page = 1;
     const pageSize = 1000;
 
-    while (true) {
-      const response = await client.get(`${endpoint}?page=${page}&page_size=${pageSize}`);
+    try {
+      while (true) {
+        if (jobId) {
+          this.throwIfCancelled(jobId);
+        }
+        const fullEndpoint = `${endpoint}?page=${page}&page_size=${pageSize}`;
+        const response = await client.get(fullEndpoint).catch(this.warnOnFail(fullEndpoint, null, jobId));
 
-      if (response.results && Array.isArray(response.results)) {
-        allResults = allResults.concat(response.results);
-        if (!response.next) {
+        if (!response) {
           break;
         }
-        page++;
-      } else if (Array.isArray(response)) {
-        // Non-paginated response
-        return response;
-      } else {
-        // Single object response
-        return [response];
+
+        if (response.results && Array.isArray(response.results)) {
+          allResults = allResults.concat(response.results);
+          if (!response.next) {
+            break;
+          }
+          page++;
+        } else if (Array.isArray(response)) {
+          // Non-paginated response
+          return response;
+        } else {
+          // Single object response
+          return [response];
+        }
       }
+    } catch (error: any) {
+      this.warnOnFail(endpoint, [], jobId)(error);
     }
 
     return allResults;
@@ -43,10 +88,10 @@ export class SyncService {
       // Source: channels (with epg_data_id) and EPG data (for metadata lookup)
       // Destination: channels and EPG data
       const [sourceChannels, sourceEpgData, destChannels, destEpgData] = await Promise.all([
-        this.getAllPaginated(sourceClient, '/api/channels/channels/').catch(() => []),
-        this.getAllPaginated(sourceClient, '/api/epg/epgdata/').catch(() => []),
-        this.getAllPaginated(destClient, '/api/channels/channels/').catch(() => []),
-        this.getAllPaginated(destClient, '/api/epg/epgdata/').catch(() => []),
+        this.getAllPaginated(sourceClient, '/api/channels/channels/', jobId),
+        this.getAllPaginated(sourceClient, '/api/epg/epgdata/', jobId),
+        this.getAllPaginated(destClient, '/api/channels/channels/', jobId),
+        this.getAllPaginated(destClient, '/api/epg/epgdata/', jobId),
       ]);
 
       if (!Array.isArray(destChannels) || !Array.isArray(destEpgData) || destEpgData.length === 0) {
@@ -303,6 +348,7 @@ export class SyncService {
       const phaseStart = Date.now();
       let checkCount = 0;
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
+        this.throwIfCancelled(jobId);
         try {
           const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
           let currentCount = 0;
@@ -342,6 +388,7 @@ export class SyncService {
     jobManager.addLog(jobId, `EPG data found (${previousCount} entries), waiting for parsing to complete...`);
     const observationStart = Date.now();
     while (Date.now() - start < timeoutMs) {
+      this.throwIfCancelled(jobId);
       try {
         const resp = await client.get('/api/epg/epgdata/?page=1&page_size=10000');
         let currentCount = 0;
@@ -392,6 +439,7 @@ export class SyncService {
     const requiredStableChecks = 3;
 
     while (Date.now() - start < timeoutMs) {
+      this.throwIfCancelled(jobId);
       try {
         const resp = await client.get('/api/channels/streams/?page=1&page_size=1');
         const count = resp?.count || (Array.isArray(resp?.results) ? resp.results.length : 0);
@@ -460,6 +508,7 @@ export class SyncService {
 
       // 1. Sync M3U Sources
       if (request.options.syncM3USources) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing M3U sources...');
         results.synced.m3uSources = await this.syncM3USources(
           sourceClient,
@@ -472,6 +521,7 @@ export class SyncService {
 
       // 2. Sync EPG Sources
       if (request.options.syncEPGSources) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing EPG sources...');
         results.synced.epgSources = await this.syncEPGSources(
           sourceClient,
@@ -498,6 +548,7 @@ export class SyncService {
 
       // 3. Sync Channel Profiles
       if (request.options.syncChannelProfiles) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing channel profiles...');
         results.synced.channelProfiles = await this.syncChannelProfiles(
           sourceClient,
@@ -509,6 +560,7 @@ export class SyncService {
 
       // 4. Sync Channel Groups
       if (request.options.syncChannelGroups) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing channel groups...');
         results.synced.channelGroups = await this.syncChannelGroups(
           sourceClient,
@@ -521,6 +573,7 @@ export class SyncService {
 
       // 5. Sync Stream Profiles
       if (request.options.syncStreamProfiles) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing stream profiles...');
         results.synced.streamProfiles = await this.syncStreamProfiles(
           sourceClient,
@@ -533,6 +586,7 @@ export class SyncService {
       // 6. Sync Logos BEFORE channels so we can map logo IDs
       let logoMap: Record<string, number> = {};
       if (request.options.syncLogos) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
         const logoResult = await this.syncLogos(
           sourceClient,
@@ -547,6 +601,7 @@ export class SyncService {
 
       // 7. Sync Channels
       if (request.options.syncChannels) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing channels...');
         results.synced.channels = await this.syncChannels(
           sourceClient,
@@ -576,6 +631,7 @@ export class SyncService {
 
       // 8. Sync User Agents
       if (request.options.syncUserAgents) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing user agents...');
         results.synced.userAgents = await this.syncUserAgents(
           sourceClient,
@@ -587,6 +643,7 @@ export class SyncService {
 
       // 9. Sync Core Settings
       if (request.options.syncCoreSettings) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing core settings...');
         results.synced.coreSettings = await this.syncCoreSettings(
           sourceClient,
@@ -598,6 +655,7 @@ export class SyncService {
 
       // 10. Sync Plugins
       if (request.options.syncPlugins) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing plugins...');
         results.synced.plugins = await this.syncPlugins(sourceClient, destClient, request.dryRun);
         currentProgress += progressPerStep;
@@ -605,6 +663,7 @@ export class SyncService {
 
       // 11. Sync DVR Rules
       if (request.options.syncDVRRules) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing DVR rules...');
         results.synced.dvrRules = await this.syncDVRRules(
           sourceClient,
@@ -616,6 +675,7 @@ export class SyncService {
 
       // 12. Sync Comskip Config
       if (request.options.syncComskipConfig) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing comskip config...');
         results.synced.comskipConfig = await this.syncComskipConfig(
           sourceClient,
@@ -628,6 +688,7 @@ export class SyncService {
 
       // 13. Sync Users
       if (request.options.syncUsers) {
+        this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing users...');
         results.synced.users = await this.syncUsers(sourceClient, destClient, request.dryRun);
         currentProgress += progressPerStep;
@@ -646,7 +707,12 @@ export class SyncService {
 
       jobManager.completeJob(jobId, results);
     } catch (error: any) {
-      jobManager.failJob(jobId, error.message);
+      if (error?.cancelled) {
+        // Job was cancelled by user, don't mark as failed
+        jobManager.addLog(jobId, 'Sync cancelled by user');
+      } else {
+        jobManager.failJob(jobId, error.message);
+      }
       throw error;
     }
   }
@@ -834,8 +900,8 @@ export class SyncService {
     const destChannels = await dest.get('/api/channels/channels/');
 
     // Build stream profile mapping by name
-    const sourceProfiles = await source.get('/api/core/streamprofiles/').catch(() => []);
-    const destProfiles = await dest.get('/api/core/streamprofiles/').catch(() => []);
+    const sourceProfiles = await source.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
+    const destProfiles = await dest.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
     const profileMap: Record<number, number> = {};
 
     for (const sourceProfile of (Array.isArray(sourceProfiles) ? sourceProfiles : [])) {
@@ -848,8 +914,8 @@ export class SyncService {
     }
 
     // Build channel group mapping by name
-    const sourceGroups = await source.get('/api/channels/groups/').catch(() => []);
-    const destGroups = await dest.get('/api/channels/groups/').catch(() => []);
+    const sourceGroups = await source.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const destGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const sourceGroupList = Array.isArray(sourceGroups) ? sourceGroups : sourceGroups.results || [];
     const destGroupList = Array.isArray(destGroups) ? destGroups : destGroups.results || [];
 
@@ -893,7 +959,7 @@ export class SyncService {
     }
 
     // Fetch SOURCE streams to get their metadata (the channel.streams array may just contain IDs)
-    const sourceStreams = await this.getAllPaginated(source, '/api/channels/streams/').catch(() => []);
+    const sourceStreams = await this.getAllPaginated(source, '/api/channels/streams/', jobId);
     const sourceStreamById: Record<number, any> = {};
     if (Array.isArray(sourceStreams)) {
       for (const stream of sourceStreams) {
@@ -908,7 +974,7 @@ export class SyncService {
     }
 
     // Fetch destination streams and build lookup tables for stream matching
-    const destStreams = await this.getAllPaginated(dest, '/api/channels/streams/').catch(() => []);
+    const destStreams = await this.getAllPaginated(dest, '/api/channels/streams/', jobId);
     const streamByHash: Record<string, number> = {};
     const streamByTvgId: Record<string, number[]> = {};
     const streamByName: Record<string, number[]> = {};
@@ -1374,8 +1440,8 @@ export class SyncService {
     const destList = Array.isArray(destAccounts) ? destAccounts : destAccounts.results || [];
 
     // Build channel group mappings for ID translation
-    const sourceGroups = await source.get('/api/channels/groups/').catch(() => []);
-    const destGroups = await dest.get('/api/channels/groups/').catch(() => []);
+    const sourceGroups = await source.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const destGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
 
     const sourceGroupList = Array.isArray(sourceGroups) ? sourceGroups : sourceGroups.results || [];
     const destGroupList = Array.isArray(destGroups) ? destGroups : destGroups.results || [];
@@ -1410,7 +1476,7 @@ export class SyncService {
         }
       } catch {
         // Group might already exist, try to find it
-        const refreshed = await dest.get('/api/channels/groups/').catch(() => []);
+        const refreshed = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
         const refreshedList = Array.isArray(refreshed) ? refreshed : refreshed.results || [];
         const found = refreshedList.find((g: any) => g.name?.toLowerCase() === lowerName);
         if (found?.id) {
@@ -1479,15 +1545,16 @@ export class SyncService {
         // If we have channel_groups settings to apply, refresh and then PATCH
         if (transformedChannelGroups && transformedChannelGroups.length > 0) {
           // Trigger refresh to discover channel groups
-          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(() => null);
+          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
 
           // Wait for refresh to complete
           const maxWait = 60000;
           const pollInterval = 2000;
           const startTime = Date.now();
           while (Date.now() - startTime < maxWait) {
+            this.throwIfCancelled(jobId);
             await new Promise(r => globalThis.setTimeout(r, pollInterval));
-            const acct = await dest.get(`/api/m3u/accounts/${accountId}/`).catch(() => null);
+            const acct = await dest.get(`/api/m3u/accounts/${accountId}/`).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/`, null, jobId));
             if (acct && acct.status !== 'refreshing' && acct.status !== 'pending_setup') {
               break;
             }
@@ -1498,7 +1565,7 @@ export class SyncService {
           const discoveredGroups = currentAccount?.channel_groups || [];
 
           // Refresh dest group mapping
-          const refreshedDestGroups = await dest.get('/api/channels/groups/').catch(() => []);
+          const refreshedDestGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
           const refreshedDestList = Array.isArray(refreshedDestGroups) ? refreshedDestGroups : refreshedDestGroups.results || [];
           for (const g of refreshedDestList) {
             if (g?.id != null && g?.name) {
@@ -1561,11 +1628,11 @@ export class SyncService {
             const autoSyncGroups = completePayload.filter((cg: any) => cg.auto_channel_sync);
             await dest.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
               channel_groups: autoSyncGroups,
-            }).catch(() => null);
+            }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
           }
 
           // Trigger another refresh to apply the enabled/disabled states
-          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(() => null);
+          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
         }
 
         synced++;
@@ -1681,7 +1748,7 @@ export class SyncService {
         return { synced: sourceList.length, skipped: 0, errors: 0 };
       }
 
-      const destResp = await dest.get('/api/core/settings/').catch(() => []);
+      const destResp = await dest.get('/api/core/settings/').catch(this.warnOnFail('/api/core/settings/', []));
       const destList = Array.isArray(destResp)
         ? destResp
         : destResp
@@ -1830,7 +1897,7 @@ export class SyncService {
     } catch (error: any) {
       const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
       const statusCode = error?.response?.status || 'N/A';
-      console.error(`[syncComskipConfig] Failed with status ${statusCode}: ${errMsg}`);
+      log.error({ statusCode, err: errMsg }, 'syncComskipConfig failed');
       if (jobId) {
         jobManager.addLog(jobId, `Comskip config: Failed (HTTP ${statusCode}) - ${errMsg}`);
       }
@@ -1848,7 +1915,7 @@ export class SyncService {
     const logoMap: Record<string, number> = {};
 
     // First, get all channels from source to find which logos are actually used by channels
-    const sourceChannels = await source.get('/api/channels/channels/').catch(() => []);
+    const sourceChannels = await source.get('/api/channels/channels/').catch(this.warnOnFail('/api/channels/channels/', [], jobId));
     const channelsList = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
     const channelLogoIds = new Set<number>();
     for (const ch of channelsList) {
@@ -2001,7 +2068,7 @@ export class SyncService {
       jobManager.addLog(jobId, 'Triggering EPG refresh by toggling EPG sources...');
 
       // Get all EPG sources
-      const epgSources = await client.get('/api/epg/sources/').catch(() => []);
+      const epgSources = await client.get('/api/epg/sources/').catch(this.warnOnFail('/api/epg/sources/', [], jobId));
 
       if (!Array.isArray(epgSources) || epgSources.length === 0) {
         jobManager.addLog(jobId, 'No EPG sources found to refresh');

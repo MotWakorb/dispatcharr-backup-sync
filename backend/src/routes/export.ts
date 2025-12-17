@@ -5,6 +5,9 @@ import path from 'path';
 import fs from 'fs';
 import type { ExportRequest } from '../types/index.js';
 import type { ApiResponse } from '../types/index.js';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('export-route');
 
 export const exportRouter = Router();
 
@@ -36,7 +39,7 @@ exportRouter.post('/', async (req, res) => {
     exportService
       .export(request, jobId)
       .catch((error) => {
-        console.error(`Export job ${jobId} failed:`, error);
+        log.error({ jobId, err: error }, 'Export job failed');
       });
 
     // Return job ID immediately
@@ -48,7 +51,7 @@ exportRouter.post('/', async (req, res) => {
       },
     });
   } catch (error: any) {
-    console.error('Error starting export:', error);
+    log.error({ err: error }, 'Error starting export');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to start export job',
@@ -101,7 +104,7 @@ exportRouter.get('/status/:jobId', (req, res) => {
       data: status,
     });
   } catch (error: any) {
-    console.error('Error getting job status:', error);
+    log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get job status',
@@ -142,7 +145,7 @@ exportRouter.get('/download/:jobId', async (req, res) => {
     // Send file
     res.download(filePath, fileName, (err) => {
       if (err) {
-        console.error('Error sending file:', err);
+        log.error({ err }, 'Error sending file');
         if (!res.headersSent) {
           res.status(500).json({
             success: false,
@@ -153,11 +156,11 @@ exportRouter.get('/download/:jobId', async (req, res) => {
 
       // Cleanup file after download
       exportService.cleanup(filePath).catch((error) => {
-        console.error('Failed to cleanup file:', error);
+        log.error({ err: error }, 'Failed to cleanup file');
       });
     });
   } catch (error: any) {
-    console.error('Error downloading file:', error);
+    log.error({ err: error }, 'Error downloading file');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to download file',
@@ -197,7 +200,7 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
 
     res.download(filePath, fileName, (err) => {
       if (err) {
-        console.error('Error sending logos file:', err);
+        log.error({ err }, 'Error sending logos file');
         if (!res.headersSent) {
           res.status(500).json({
             success: false,
@@ -207,7 +210,7 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
       }
     });
   } catch (error: any) {
-    console.error('Error downloading logos:', error);
+    log.error({ err: error }, 'Error downloading logos');
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to download logos',

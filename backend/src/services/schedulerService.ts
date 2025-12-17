@@ -7,7 +7,10 @@ import { exportService } from './exportService.js';
 import { syncService } from './syncService.js';
 import { jobManager } from './jobManager.js';
 import { notificationService } from './notificationService.js';
+import { createLogger } from './logger.js';
 import type { Schedule, SchedulePreset } from '../types/index.js';
+
+const log = createLogger('scheduler');
 
 // Preset cron expressions
 const PRESET_CRONS: Record<SchedulePreset, string> = {
@@ -25,11 +28,11 @@ class SchedulerService {
 
   // Initialize on startup
   async initialize(): Promise<void> {
-    console.log('Initializing scheduler service...');
+    log.info('Initializing scheduler service');
     try {
       // Load timezone from settings
       this.currentTimezone = await settingsStore.getTimezone();
-      console.log(`Scheduler using timezone: ${this.currentTimezone}`);
+      log.info({ timezone: this.currentTimezone }, 'Scheduler using timezone');
 
       const schedules = await scheduleStore.getAll();
       for (const schedule of schedules) {
@@ -37,15 +40,15 @@ class SchedulerService {
           await this.scheduleJob(schedule);
         }
       }
-      console.log(`Scheduler initialized with ${this.scheduledTasks.size} active schedules`);
+      log.info({ count: this.scheduledTasks.size }, 'Scheduler initialized with active schedules');
     } catch (error) {
-      console.error('Failed to initialize scheduler:', error);
+      log.error({ err: error }, 'Failed to initialize scheduler');
     }
   }
 
   // Reinitialize all schedules with a new timezone
   async reinitializeWithTimezone(timezone: string): Promise<void> {
-    console.log(`Reinitializing scheduler with timezone: ${timezone}`);
+    log.info({ timezone }, 'Reinitializing scheduler with timezone');
     this.currentTimezone = timezone;
 
     // Stop all current tasks
@@ -61,7 +64,7 @@ class SchedulerService {
         await this.scheduleJob(schedule);
       }
     }
-    console.log(`Scheduler reinitialized with ${this.scheduledTasks.size} active schedules`);
+    log.info({ count: this.scheduledTasks.size }, 'Scheduler reinitialized with active schedules');
   }
 
   // Get cron expression for a schedule
@@ -83,7 +86,7 @@ class SchedulerService {
     const cronExpr = this.getCronExpression(schedule);
 
     if (!cron.validate(cronExpr)) {
-      console.error(`Invalid cron expression for schedule ${schedule.id}: ${cronExpr}`);
+      log.error({ scheduleId: schedule.id, cronExpr }, 'Invalid cron expression');
       return;
     }
 
@@ -99,7 +102,7 @@ class SchedulerService {
     // Calculate and store next run time
     await this.updateNextRunTime(schedule.id, cronExpr);
 
-    console.log(`Scheduled job "${schedule.name}" (${schedule.id}) with cron: ${cronExpr} (timezone: ${this.currentTimezone})`);
+    log.info({ scheduleName: schedule.name, scheduleId: schedule.id, cronExpr, timezone: this.currentTimezone }, 'Scheduled job');
   }
 
   // Remove a scheduled job
@@ -108,7 +111,7 @@ class SchedulerService {
     if (task) {
       task.stop();
       this.scheduledTasks.delete(scheduleId);
-      console.log(`Unscheduled job ${scheduleId}`);
+      log.debug({ scheduleId }, 'Unscheduled job');
     }
   }
 
@@ -116,7 +119,7 @@ class SchedulerService {
   async executeSchedule(scheduleId: string): Promise<string | undefined> {
     // Prevent concurrent runs of the same schedule
     if (this.runningJobs.has(scheduleId)) {
-      console.log(`Schedule ${scheduleId} is already running, skipping this execution`);
+      log.debug({ scheduleId }, 'Schedule is already running, skipping this execution');
       return undefined;
     }
 
@@ -127,14 +130,14 @@ class SchedulerService {
     try {
       schedule = await scheduleStore.getById(scheduleId);
       if (!schedule) {
-        console.error(`Schedule ${scheduleId} not found`);
+        log.error({ scheduleId }, 'Schedule not found');
         return undefined;
       }
 
       // Get source connection
       const sourceConn = await savedConnectionStore.getById(schedule.sourceConnectionId);
       if (!sourceConn) {
-        console.error(`Source connection ${schedule.sourceConnectionId} not found for schedule ${scheduleId}`);
+        log.error({ connectionId: schedule.sourceConnectionId, scheduleId }, 'Source connection not found');
         return undefined;
       }
 
@@ -146,7 +149,7 @@ class SchedulerService {
       await scheduleStore.recordRunStart(scheduleId, jobId);
       startTime = Date.now();
 
-      console.log(`Executing schedule "${schedule.name}" (${scheduleId}), job ${jobId}`);
+      log.info({ scheduleName: schedule.name, scheduleId, jobId }, 'Executing schedule');
 
       // Send start notification (async, don't wait)
       notificationService.notify({
@@ -155,7 +158,7 @@ class SchedulerService {
         jobType: schedule.jobType,
         jobId,
         timestamp: new Date().toISOString(),
-      }).catch((err) => console.error('Failed to send start notification:', err));
+      }).catch((err) => log.error({ err }, 'Failed to send start notification'));
 
       if (schedule.jobType === 'backup') {
         await exportService.export({
@@ -197,7 +200,7 @@ class SchedulerService {
 
       // Record success
       await scheduleStore.recordRunComplete(scheduleId, jobId, 'completed');
-      console.log(`Schedule "${schedule.name}" completed successfully`);
+      log.info({ scheduleName: schedule.name, scheduleId }, 'Schedule completed successfully');
 
       // Check if job completed with errors
       const jobResult = jobManager.getJob(jobId);
@@ -223,10 +226,10 @@ class SchedulerService {
         timestamp: new Date().toISOString(),
         duration: Date.now() - startTime,
         ...(totalErrors > 0 && { errorCount: totalErrors }),
-      }).catch((err) => console.error('Failed to send completion notification:', err));
+      }).catch((err) => log.error({ err }, 'Failed to send completion notification'));
 
     } catch (error: any) {
-      console.error(`Schedule ${scheduleId} failed:`, error);
+      log.error({ err: error, scheduleId }, 'Schedule failed');
       // Record failure
       if (jobId) {
         await scheduleStore.recordRunComplete(scheduleId, jobId, 'failed', error.message);
@@ -241,7 +244,7 @@ class SchedulerService {
             timestamp: new Date().toISOString(),
             error: error.message,
             duration: Date.now() - startTime,
-          }).catch((err) => console.error('Failed to send failure notification:', err));
+          }).catch((err) => log.error({ err }, 'Failed to send failure notification'));
         }
       }
     } finally {
@@ -267,7 +270,7 @@ class SchedulerService {
       const nextRun = interval.next().toISOString();
       await scheduleStore.updateNextRunTime(scheduleId, nextRun);
     } catch (error) {
-      console.error(`Failed to calculate next run time for ${scheduleId}:`, error);
+      log.error({ err: error, scheduleId }, 'Failed to calculate next run time');
     }
   }
 
@@ -308,20 +311,20 @@ class SchedulerService {
   // Apply retention policy - delete old backups beyond the retention count
   private async applyRetentionPolicy(scheduleId: string, retentionCount: number): Promise<void> {
     try {
-      console.log(`Applying retention policy for schedule ${scheduleId}: keeping ${retentionCount} backups`);
+      log.debug({ scheduleId, retentionCount }, 'Applying retention policy');
 
       // Get all completed backup job IDs for this schedule, sorted newest first
       const completedJobIds = await scheduleStore.getCompletedBackupJobIds(scheduleId);
 
       if (completedJobIds.length <= retentionCount) {
-        console.log(`Retention: ${completedJobIds.length} backups exist, retention count is ${retentionCount}, no cleanup needed`);
+        log.debug({ backupCount: completedJobIds.length, retentionCount }, 'Retention: no cleanup needed');
         return;
       }
 
       // Get the job IDs to delete (oldest ones beyond retention count)
       const jobIdsToDelete = completedJobIds.slice(retentionCount);
 
-      console.log(`Retention: Deleting ${jobIdsToDelete.length} old backups`);
+      log.debug({ deleteCount: jobIdsToDelete.length }, 'Retention: Deleting old backups');
 
       // Delete the backup files
       const result = await exportService.cleanupOldBackups(jobIdsToDelete);
@@ -329,14 +332,14 @@ class SchedulerService {
       // Delete the history entries for deleted backups
       if (result.deleted.length > 0) {
         await scheduleStore.deleteHistoryEntries(result.deleted);
-        console.log(`Retention: Cleaned up ${result.deleted.length} old backups and history entries`);
+        log.info({ cleanedUp: result.deleted.length }, 'Retention: Cleaned up old backups and history entries');
       }
 
       if (result.errors.length > 0) {
-        console.error(`Retention: Encountered ${result.errors.length} errors during cleanup:`, result.errors);
+        log.error({ errorCount: result.errors.length, errors: result.errors }, 'Retention: Encountered errors during cleanup');
       }
     } catch (error) {
-      console.error(`Retention: Failed to apply retention policy for schedule ${scheduleId}:`, error);
+      log.error({ err: error, scheduleId }, 'Retention: Failed to apply retention policy');
       // Don't throw - retention failure shouldn't fail the backup job
     }
   }
@@ -355,12 +358,12 @@ class SchedulerService {
 
   // Shutdown gracefully
   shutdown(): void {
-    console.log('Shutting down scheduler service...');
+    log.info('Shutting down scheduler service');
     for (const [id, task] of this.scheduledTasks) {
       task.stop();
     }
     this.scheduledTasks.clear();
-    console.log('Scheduler service shut down');
+    log.info('Scheduler service shut down');
   }
 }
 
