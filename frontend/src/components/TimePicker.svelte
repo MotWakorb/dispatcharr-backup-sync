@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { TimeFormat } from '../../types';
-  import { parseTypedTime, hour24ToDisplayTime } from '../../lib/scheduleUtils';
+  import type { TimeFormat } from '../types';
+  import { parseTypedTime, hour24ToDisplayTime } from '../lib/scheduleUtils';
 
   export let hour24: number = 2;
   export let minute: number = 0;

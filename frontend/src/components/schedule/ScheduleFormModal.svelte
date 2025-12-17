@@ -2,8 +2,8 @@
   import { createEventDispatcher } from 'svelte';
   import type { Schedule, ScheduleInput, SavedConnection, SyncOptions, TimeFormat } from '../../types';
   import { MINUTES, DAYS_OF_WEEK, DAYS_OF_MONTH, buildCronExpression, parseCronExpression, hour24ToDisplayTime } from '../../lib/scheduleUtils';
-  import TimePicker from './TimePicker.svelte';
-  import DayPicker from './DayPicker.svelte';
+  import TimePicker from '../TimePicker.svelte';
+  import DayPicker from '../DayPicker.svelte';
 
   export let show: boolean = false;
   export let editingSchedule: Schedule | null = null;

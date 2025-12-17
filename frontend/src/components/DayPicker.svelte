@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { DAYS_OF_WEEK } from '../../lib/scheduleUtils';
+  import { DAYS_OF_WEEK } from '../lib/scheduleUtils';
 
   export let selectedDays: number[] = [1];
   export let allowEmpty: boolean = false;
