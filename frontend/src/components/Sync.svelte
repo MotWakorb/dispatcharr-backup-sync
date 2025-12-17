@@ -319,9 +319,10 @@
         class="logs-modal"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="sync-logs-title"
       >
         <div class="flex justify-between items-center mb-2">
-          <h3>Job Logs</h3>
+          <h3 id="sync-logs-title">Job Logs</h3>
           <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
         </div>
         <div class="logs-body">

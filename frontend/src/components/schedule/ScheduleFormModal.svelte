@@ -207,10 +207,10 @@
 
 {#if show}
   <div class="overlay" role="presentation">
-    <div class="modal modal-lg" role="dialog" aria-modal="true">
+    <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="schedule-form-title">
       <div class="modal-header">
         <div>
-          <h3>{editingSchedule ? 'Edit Schedule' : 'Create Schedule'}</h3>
+          <h3 id="schedule-form-title">{editingSchedule ? 'Edit Schedule' : 'Create Schedule'}</h3>
           <p class="text-sm text-gray">
             {editingSchedule ? 'Update your scheduled job.' : 'Set up a new automated job.'}
           </p>

@@ -305,10 +305,10 @@
 <!-- Logs Modal -->
 {#if showLogsModal}
   <div class="modal-overlay" role="presentation">
-    <div class="logs-modal" role="dialog" aria-modal="true">
+    <div class="logs-modal" role="dialog" aria-modal="true" aria-labelledby="jobs-logs-title">
       <div class="modal-header">
         <div>
-          <h3>Job Logs</h3>
+          <h3 id="jobs-logs-title">Job Logs</h3>
           <p class="text-sm text-gray">{logsModalJob?.jobType} - {logsModalJob?.jobId}</p>
         </div>
         <div class="modal-actions">

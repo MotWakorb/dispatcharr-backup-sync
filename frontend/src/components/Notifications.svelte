@@ -433,10 +433,10 @@
   {#if showCreateModal}
     <div class="overlay" role="presentation">
       <button class="sr-only" on:click={closeCreateModal}>Close create dialog</button>
-      <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-provider-title">
         <div class="modal-header">
           <div>
-            <h3>Add Notification Provider</h3>
+            <h3 id="create-provider-title">Add Notification Provider</h3>
             <p class="text-sm text-gray">Configure a new notification provider.</p>
           </div>
           <button class="close-btn" type="button" on:click={closeCreateModal} aria-label="Close">
@@ -630,10 +630,10 @@
   {#if editingProvider}
     <div class="overlay" role="presentation">
       <button class="sr-only" on:click={closeEdit}>Close edit dialog</button>
-      <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-provider-title">
         <div class="modal-header">
           <div>
-            <h3>Edit Notification Provider</h3>
+            <h3 id="edit-provider-title">Edit Notification Provider</h3>
             <p class="text-sm text-gray">Update settings for {editingProvider.name}</p>
           </div>
           <button class="close-btn" type="button" on:click={closeEdit} aria-label="Close">

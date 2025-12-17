@@ -577,10 +577,10 @@
   {#if showCreateModal}
     <div class="overlay" role="presentation">
       <button class="sr-only" on:click={closeCreateModal}>Close create dialog</button>
-      <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-connection-title">
         <div class="modal-header">
           <div>
-            <h3>Create Connection</h3>
+            <h3 id="create-connection-title">Create Connection</h3>
             <p class="text-sm text-gray">Add a new Dispatcharr instance connection. You must test the connection successfully before saving.</p>
           </div>
           <button class="close-btn" type="button" on:click={closeCreateModal} aria-label="Close">
@@ -685,10 +685,10 @@
   {#if editingConnection}
     <div class="overlay" role="presentation">
       <button class="sr-only" on:click={closeEdit}>Close edit dialog</button>
-      <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-connection-title">
         <div class="modal-header">
           <div>
-            <h3>Edit Connection</h3>
+            <h3 id="edit-connection-title">Edit Connection</h3>
             <p class="text-sm text-gray">Update settings for {editingConnection.name}</p>
           </div>
           <button class="close-btn" type="button" on:click={closeEdit} aria-label="Close">

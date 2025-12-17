@@ -442,10 +442,10 @@
   <!-- Restore Configuration Modal -->
   {#if showImportModal}
     <div class="modal-overlay" role="presentation">
-      <div class="modal import-modal" role="dialog" aria-modal="true">
+      <div class="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="restore-config-title">
         <div class="modal-header">
           <div>
-            <h3>Restore Configuration</h3>
+            <h3 id="restore-config-title">Restore Configuration</h3>
             <p class="text-sm text-gray">{selectedFile?.name}</p>
           </div>
           <button class="close-btn" type="button" on:click={closeImportModal} aria-label="Close">
@@ -627,9 +627,9 @@
   {#if showLogs}
     <div class="logs-overlay" role="presentation">
       <button class="sr-only" on:click={() => showLogs = false}>Close logs</button>
-      <div class="logs-modal" role="dialog" aria-modal="true">
+      <div class="logs-modal" role="dialog" aria-modal="true" aria-labelledby="import-logs-title">
         <div class="flex justify-between items-center mb-2">
-          <h3>Job Logs</h3>
+          <h3 id="import-logs-title">Job Logs</h3>
           <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
         </div>
         <div class="logs-body">

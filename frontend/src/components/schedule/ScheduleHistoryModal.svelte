@@ -31,10 +31,10 @@
 
 {#if show && schedule}
   <div class="overlay" role="presentation">
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="schedule-history-title">
       <div class="modal-header">
         <div>
-          <h3>Run History</h3>
+          <h3 id="schedule-history-title">Run History</h3>
           <p class="text-sm text-gray">{schedule.name}</p>
         </div>
         <button class="close-btn" type="button" on:click={handleClose} aria-label="Close">

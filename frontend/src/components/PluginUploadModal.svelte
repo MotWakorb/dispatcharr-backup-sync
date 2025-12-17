@@ -91,9 +91,9 @@
 
 {#if show}
   <div class="modal-overlay" role="presentation">
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="plugins-required-title">
       <div class="modal-header">
-        <h3>Plugins Required</h3>
+        <h3 id="plugins-required-title">Plugins Required</h3>
         <button class="close-btn" type="button" on:click={handleClose} aria-label="Close">
           &times;
         </button>
