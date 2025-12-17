@@ -37,6 +37,35 @@ const SECTION_OPTION_MAP = {
   logos: 'syncLogos',
 } as const;
 
+// File size limits for base64 decoding (to prevent memory exhaustion)
+const MAX_BACKUP_FILE_SIZE = 10 * 1024 * 1024 * 1024; // 10GB - matches multer limit
+const MAX_LOGO_FILE_SIZE = 50 * 1024 * 1024; // 50MB - reasonable limit for a single logo
+
+/**
+ * Estimates the decoded size of a base64 string.
+ * Base64 encoding increases size by ~33%, so decoded = encoded * 3/4
+ */
+function estimateBase64DecodedSize(base64String: string): number {
+  // Remove any whitespace/newlines that might be in the string
+  const cleanLength = base64String.replace(/[\s=]/g, '').length;
+  // Each 4 base64 chars = 3 bytes of data
+  return Math.ceil(cleanLength * 0.75);
+}
+
+/**
+ * Safely decode a base64 string with size validation.
+ * Throws an error if the estimated decoded size exceeds the limit.
+ */
+function safeBase64Decode(base64String: string, maxSize: number, context: string): Buffer {
+  const estimatedSize = estimateBase64DecodedSize(base64String);
+  if (estimatedSize > maxSize) {
+    const sizeMB = (estimatedSize / (1024 * 1024)).toFixed(2);
+    const limitMB = (maxSize / (1024 * 1024)).toFixed(2);
+    throw new Error(`${context}: File size (${sizeMB}MB) exceeds maximum allowed (${limitMB}MB)`);
+  }
+  return Buffer.from(base64String, 'base64');
+}
+
 export class ImportService {
   private tempDir = path.join(process.cwd(), 'temp');
   private cacheDir = path.join(this.tempDir, 'upload-cache');
@@ -251,7 +280,7 @@ export class ImportService {
       const tempFilePath = path.join(this.tempDir, request.fileName);
       const fileBuffer = Buffer.isBuffer(request.fileData)
         ? request.fileData
-        : Buffer.from(request.fileData, 'base64');
+        : safeBase64Decode(request.fileData, MAX_BACKUP_FILE_SIZE, 'Backup file');
       await writeFile(tempFilePath, fileBuffer);
 
       // Extract if compressed
@@ -760,7 +789,7 @@ export class ImportService {
       tempFilePath = path.join(this.tempDir, request.fileName);
       const fileBuffer = Buffer.isBuffer(request.fileData)
         ? request.fileData
-        : Buffer.from(request.fileData, 'base64');
+        : safeBase64Decode(request.fileData, MAX_BACKUP_FILE_SIZE, 'Backup file');
       await writeFile(tempFilePath, fileBuffer);
 
       const ext = path.extname(request.fileName).toLowerCase();
@@ -2422,8 +2451,8 @@ export class ImportService {
       }
 
       try {
-        // Convert base64 to Buffer for file upload
-        const buffer = globalThis.Buffer.from(base64, 'base64');
+        // Convert base64 to Buffer for file upload (with size validation)
+        const buffer = safeBase64Decode(base64, MAX_LOGO_FILE_SIZE, `Logo "${uploadName}"`);
 
         // Determine content type from extension (if provided) or default to png
         const ext = logo.ext || 'png';
