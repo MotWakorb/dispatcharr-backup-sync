@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
   import type { JobStatus, JobLogEntry } from '../types';
-  import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS, TOAST_TIMEOUT_MS } from '../constants';
+  import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS } from '../constants';
+  import { toastStore } from '../stores/toastStore';
 
   let jobs: JobStatus[] = [];
   let history: JobStatus[] = [];
@@ -21,9 +22,7 @@
   let logsLoading = false;
   let logsError: string | null = null;
 
-  // Toast notification state
-  let toast: { message: string; type: 'success' | 'error' } | null = null;
-  let toastTimeout: number | null = null;
+  // Job completion tracking
   let previousJobStatuses: Map<string, string> = new Map();
 
   onMount(() => {
@@ -36,33 +35,17 @@
     if (pollInterval) {
       clearInterval(pollInterval);
     }
-    if (toastTimeout) {
-      clearTimeout(toastTimeout);
-    }
   });
-
-  function showToast(message: string, type: 'success' | 'error') {
-    if (toastTimeout) clearTimeout(toastTimeout);
-    toast = { message, type };
-    toastTimeout = window.setTimeout(() => {
-      toast = null;
-    }, TOAST_TIMEOUT_MS);
-  }
-
-  function dismissToast() {
-    if (toastTimeout) clearTimeout(toastTimeout);
-    toast = null;
-  }
 
   function checkForCompletions(newJobs: JobStatus[]) {
     for (const job of newJobs) {
       const prevStatus = previousJobStatuses.get(job.jobId);
       if (prevStatus && prevStatus !== job.status) {
         if (job.status === 'completed') {
-          showToast(`${job.jobType} job completed successfully`, 'success');
+          toastStore.success(`${job.jobType} job completed successfully`);
           loadHistory();
         } else if (job.status === 'failed') {
-          showToast(`${job.jobType} job failed: ${job.error || 'Unknown error'}`, 'error');
+          toastStore.error(`${job.jobType} job failed: ${job.error || 'Unknown error'}`);
           loadHistory();
         }
       }
@@ -363,19 +346,6 @@
   </div>
 {/if}
 
-<!-- Toast notification -->
-{#if toast}
-  <div
-    class="toast toast-{toast.type}"
-    role="alert"
-    aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
-  >
-    <span>{toast.message}</span>
-    <button class="toast-close" on:click={dismissToast} aria-label="Dismiss">&times;</button>
-  </div>
-{/if}
-
-
 <style>
   .table-wrapper {
     overflow-x: auto;
@@ -587,58 +557,4 @@
     outline: 2px solid var(--primary);
     outline-offset: -2px;
   }
-
-  /* Notification toast */
-  .toast {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
-    padding: 1rem 1.25rem;
-    border-radius: 0.5rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    z-index: 1100;
-    animation: slideIn 0.3s ease;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .toast-success {
-    background: var(--bg-success);
-    color: var(--text-success);
-    border: 1px solid var(--success);
-  }
-
-  .toast-error {
-    background: var(--bg-error);
-    color: var(--text-error);
-    border: 1px solid var(--danger);
-  }
-
-  .toast-close {
-    background: none;
-    border: none;
-    font-size: 1.25rem;
-    cursor: pointer;
-    color: inherit;
-    opacity: 0.7;
-    padding: 0;
-    line-height: 1;
-  }
-
-  .toast-close:hover {
-    opacity: 1;
-  }
-
-  @keyframes slideIn {
-    from {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-
 </style>

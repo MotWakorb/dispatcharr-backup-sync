@@ -7,6 +7,7 @@
   import Jobs from './components/Jobs.svelte';
   import Schedules from './components/Schedules.svelte';
   import Notifications from './components/Notifications.svelte';
+  import ToastContainer from './components/ToastContainer.svelte';
   import { getVersionInfo } from './api';
   import type { VersionInfo } from './types';
 
@@ -129,3 +130,5 @@
     {/if}
   </div>
 </main>
+
+<ToastContainer />
