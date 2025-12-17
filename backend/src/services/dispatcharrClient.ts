@@ -48,6 +48,106 @@ function safeStringify(data: any, maxLen = 200): string {
   return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
 }
 
+// Environment variable to allow private/internal URLs (for self-hosted/Docker setups)
+const ALLOW_PRIVATE_URLS = process.env.ALLOW_PRIVATE_URLS === 'true';
+
+/**
+ * Validates a URL to prevent SSRF attacks.
+ * Blocks internal/private IP ranges, localhost, and non-HTTP(S) protocols.
+ * Set ALLOW_PRIVATE_URLS=true environment variable to allow private network access
+ * (useful for self-hosted Docker setups).
+ */
+function validateUrl(urlString: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    throw new Error(`Invalid URL: ${urlString}`);
+  }
+
+  // Only allow HTTP and HTTPS protocols
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Invalid protocol: ${parsed.protocol} - only HTTP and HTTPS are allowed`);
+  }
+
+  // Skip private IP checks if explicitly allowed (for self-hosted/Docker setups)
+  if (ALLOW_PRIVATE_URLS) {
+    log.debug({ url: urlString }, 'Skipping private URL validation (ALLOW_PRIVATE_URLS=true)');
+    return;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block localhost variants
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    throw new Error('Localhost URLs are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+  }
+
+  // Block private IP ranges (RFC 1918)
+  // 10.0.0.0 - 10.255.255.255
+  // 172.16.0.0 - 172.31.255.255
+  // 192.168.0.0 - 192.168.255.255
+  // 169.254.0.0 - 169.254.255.255 (link-local)
+  // 0.0.0.0
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [, a, b, c, d] = ipv4Match.map(Number);
+
+    // 0.0.0.0
+    if (a === 0 && b === 0 && c === 0 && d === 0) {
+      throw new Error('Invalid IP address: 0.0.0.0');
+    }
+
+    // 10.x.x.x
+    if (a === 10) {
+      throw new Error('Private IP addresses (10.x.x.x) are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+
+    // 172.16.0.0 - 172.31.255.255
+    if (a === 172 && b >= 16 && b <= 31) {
+      throw new Error('Private IP addresses (172.16-31.x.x) are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+
+    // 192.168.x.x
+    if (a === 192 && b === 168) {
+      throw new Error('Private IP addresses (192.168.x.x) are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+
+    // 169.254.x.x (link-local)
+    if (a === 169 && b === 254) {
+      throw new Error('Link-local IP addresses (169.254.x.x) are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+
+    // 127.x.x.x (loopback)
+    if (a === 127) {
+      throw new Error('Loopback IP addresses (127.x.x.x) are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+  }
+
+  // Block IPv6 private/local addresses
+  if (hostname.startsWith('[')) {
+    const ipv6 = hostname.slice(1, -1).toLowerCase();
+    // ::1 (loopback)
+    if (ipv6 === '::1') {
+      throw new Error('IPv6 loopback address is not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+    // fe80:: (link-local)
+    if (ipv6.startsWith('fe80:')) {
+      throw new Error('IPv6 link-local addresses are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+    // fc00:: and fd00:: (unique local)
+    if (ipv6.startsWith('fc') || ipv6.startsWith('fd')) {
+      throw new Error('IPv6 unique local addresses are not allowed (set ALLOW_PRIVATE_URLS=true to enable)');
+    }
+  }
+
+  // Block common internal hostnames (cloud metadata endpoints - always blocked)
+  const blockedHostnames = ['metadata', 'metadata.google.internal', '169.254.169.254'];
+  if (blockedHostnames.includes(hostname)) {
+    throw new Error(`Blocked hostname: ${hostname} (cloud metadata endpoint)`);
+  }
+}
+
 export class DispatcharrClient {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -56,6 +156,9 @@ export class DispatcharrClient {
   private cookieJar: CookieJar;
 
   constructor(private connection: DispatcharrConnection) {
+    // Validate URL to prevent SSRF attacks
+    validateUrl(connection.url);
+
     this.cookieJar = new CookieJar();
     this.client = wrapper(axios.create({
       baseURL: connection.url,
