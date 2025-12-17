@@ -602,12 +602,20 @@ export class ImportService {
         if (extractedDir) {
           await rm(extractedDir, { recursive: true, force: true } as any);
         }
+        // Cleanup cached upload if one was used
+        if (request.uploadId) {
+          await this.deleteCachedUpload(request.uploadId);
+        }
       } catch (error) {
         log.debug({ err: error }, 'Failed to cleanup temp files');
       }
 
       jobManager.completeJob(jobId, results);
     } catch (error: any) {
+      // Cleanup cached upload even on failure
+      if (request.uploadId) {
+        await this.deleteCachedUpload(request.uploadId).catch(() => {});
+      }
       if (error?.cancelled) {
         // Job was cancelled by user, don't mark as failed
         jobManager.addLog(jobId, 'Import cancelled by user');
@@ -3040,6 +3048,88 @@ export class ImportService {
       await new Promise((res) => setTimeout(res, intervalMs));
     }
     jobManager.addLog(jobId, 'Timed out waiting for streams; channel-stream mapping may be incomplete');
+  }
+
+  /**
+   * Delete a cached upload after it has been used
+   */
+  async deleteCachedUpload(uploadId: string): Promise<void> {
+    try {
+      const cacheFile = path.join(this.cacheDir, uploadId);
+      const metaFile = `${cacheFile}.meta`;
+      await Promise.all([
+        unlink(cacheFile).catch(() => {}),
+        unlink(metaFile).catch(() => {}),
+      ]);
+      log.debug({ uploadId }, 'Deleted cached upload');
+    } catch (error) {
+      log.debug({ uploadId, err: error }, 'Failed to delete cached upload');
+    }
+  }
+
+  /**
+   * Cleanup stale temp files older than maxAgeMs (default: 1 hour)
+   */
+  async cleanupStaleTempFiles(maxAgeMs: number = 60 * 60 * 1000): Promise<{ deleted: string[]; errors: string[] }> {
+    const deleted: string[] = [];
+    const errors: string[] = [];
+    const now = Date.now();
+
+    try {
+      // Ensure directories exist
+      await mkdir(this.tempDir, { recursive: true });
+      await mkdir(this.cacheDir, { recursive: true });
+
+      // Cleanup upload cache
+      const cacheFiles = await fsp.readdir(this.cacheDir);
+      for (const file of cacheFiles) {
+        const filePath = path.join(this.cacheDir, file);
+        try {
+          const stat = await fsp.stat(filePath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            await unlink(filePath);
+            deleted.push(filePath);
+          }
+        } catch (err) {
+          errors.push(`${filePath}: ${err}`);
+        }
+      }
+
+      // Cleanup extraction directories (zip-*, extract-*)
+      const tempFiles = await fsp.readdir(this.tempDir);
+      for (const file of tempFiles) {
+        if (file === 'upload-cache') continue; // Skip cache dir itself
+        const filePath = path.join(this.tempDir, file);
+        try {
+          const stat = await fsp.stat(filePath);
+          if (now - stat.mtimeMs > maxAgeMs) {
+            if (stat.isDirectory()) {
+              await fsp.rm(filePath, { recursive: true, force: true });
+            } else {
+              await unlink(filePath);
+            }
+            deleted.push(filePath);
+          }
+        } catch (err) {
+          errors.push(`${filePath}: ${err}`);
+        }
+      }
+
+      if (deleted.length > 0) {
+        log.info({ count: deleted.length }, 'Cleaned up stale temp files');
+      }
+    } catch (error) {
+      log.error({ err: error }, 'Error during temp file cleanup');
+    }
+
+    return { deleted, errors };
+  }
+
+  /**
+   * Get the temp directory path for external access
+   */
+  getTempDir(): string {
+    return this.tempDir;
   }
 }
 

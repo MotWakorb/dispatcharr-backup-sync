@@ -12,6 +12,7 @@ import { notificationsRouter } from './routes/notifications.js';
 import { infoRouter } from './routes/info.js';
 import { schedulerService } from './services/schedulerService.js';
 import { jobManager } from './services/jobManager.js';
+import { importService } from './services/importService.js';
 import { createLogger } from './services/logger.js';
 
 const log = createLogger('server');
@@ -65,6 +66,9 @@ app.use((req, res) => {
   });
 });
 
+// Temp file cleanup interval (runs every hour)
+let tempCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
 app.listen(PORT, () => {
   log.info({ port: PORT }, 'Dispatcharr Manager API running');
   log.info({ url: `http://localhost:${PORT}/health` }, 'Health check endpoint');
@@ -73,6 +77,25 @@ app.listen(PORT, () => {
   schedulerService.initialize().catch((error) => {
     log.error({ err: error }, 'Failed to initialize scheduler');
   });
+
+  // Cleanup stale temp files on startup
+  importService.cleanupStaleTempFiles().then((result) => {
+    if (result.deleted.length > 0) {
+      log.info({ count: result.deleted.length }, 'Startup: Cleaned up stale temp files');
+    }
+  }).catch((error) => {
+    log.error({ err: error }, 'Startup: Failed to cleanup temp files');
+  });
+
+  // Start periodic temp file cleanup (every hour)
+  tempCleanupInterval = setInterval(() => {
+    importService.cleanupStaleTempFiles().catch((error) => {
+      log.error({ err: error }, 'Periodic temp cleanup failed');
+    });
+  }, 60 * 60 * 1000); // 1 hour
+  if (tempCleanupInterval.unref) {
+    tempCleanupInterval.unref(); // Don't prevent process exit
+  }
 });
 
 // Graceful shutdown
@@ -80,6 +103,9 @@ process.on('SIGTERM', () => {
   log.info('SIGTERM received, shutting down');
   schedulerService.shutdown();
   jobManager.shutdown();
+  if (tempCleanupInterval) {
+    clearInterval(tempCleanupInterval);
+  }
   process.exit(0);
 });
 
@@ -87,5 +113,8 @@ process.on('SIGINT', () => {
   log.info('SIGINT received, shutting down');
   schedulerService.shutdown();
   jobManager.shutdown();
+  if (tempCleanupInterval) {
+    clearInterval(tempCleanupInterval);
+  }
   process.exit(0);
 });
