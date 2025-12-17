@@ -8,7 +8,10 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "dispatcharr",
@@ -50,7 +53,9 @@
     "@types/tar": "^6.1.10",
     "@types/uuid": "^9.0.7",
     "@types/ws": "^8.5.10",
+    "@vitest/coverage-v8": "^4.0.16",
     "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^4.0.16"
   }
 }

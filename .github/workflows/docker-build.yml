@@ -16,7 +16,34 @@ env:
   IMAGE_NAME_FRONTEND: ${{ github.repository }}-frontend
 
 jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run type check
+        working-directory: backend
+        run: npm run type-check
+
+      - name: Run tests
+        working-directory: backend
+        run: npm test
+
   build-backend:
+    needs: test-backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,6 +94,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   build-frontend:
+    needs: test-backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
