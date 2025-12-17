@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
   import type { JobStatus, JobLogEntry } from '../types';
+  import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage } from '../constants';
 
   let jobs: JobStatus[] = [];
   let history: JobStatus[] = [];
@@ -83,8 +84,8 @@
         previousJobStatuses = new Map(newJobs.map(j => [j.jobId, j.status]));
       }
       jobs = newJobs;
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to load jobs';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.LOAD_JOBS);
     } finally {
       if (shouldShowLoading) loading = false;
       initialized = true;
@@ -96,8 +97,8 @@
     historyError = null;
     try {
       history = await getJobHistory();
-    } catch (err: any) {
-      historyError = err?.response?.data?.error || err?.message || 'Failed to load history';
+    } catch (err: unknown) {
+      historyError = getErrorMessage(err, ERRORS.LOAD_HISTORY);
     } finally {
       loadingHistory = false;
     }
@@ -122,8 +123,8 @@
     try {
       await cancelExport(job.jobId);
       await loadJobs();
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to cancel job';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.CANCEL_JOB);
     }
   }
 
@@ -137,8 +138,8 @@
     logs = [];
     try {
       logs = await getJobLogs(job.jobId);
-    } catch (err: any) {
-      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
+    } catch (err: unknown) {
+      logsError = getErrorMessage(err, ERRORS.LOAD_LOGS);
     } finally {
       logsLoading = false;
     }
@@ -150,8 +151,8 @@
     logsError = null;
     try {
       logs = await getJobLogs(logsModalJob.jobId);
-    } catch (err: any) {
-      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
+    } catch (err: unknown) {
+      logsError = getErrorMessage(err, ERRORS.LOAD_LOGS);
     } finally {
       logsLoading = false;
     }
@@ -165,13 +166,13 @@
   }
 
   async function handleClearHistory() {
-    if (!confirm('Are you sure you want to clear all job history?')) return;
+    if (!confirm(CONFIRM.CLEAR_HISTORY)) return;
     clearingHistory = true;
     try {
       await clearJobHistory();
       history = [];
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to clear history';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.CLEAR_HISTORY);
     } finally {
       clearingHistory = false;
     }
@@ -189,9 +190,9 @@
     {/if}
 
     {#if loading && jobs.length === 0}
-      <p>Loading jobs...</p>
+      <p>{STATUS.LOADING}</p>
     {:else if jobs.length === 0}
-      <p class="text-gray">No jobs are currently running.</p>
+      <p class="text-gray">{LABELS.NO_JOBS_RUNNING}</p>
     {:else}
       <div class="table-wrapper">
         <table class="table">
@@ -249,9 +250,9 @@
         <button class="btn btn-secondary btn-sm" on:click={loadHistory} disabled={loadingHistory}>
           {#if loadingHistory}
             <span class="spinner"></span>
-            Loading...
+            {STATUS.LOADING}
           {:else}
-            Refresh
+            {LABELS.REFRESH}
           {/if}
         </button>
         {#if history.length > 0}
@@ -270,9 +271,9 @@
     {#if historyError}
       <div class="alert alert-error">{historyError}</div>
     {:else if loadingHistory && history.length === 0}
-      <p>Loading history...</p>
+      <p>{STATUS.LOADING}</p>
     {:else if history.length === 0}
-      <p class="text-gray">No history yet.</p>
+      <p class="text-gray">{LABELS.NO_HISTORY}</p>
     {:else}
       <div class="table-wrapper">
         <table class="table">
@@ -333,7 +334,7 @@
               {#if logsLoading}
                 <span class="spinner"></span>
               {/if}
-              Refresh
+              {LABELS.REFRESH}
             </button>
           {/if}
           <button class="close-btn" type="button" on:click={closeLogsModal} aria-label="Close">
@@ -346,9 +347,9 @@
       {/if}
       <div class="logs-body">
         {#if logsLoading && logs.length === 0}
-          <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading logs...</span></div>
+          <div class="flex items-center gap-2"><span class="spinner"></span><span>{STATUS.LOADING}</span></div>
         {:else if logs.length === 0}
-          <p class="text-sm text-gray">No logs available.</p>
+          <p class="text-sm text-gray">{LABELS.NO_LOGS}</p>
         {:else}
           {#each logs as log}
             <div class="log-line {/error|failed/i.test(log.message) ? 'log-error' : ''}">

@@ -17,6 +17,7 @@
     JobStatus,
     SavedConnection,
   } from '../types';
+  import { ERRORS, STATUS, getErrorMessage } from '../constants';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -54,6 +55,7 @@
   let showLogs = false;
   let logs: { timestamp: string; message: string }[] = [];
   let logsPoll: number | null = null;
+  let logsError: string | null = null;
   let showBackgroundModal = false;
 
   onMount(loadSavedConnections);
@@ -63,9 +65,8 @@
     savedConnectionsError = null;
     try {
       savedConnections = await listSavedConnections();
-    } catch (err: any) {
-      savedConnectionsError =
-        err.response?.data?.error || err.message || 'Failed to load saved accounts';
+    } catch (err: unknown) {
+      savedConnectionsError = getErrorMessage(err, ERRORS.LOAD_SAVED_ACCOUNTS);
     } finally {
       loadingSavedConnections = false;
     }
@@ -86,8 +87,8 @@
       const jobId = await startExport(connection, options, dryRun);
       startLogPolling(jobId);
       pollJobStatus(jobId);
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to start backup';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.START_BACKUP);
       exporting = false;
     }
   }
@@ -109,18 +110,18 @@
         }
         // Keep overlay visible when job completes so user can see results and click Close
         if (job.status === 'cancelled') {
-          overlayMessage = 'Backup cancelled';
+          overlayMessage = STATUS.BACKUP_CANCELLED;
         }
         if (job.status === 'failed') {
-          error = job.error || job.message || 'Backup failed';
+          error = job.error || job.message || STATUS.BACKUP_FAILED;
         }
         if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
           stopLogPolling();
           await loadLogs(job.jobId);
         }
       }
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to get job status';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.GET_JOB_STATUS);
       exporting = false;
     }
   }
@@ -136,10 +137,10 @@
     try {
       await cancelExport(currentJob.jobId);
       currentJob = { ...currentJob, status: 'cancelled', message: 'Cancelled by user' };
-      overlayMessage = 'Backup cancelled';
+      overlayMessage = STATUS.BACKUP_CANCELLED;
       await loadLogs(currentJob.jobId);
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to cancel backup';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.CANCEL_JOB);
     } finally {
       exporting = false;
     }
@@ -148,8 +149,9 @@
   async function loadLogs(jobId: string) {
     try {
       logs = await getJobLogs(jobId);
-    } catch (err: any) {
-      // ignore log load errors for now
+      logsError = null;
+    } catch (err: unknown) {
+      logsError = getErrorMessage(err, ERRORS.LOAD_LOGS);
     }
   }
 
@@ -319,7 +321,9 @@
           <button class="btn btn-secondary btn-sm" on:click={() => showLogs = false}>Close</button>
         </div>
         <div class="logs-body">
-          {#if logs.length === 0}
+          {#if logsError}
+            <p class="text-sm text-error">{logsError}</p>
+          {:else if logs.length === 0}
             <p class="text-sm text-gray">No logs yet.</p>
           {:else}
             {#each logs as log (log.timestamp + log.message)}

@@ -4,6 +4,7 @@
   import JobProgress from './JobProgress.svelte';
   import { startImport, getImportStatus, listSavedConnections, inspectImportFile, getJobLogs, uploadPluginFiles } from '../api';
   import type { DispatcharrConnection, ImportOptions, JobStatus, SavedConnection, JobLogEntry, PluginInfo } from '../types';
+  import { ERRORS, STATUS, LABELS, VALIDATION, getErrorMessage } from '../constants';
 
   let connection: DispatcharrConnection = {
     url: '',
@@ -68,9 +69,8 @@
     savedConnectionsError = null;
     try {
       savedConnections = await listSavedConnections();
-    } catch (err: any) {
-      savedConnectionsError =
-        err.response?.data?.error || err.message || 'Failed to load saved accounts';
+    } catch (err: unknown) {
+      savedConnectionsError = getErrorMessage(err, ERRORS.LOAD_SAVED_ACCOUNTS);
     } finally {
       loadingSavedConnections = false;
     }
@@ -123,8 +123,9 @@
         // Show the import modal after successful inspection
         showImportModal = true;
       }
-    } catch (err: any) {
-      parseError = err?.message ? `Failed to read file: ${err.message}` : 'Failed to read file.';
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'message' in err ? (err as Error).message : '';
+      parseError = msg ? `${ERRORS.READ_FILE}: ${msg}` : ERRORS.READ_FILE;
     } finally {
       parsing = false;
       detectUploadProgress = detectUploadProgress || (selectedFile ? 100 : 0);
@@ -187,7 +188,7 @@
     if (availableSections.length > 0) {
       const anySelected = availableSections.some((def) => importOptions[def.optionKey]);
       if (!anySelected) {
-        error = 'Select at least one section to restore or deselect the file.';
+        error = VALIDATION.SELECT_ONE_SECTION;
         return;
       }
     }
@@ -220,8 +221,8 @@
       );
       startLogPolling(jobId);
       pollJobStatus(jobId);
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to start restore';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.START_RESTORE);
       importing = false;
       importUploadProgress = 0;
       showOverlay = false;
@@ -292,8 +293,8 @@
       pluginUploadResult = result;
       // Clear files list after upload completes
       pluginFiles = [];
-    } catch (err: any) {
-      pluginUploadError = err.response?.data?.error || err.message || 'Failed to upload plugins';
+    } catch (err: unknown) {
+      pluginUploadError = getErrorMessage(err, ERRORS.UPLOAD_PLUGINS);
       pluginFiles = [];
     } finally {
       pluginUploading = false;
@@ -304,8 +305,8 @@
     try {
       logs = await getJobLogs(jobId);
       logsError = null;
-    } catch (err: any) {
-      logsError = err?.response?.data?.error || err?.message || 'Failed to load logs';
+    } catch (err: unknown) {
+      logsError = getErrorMessage(err, ERRORS.LOAD_LOGS);
     }
   }
 
@@ -336,10 +337,10 @@
         }
         // Keep overlay visible when job completes so user can see results and click Close
         if (job.status === 'cancelled') {
-          overlayMessage = 'Restore cancelled';
+          overlayMessage = STATUS.RESTORE_CANCELLED;
         }
         if (job.status === 'failed') {
-          error = job.error || job.message || 'Restore failed';
+          error = job.error || job.message || STATUS.RESTORE_FAILED;
         }
         if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
           stopLogPolling();
@@ -347,8 +348,8 @@
         }
         importing = false;
       }
-    } catch (err: any) {
-      error = err.response?.data?.error || err.message || 'Failed to get restore status';
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.GET_JOB_STATUS);
       importing = false;
     }
   }
