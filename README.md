@@ -31,6 +31,7 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 | DVR Rules | Yes | Yes | Yes |
 | Comskip Config | Yes | Yes | Yes |
 | Users | Yes | Yes | Yes |
+| Logos | Yes | Yes | No |
 
 ## Quick Start with Docker Compose
 
@@ -222,9 +223,13 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 
 ## Known Issues
 
-### Logos Not Synced
+### Logo Backup/Restore
 
-Logo synchronization is currently **not supported**. The Dispatcharr API endpoint for uploading logos expects a specific content type that differs from standard JSON, making programmatic logo sync unreliable. Logos will need to be manually uploaded to your destination instance.
+Logo backup and restore is supported as of v1.3.0. The tool handles two types of logos:
+- **URL-based logos** (e.g., `https://logo.m3uassets.com/...`): Stored as name→URL mappings and restored via API
+- **Local file logos** (stored in `/data/logos`): Downloaded during backup and uploaded during restore
+
+**Note**: Logo sync between instances is not yet supported - only backup/restore operations.
 
 ### M3U Auto Channel Sync Limitation
 
@@ -261,12 +266,36 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
   node smoke.playwright.mjs"
 ```
 
+## Changelog
+
+### v1.3.1
+- **UI Improvements**: Added Logs button to active jobs table, auto-refresh logs modal for running jobs
+- **Visual Polish**: Softer notification colors (sky blue instead of yellow) for plugin mismatch notices
+- **Button Order Fix**: History section buttons now show Download, Logos, then Logs (rightmost)
+
+### v1.3.0
+- **Logo Backup/Restore**: Full support for backing up and restoring logos
+  - URL-based logos stored as mappings (no redundant downloads)
+  - Local file logos downloaded and uploaded as needed
+- **Improved Performance**: Significantly faster backups when most logos are URL-based
+
+### v1.2.0
+- **Dark Mode**: Light, dark, and auto theme support (follows system preference)
+- **Version Display**: Shows current version in header
+- **Update Notifications**: Automatic check for new releases with dismissible banner
+
+### v1.1.0
+- **Job Scheduler**: Schedule recurring backup and sync jobs
+- **Notification System**: Alerts via Discord, Email, Slack, and Telegram
+- **Backup Retention**: Automatically clean up old backups
+
 ## Roadmap
 
 - ~~**Job Scheduler**: Schedule recurring sync and backup jobs to run automatically~~ (Added in v1.1.0)
 - ~~**Notification System**: Alert on job success or failure via Discord, Email, Slack, and Telegram~~ (Added in v1.1.0)
 - ~~**Dark Mode**: Light, dark, and auto theme support~~ (Added in v1.2.0)
 - ~~**Version Display & Update Notifications**: Show current version and notify when updates are available~~ (Added in v1.2.0)
+- ~~**Logo Backup/Restore**: Backup and restore channel logos~~ (Added in v1.3.0)
 - **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
 
 ## License
