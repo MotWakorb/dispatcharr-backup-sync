@@ -365,7 +365,11 @@
 
 <!-- Toast notification -->
 {#if toast}
-  <div class="toast toast-{toast.type}">
+  <div
+    class="toast toast-{toast.type}"
+    role="alert"
+    aria-live={toast.type === 'error' ? 'assertive' : 'polite'}
+  >
     <span>{toast.message}</span>
     <button class="toast-close" on:click={dismissToast} aria-label="Dismiss">&times;</button>
   </div>
