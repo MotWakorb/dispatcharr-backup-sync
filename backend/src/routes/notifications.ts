@@ -6,6 +6,10 @@ import type {
   NotificationProvider,
   NotificationProviderInput,
   NotificationGlobalSettings,
+  SmtpConfig,
+  TelegramConfig,
+  DiscordConfig,
+  SlackConfig,
 } from '../types/notifications.js';
 
 export const notificationsRouter = Router();
@@ -26,25 +30,25 @@ function validateProviderInput(input: NotificationProviderInput): string | null 
   // Type-specific validation
   switch (input.type) {
     case 'smtp': {
-      const config = input.config as any;
+      const config = input.config as SmtpConfig;
       if (!config.host || !config.fromAddress || !config.toAddress) {
         return 'SMTP config requires host, fromAddress, and toAddress';
       }
       // Set default port if not provided
       if (!config.port) {
-        config.port = 25;
+        (input.config as SmtpConfig).port = 25;
       }
       break;
     }
     case 'telegram': {
-      const config = input.config as any;
+      const config = input.config as TelegramConfig;
       if (!config.botToken || !config.chatId) {
         return 'Telegram config requires botToken and chatId';
       }
       break;
     }
     case 'discord': {
-      const config = input.config as any;
+      const config = input.config as DiscordConfig;
       if (!config.webhookUrl) {
         return 'Discord config requires webhookUrl';
       }
@@ -54,7 +58,7 @@ function validateProviderInput(input: NotificationProviderInput): string | null 
       break;
     }
     case 'slack': {
-      const config = input.config as any;
+      const config = input.config as SlackConfig;
       if (!config.webhookUrl) {
         return 'Slack config requires webhookUrl';
       }

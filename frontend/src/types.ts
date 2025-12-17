@@ -37,13 +37,41 @@ export type ExportOptions = SyncOptions;
 
 export type ImportOptions = SyncOptions;
 
+/**
+ * Result from export/backup job
+ */
+export interface ExportJobResult {
+  filePath?: string;
+  fileName?: string;
+  logosFilePath?: string;
+  logosFileName?: string;
+}
+
+/**
+ * Result from import job
+ */
+export interface ImportJobResult {
+  totalImported?: number;
+  totalSkipped?: number;
+  totalErrors?: number;
+}
+
+/**
+ * Result from sync job
+ */
+export interface SyncJobResult {
+  totalSynced?: number;
+  totalSkipped?: number;
+  totalErrors?: number;
+}
+
 export interface JobStatus {
   jobId: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   jobType?: 'backup' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
-  result?: any;
+  result?: ExportJobResult | ImportJobResult | SyncJobResult;
   error?: string;
   startedAt: Date;
   completedAt?: Date;
@@ -58,7 +86,7 @@ export interface TestConnectionResponse {
   success: boolean;
   message: string;
   version?: string;
-  instanceInfo?: any;
+  instanceInfo?: Record<string, unknown>;
 }
 
 export interface ApiResponse<T = any> {
@@ -72,7 +100,7 @@ export interface PluginInfo {
   key: string;
   name?: string;
   enabled?: boolean;
-  settings?: Record<string, any>;
+  settings?: Record<string, unknown>;
 }
 
 // Schedule types

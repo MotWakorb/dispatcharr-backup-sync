@@ -7,9 +7,9 @@
     ? Math.round(job.progress)
     : undefined;
 
-  const statValue = (value: unknown, key: string) => {
-    if (value && typeof value === 'object' && key in (value as any)) {
-      return (value as any)[key];
+  const statValue = (value: unknown, key: string): unknown => {
+    if (value && typeof value === 'object' && key in value) {
+      return (value as Record<string, unknown>)[key];
     }
     return undefined;
   };

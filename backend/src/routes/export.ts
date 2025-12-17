@@ -3,7 +3,7 @@ import { exportService } from '../services/exportService.js';
 import { jobManager } from '../services/jobManager.js';
 import path from 'path';
 import fs from 'fs';
-import type { ExportRequest } from '../types/index.js';
+import type { ExportRequest, ExportJobResult } from '../types/index.js';
 import type { ApiResponse } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
 
@@ -132,7 +132,8 @@ exportRouter.get('/download/:jobId', async (req, res) => {
       });
     }
 
-    const filePath = status.result?.filePath;
+    const exportResult = status.result as ExportJobResult | undefined;
+    const filePath = exportResult?.filePath;
     if (!filePath || !fs.existsSync(filePath)) {
       return res.status(404).json({
         success: false,
@@ -140,7 +141,7 @@ exportRouter.get('/download/:jobId', async (req, res) => {
       });
     }
 
-    const fileName = status.result?.fileName || path.basename(filePath);
+    const fileName = exportResult?.fileName || path.basename(filePath);
 
     // Send file
     res.download(filePath, fileName, (err) => {
@@ -188,7 +189,8 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
       } as ApiResponse);
     }
 
-    const filePath = (status as any).result?.logosFilePath;
+    const exportResult = status.result as ExportJobResult | undefined;
+    const filePath = exportResult?.logosFilePath;
     if (!filePath || !fs.existsSync(filePath)) {
       return res.status(404).json({
         success: false,
@@ -196,7 +198,7 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
       } as ApiResponse);
     }
 
-    const fileName = (status as any).result?.logosFileName || path.basename(filePath);
+    const fileName = exportResult?.logosFileName || path.basename(filePath);
 
     res.download(filePath, fileName, (err) => {
       if (err) {

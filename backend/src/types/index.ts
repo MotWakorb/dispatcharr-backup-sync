@@ -65,7 +65,7 @@ export interface JobStatus {
   jobType?: 'backup' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
-  result?: any;
+  result?: ExportJobResult | ImportJobResult | SyncJobResult;
   error?: string;
   startedAt: Date;
   completedAt?: Date;
@@ -80,7 +80,7 @@ export interface TestConnectionResponse {
   success: boolean;
   message: string;
   version?: string;
-  instanceInfo?: any;
+  instanceInfo?: Record<string, unknown>;
 }
 
 export interface ApiResponse<T = any> {
@@ -171,12 +171,22 @@ export interface SyncResultWithLogoMap extends SyncResult {
 }
 
 /**
+ * Plugin information from backup file
+ */
+export interface PluginInfo {
+  key: string;
+  name?: string;
+  enabled?: boolean;
+  settings?: Record<string, unknown>;
+}
+
+/**
  * Result from file inspection before import
  */
 export interface InspectResult {
   sections: string[];
   uploadId?: string;
-  plugins?: any[];
+  plugins?: PluginInfo[];
 }
 
 /**
@@ -230,3 +240,38 @@ export interface AssignmentResult {
   skipped: number;
   errors: number;
 }
+
+/**
+ * Result from export/backup job
+ */
+export interface ExportJobResult {
+  filePath?: string;
+  fileName?: string;
+  logosFilePath?: string;
+  logosFileName?: string;
+}
+
+/**
+ * Result from import job
+ */
+export interface ImportJobResult {
+  totalImported?: number;
+  totalSkipped?: number;
+  totalErrors?: number;
+  sections?: Record<string, ImportResult>;
+}
+
+/**
+ * Result from sync job
+ */
+export interface SyncJobResult {
+  totalSynced?: number;
+  totalSkipped?: number;
+  totalErrors?: number;
+  sections?: Record<string, SyncResult>;
+}
+
+/**
+ * Union type for all job results
+ */
+export type JobResult = ExportJobResult | ImportJobResult | SyncJobResult;
