@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { scheduleStore } from '../services/scheduleStore.js';
 import { schedulerService } from '../services/schedulerService.js';
 import { savedConnectionStore } from '../services/savedConnectionStore.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse, Schedule, ScheduleInput, ScheduleRunHistoryEntry } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
 
@@ -64,10 +65,10 @@ schedulesRouter.get('/', async (_req, res) => {
       success: true,
       data: schedulesWithStatus,
     } as ApiResponse<Schedule[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to list schedules',
+      error: getErrorMessage(error, 'Failed to list schedules'),
     } as ApiResponse);
   }
 });
@@ -90,10 +91,10 @@ schedulesRouter.get('/:id', async (req, res) => {
         runningJobId: schedulerService.getRunningJobId(schedule.id),
       },
     } as ApiResponse<Schedule>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get schedule',
+      error: getErrorMessage(error, 'Failed to get schedule'),
     } as ApiResponse);
   }
 });
@@ -134,10 +135,10 @@ schedulesRouter.post('/', async (req, res) => {
       data: schedule,
       message: 'Schedule created',
     } as ApiResponse<Schedule>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to create schedule',
+      error: getErrorMessage(error, 'Failed to create schedule'),
     } as ApiResponse);
   }
 });
@@ -200,11 +201,12 @@ schedulesRouter.put('/:id', async (req, res) => {
       data: schedule,
       message: 'Schedule updated',
     } as ApiResponse<Schedule>);
-  } catch (error: any) {
-    const status = error.message === 'Schedule not found' ? 404 : 500;
+  } catch (error) {
+    const errorMsg = getErrorMessage(error);
+    const status = errorMsg === 'Schedule not found' ? 404 : 500;
     res.status(status).json({
       success: false,
-      error: error.message || 'Failed to update schedule',
+      error: errorMsg || 'Failed to update schedule',
     } as ApiResponse);
   }
 });
@@ -236,10 +238,10 @@ schedulesRouter.delete('/:id', async (req, res) => {
       success: true,
       message: 'Schedule deleted',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to delete schedule',
+      error: getErrorMessage(error, 'Failed to delete schedule'),
     } as ApiResponse);
   }
 });
@@ -271,10 +273,10 @@ schedulesRouter.post('/:id/toggle', async (req, res) => {
       data: updated,
       message: `Schedule ${updated.enabled ? 'enabled' : 'disabled'}`,
     } as ApiResponse<Schedule>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to toggle schedule',
+      error: getErrorMessage(error, 'Failed to toggle schedule'),
     } as ApiResponse);
   }
 });
@@ -307,10 +309,10 @@ schedulesRouter.post('/:id/run', async (req, res) => {
       success: true,
       message: 'Schedule run triggered',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to trigger schedule run',
+      error: getErrorMessage(error, 'Failed to trigger schedule run'),
     } as ApiResponse);
   }
 });
@@ -334,10 +336,10 @@ schedulesRouter.get('/:id/history', async (req, res) => {
       success: true,
       data: history,
     } as ApiResponse<ScheduleRunHistoryEntry[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get schedule history',
+      error: getErrorMessage(error, 'Failed to get schedule history'),
     } as ApiResponse);
   }
 });

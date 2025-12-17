@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { exportService } from '../services/exportService.js';
 import { jobManager } from '../services/jobManager.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import path from 'path';
 import fs from 'fs';
 import type { ExportRequest, ExportJobResult } from '../types/index.js';
@@ -50,11 +51,11 @@ exportRouter.post('/', async (req, res) => {
         message: 'Export job started',
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error starting export');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to start export job',
+      error: getErrorMessage(error, 'Failed to start export job'),
     });
   }
 });
@@ -78,10 +79,10 @@ exportRouter.post('/cancel/:jobId', (req, res) => {
       success: true,
       message: 'Export job cancelled',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to cancel export job',
+      error: getErrorMessage(error, 'Failed to cancel export job'),
     } as ApiResponse);
   }
 });
@@ -103,11 +104,11 @@ exportRouter.get('/status/:jobId', (req, res) => {
       success: true,
       data: status,
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get job status',
+      error: getErrorMessage(error, 'Failed to get job status'),
     });
   }
 });
@@ -160,11 +161,11 @@ exportRouter.get('/download/:jobId', async (req, res) => {
         log.error({ err: error }, 'Failed to cleanup file');
       });
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error downloading file');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to download file',
+      error: getErrorMessage(error, 'Failed to download file'),
     });
   }
 });
@@ -211,11 +212,11 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
         }
       }
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error downloading logos');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to download logos',
+      error: getErrorMessage(error, 'Failed to download logos'),
     } as ApiResponse);
   }
 });

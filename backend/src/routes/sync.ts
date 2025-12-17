@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { syncService } from '../services/syncService.js';
 import { jobManager } from '../services/jobManager.js';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
 
@@ -68,11 +69,11 @@ syncRouter.post('/compare-plugins', async (req, res) => {
         missingPlugins,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error comparing plugins');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to compare plugins',
+      error: getErrorMessage(error, 'Failed to compare plugins'),
     });
   }
 });
@@ -127,11 +128,11 @@ syncRouter.post('/', async (req, res) => {
         message: 'Sync job started',
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error starting sync');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to start sync job',
+      error: getErrorMessage(error, 'Failed to start sync job'),
     });
   }
 });
@@ -153,11 +154,11 @@ syncRouter.get('/status/:jobId', (req, res) => {
       success: true,
       data: status,
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get job status',
+      error: getErrorMessage(error, 'Failed to get job status'),
     });
   }
 });
@@ -181,11 +182,11 @@ syncRouter.post('/cancel/:jobId', (req, res) => {
       success: true,
       message: 'Sync job cancelled',
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error cancelling sync job');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to cancel sync job',
+      error: getErrorMessage(error, 'Failed to cancel sync job'),
     });
   }
 });
@@ -198,11 +199,11 @@ syncRouter.get('/jobs', (req, res) => {
       success: true,
       data: jobs,
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error getting jobs');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get jobs',
+      error: getErrorMessage(error, 'Failed to get jobs'),
     });
   }
 });

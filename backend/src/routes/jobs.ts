@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { jobManager } from '../services/jobManager.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse, JobStatus, JobLogEntry } from '../types/index.js';
 
 export const jobsRouter = Router();
@@ -11,10 +12,10 @@ jobsRouter.get('/', (_req, res) => {
       success: true,
       data: jobs,
     } as ApiResponse<JobStatus[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to list jobs',
+      error: getErrorMessage(error, 'Failed to list jobs'),
     } as ApiResponse);
   }
 });
@@ -29,10 +30,10 @@ jobsRouter.get('/:jobId/logs', (req, res) => {
       success: true,
       data: logs,
     } as ApiResponse<JobLogEntry[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get job logs',
+      error: getErrorMessage(error, 'Failed to get job logs'),
     } as ApiResponse);
   }
 });
@@ -45,10 +46,10 @@ jobsRouter.get('/history/list', (_req, res) => {
       success: true,
       data: history,
     } as ApiResponse<JobStatus[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get job history',
+      error: getErrorMessage(error, 'Failed to get job history'),
     } as ApiResponse);
   }
 });
@@ -61,10 +62,10 @@ jobsRouter.delete('/history', (_req, res) => {
       success: true,
       message: 'History cleared',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to clear history',
+      error: getErrorMessage(error, 'Failed to clear history'),
     } as ApiResponse);
   }
 });

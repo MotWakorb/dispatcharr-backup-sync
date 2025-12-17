@@ -3,6 +3,7 @@ import axios from 'axios';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { createLogger } from '../services/logger.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import { CACHE_TTL_MS, GITHUB_TIMEOUT_MS } from '../constants.js';
 
 const log = createLogger('info-route');
@@ -130,11 +131,11 @@ router.get('/', async (req, res) => {
         releaseUrl: updateAvailable ? releaseUrl : null,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error getting version info');
     res.status(500).json({
       success: false,
-      error: 'Failed to get version info',
+      error: getErrorMessage(error, 'Failed to get version info'),
     });
   }
 });

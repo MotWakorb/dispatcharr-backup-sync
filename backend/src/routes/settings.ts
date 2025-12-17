@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { settingsStore, type AppSettings } from '../services/settingsStore.js';
 import { schedulerService } from '../services/schedulerService.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse } from '../types/index.js';
 
 export const settingsRouter = Router();
@@ -35,10 +36,10 @@ settingsRouter.get('/', async (_req, res) => {
       success: true,
       data: settings,
     } as ApiResponse<AppSettings>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get settings',
+      error: getErrorMessage(error, 'Failed to get settings'),
     } as ApiResponse);
   }
 });
@@ -73,10 +74,10 @@ settingsRouter.put('/', async (req, res) => {
       data: settings,
       message: 'Settings updated',
     } as ApiResponse<AppSettings>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to update settings',
+      error: getErrorMessage(error, 'Failed to update settings'),
     } as ApiResponse);
   }
 });

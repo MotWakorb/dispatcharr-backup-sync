@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { importService } from '../services/importService.js';
 import { jobManager } from '../services/jobManager.js';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { getErrorMessage, getErrorStatus } from '../utils/errorUtils.js';
 import multer from 'multer';
 import FormData from 'form-data';
 import type { ImportRequest, DispatcharrConnection } from '../types/index.js';
@@ -39,11 +40,11 @@ importRouter.post('/inspect', upload.single('file'), async (req, res) => {
     const result = await importService.inspect(request);
     log.debug({ sections: Object.keys(result.sections || {}) }, 'Inspect result');
     res.json({ success: true, data: result });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error inspecting import file');
     res.status(400).json({
       success: false,
-      error: error.message || 'Failed to inspect file',
+      error: getErrorMessage(error, 'Failed to inspect file'),
     });
   }
 });
@@ -135,11 +136,11 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
         message: 'Import job started',
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error starting import');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to start import job',
+      error: getErrorMessage(error, 'Failed to start import job'),
     });
   }
 });
@@ -161,11 +162,11 @@ importRouter.get('/status/:jobId', (req, res) => {
       success: true,
       data: status,
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error getting job status');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get job status',
+      error: getErrorMessage(error, 'Failed to get job status'),
     });
   }
 });
@@ -225,9 +226,9 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
 
         results.uploaded++;
         log.info({ plugin: file.originalname }, 'Successfully uploaded plugin');
-      } catch (error: any) {
-        const errorMsg = error.response?.data?.detail || error.response?.data?.error || error.message || 'Unknown error';
-        const statusCode = error.response?.status;
+      } catch (error) {
+        const errorMsg = getErrorMessage(error, 'Unknown error');
+        const statusCode = getErrorStatus(error);
         const errorLower = errorMsg.toLowerCase();
 
         log.debug({ plugin: file.originalname, statusCode, errorMsg }, 'Plugin upload error');
@@ -253,11 +254,11 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
       success: true,
       data: results,
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error uploading plugins');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to upload plugins',
+      error: getErrorMessage(error, 'Failed to upload plugins'),
     });
   }
 });
@@ -281,11 +282,11 @@ importRouter.post('/cancel/:jobId', (req, res) => {
       success: true,
       message: 'Import job cancelled',
     });
-  } catch (error: any) {
+  } catch (error) {
     log.error({ err: error }, 'Error cancelling import job');
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to cancel import job',
+      error: getErrorMessage(error, 'Failed to cancel import job'),
     });
   }
 });

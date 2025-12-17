@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { DispatcharrConnection, ApiResponse, TestConnectionResponse } from '../types/index.js';
 
 export const connectionsRouter = Router();
@@ -24,10 +25,10 @@ connectionsRouter.post('/test', async (req, res) => {
       data: result,
       message: result.message,
     } as ApiResponse<TestConnectionResponse>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: getErrorMessage(error),
     } as ApiResponse);
   }
 });
@@ -59,10 +60,10 @@ connectionsRouter.post('/info', async (req, res) => {
       success: true,
       data: info,
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: getErrorMessage(error),
     } as ApiResponse);
   }
 });

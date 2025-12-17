@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { notificationStore } from '../services/notificationStore.js';
 import { notificationService } from '../services/notificationService.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse } from '../types/index.js';
 import type {
   NotificationProvider,
@@ -82,10 +83,10 @@ notificationsRouter.get('/providers', async (_req, res) => {
       success: true,
       data: providers,
     } as ApiResponse<NotificationProvider[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to list notification providers',
+      error: getErrorMessage(error, 'Failed to list notification providers'),
     } as ApiResponse);
   }
 });
@@ -105,10 +106,10 @@ notificationsRouter.get('/providers/:id', async (req, res) => {
       success: true,
       data: provider,
     } as ApiResponse<NotificationProvider>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get notification provider',
+      error: getErrorMessage(error, 'Failed to get notification provider'),
     } as ApiResponse);
   }
 });
@@ -131,10 +132,10 @@ notificationsRouter.post('/providers', async (req, res) => {
       data: provider,
       message: 'Notification provider created',
     } as ApiResponse<NotificationProvider>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to create notification provider',
+      error: getErrorMessage(error, 'Failed to create notification provider'),
     } as ApiResponse);
   }
 });
@@ -166,10 +167,10 @@ notificationsRouter.put('/providers/:id', async (req, res) => {
       data: provider,
       message: 'Notification provider updated',
     } as ApiResponse<NotificationProvider>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to update notification provider',
+      error: getErrorMessage(error, 'Failed to update notification provider'),
     } as ApiResponse);
   }
 });
@@ -191,10 +192,10 @@ notificationsRouter.delete('/providers/:id', async (req, res) => {
       success: true,
       message: 'Notification provider deleted',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to delete notification provider',
+      error: getErrorMessage(error, 'Failed to delete notification provider'),
     } as ApiResponse);
   }
 });
@@ -208,10 +209,10 @@ notificationsRouter.post('/providers/:id/test', async (req, res) => {
       success: result.success,
       message: result.message,
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to test notification provider',
+      error: getErrorMessage(error, 'Failed to test notification provider'),
     } as ApiResponse);
   }
 });
@@ -233,10 +234,10 @@ notificationsRouter.post('/providers/test-config', async (req, res) => {
       success: result.success,
       message: result.message,
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to test notification provider',
+      error: getErrorMessage(error, 'Failed to test notification provider'),
     } as ApiResponse);
   }
 });
@@ -251,10 +252,10 @@ notificationsRouter.get('/settings', async (_req, res) => {
       success: true,
       data: settings,
     } as ApiResponse<NotificationGlobalSettings>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to get notification settings',
+      error: getErrorMessage(error, 'Failed to get notification settings'),
     } as ApiResponse);
   }
 });
@@ -269,10 +270,10 @@ notificationsRouter.put('/settings', async (req, res) => {
       data: settings,
       message: 'Notification settings updated',
     } as ApiResponse<NotificationGlobalSettings>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to update notification settings',
+      error: getErrorMessage(error, 'Failed to update notification settings'),
     } as ApiResponse);
   }
 });

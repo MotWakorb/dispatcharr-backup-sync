@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { savedConnectionStore } from '../services/savedConnectionStore.js';
+import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse, SavedConnection, SavedConnectionInput } from '../types/index.js';
 
 export const savedConnectionsRouter = Router();
@@ -19,10 +20,10 @@ savedConnectionsRouter.get('/', async (_req, res) => {
       success: true,
       data: connections,
     } as ApiResponse<SavedConnection[]>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to list saved connections',
+      error: getErrorMessage(error, 'Failed to list saved connections'),
     } as ApiResponse);
   }
 });
@@ -45,10 +46,10 @@ savedConnectionsRouter.post('/', async (req, res) => {
       data: saved,
       message: 'Saved connection created',
     } as ApiResponse<SavedConnection>);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to create saved connection',
+      error: getErrorMessage(error, 'Failed to create saved connection'),
     } as ApiResponse);
   }
 });
@@ -72,13 +73,12 @@ savedConnectionsRouter.put('/:id', async (req, res) => {
       data: updated,
       message: 'Saved connection updated',
     } as ApiResponse<SavedConnection>);
-  } catch (error: any) {
-    const message = error.message === 'Saved connection not found'
-      ? 'Saved connection not found'
-      : 'Failed to update saved connection';
-    res.status(error.message === 'Saved connection not found' ? 404 : 500).json({
+  } catch (error) {
+    const errorMsg = getErrorMessage(error);
+    const isNotFound = errorMsg === 'Saved connection not found';
+    res.status(isNotFound ? 404 : 500).json({
       success: false,
-      error: error.message || message,
+      error: isNotFound ? errorMsg : getErrorMessage(error, 'Failed to update saved connection'),
     } as ApiResponse);
   }
 });
@@ -100,10 +100,10 @@ savedConnectionsRouter.delete('/:id', async (req, res) => {
       success: true,
       message: 'Saved connection deleted',
     } as ApiResponse);
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to delete saved connection',
+      error: getErrorMessage(error, 'Failed to delete saved connection'),
     } as ApiResponse);
   }
 });
