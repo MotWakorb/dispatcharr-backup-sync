@@ -9,6 +9,7 @@
   let loadingHistory = false;
   let clearingHistory = false;
   let error: string | null = null;
+  let historyError: string | null = null;
   let pollInterval: number | null = null;
   let initialized = false;
 
@@ -18,7 +19,6 @@
   let logs: JobLogEntry[] = [];
   let logsLoading = false;
   let logsError: string | null = null;
-  let logsPollInterval: number | null = null;
 
   // Toast notification state
   let toast: { message: string; type: 'success' | 'error' } | null = null;
@@ -35,8 +35,8 @@
     if (pollInterval) {
       clearInterval(pollInterval);
     }
-    if (logsPollInterval) {
-      clearInterval(logsPollInterval);
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
     }
   });
 
@@ -93,10 +93,11 @@
 
   async function loadHistory() {
     loadingHistory = true;
+    historyError = null;
     try {
       history = await getJobHistory();
     } catch (err: any) {
-      // ignore history errors for now
+      historyError = err?.response?.data?.error || err?.message || 'Failed to load history';
     } finally {
       loadingHistory = false;
     }
@@ -141,22 +142,6 @@
     } finally {
       logsLoading = false;
     }
-
-    // Start auto-refresh for running/pending jobs
-    if (logsPollInterval) {
-      clearInterval(logsPollInterval);
-      logsPollInterval = null;
-    }
-    if (job.status === 'running' || job.status === 'pending') {
-      logsPollInterval = window.setInterval(async () => {
-        if (!logsModalJob) return;
-        try {
-          logs = await getJobLogs(logsModalJob.jobId);
-        } catch {
-          // Ignore errors during auto-refresh
-        }
-      }, 2000);
-    }
   }
 
   async function refreshLogs() {
@@ -177,10 +162,6 @@
     logsModalJob = null;
     logs = [];
     logsError = null;
-    if (logsPollInterval) {
-      clearInterval(logsPollInterval);
-      logsPollInterval = null;
-    }
   }
 
   async function handleClearHistory() {
@@ -222,12 +203,11 @@
               <th>Message</th>
               <th>Progress</th>
               <th>Started</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {#each jobs.slice().reverse() as job (job.jobId)}
-              <tr>
+              <tr class="job-row" on:click={() => viewLogs(job)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && viewLogs(job)}>
                 <td class="mono">{job.jobId}</td>
                 <td>{job.jobType || 'unknown'}</td>
                 <td>
@@ -236,24 +216,21 @@
                 <td class="text-sm text-gray">{job.message || job.error || '-'}</td>
                 <td class="progress-cell">
                   {#if job.progress !== undefined}
-                    <div class="progress-bar">
-                      <div
-                        class="progress-fill"
-                        style={`width: ${Math.round(job.progress)}%;`}
-                      >
-                        <span class="progress-label">{Math.round(job.progress)}%</span>
+                    {#if job.progress !== undefined}
+                      <div class="progress-bar">
+                        <div
+                          class="progress-fill"
+                          style={`width: ${Math.round(job.progress)}%;`}
+                        >
+                          <span class="progress-label">{Math.round(job.progress)}%</span>
+                        </div>
                       </div>
-                    </div>
+                    {/if}
                   {:else}
                     -
                   {/if}
                 </td>
                 <td class="text-sm">{new Date(job.startedAt).toLocaleString()}</td>
-                <td class="actions">
-                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
-                    Logs
-                  </button>
-                </td>
               </tr>
             {/each}
           </tbody>
@@ -290,7 +267,9 @@
       </div>
     </div>
 
-    {#if loadingHistory && history.length === 0}
+    {#if historyError}
+      <div class="alert alert-error">{historyError}</div>
+    {:else if loadingHistory && history.length === 0}
       <p>Loading history...</p>
     {:else if history.length === 0}
       <p class="text-gray">No history yet.</p>
@@ -316,6 +295,9 @@
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
+                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
+                    Logs
+                  </button>
                   {#if job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
@@ -326,9 +308,6 @@
                       </button>
                     {/if}
                   {/if}
-                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
-                    Logs
-                  </button>
                 </td>
               </tr>
             {/each}
@@ -350,10 +329,12 @@
         </div>
         <div class="modal-actions">
           {#if logsModalJob?.status === 'running' || logsModalJob?.status === 'pending'}
-            <span class="auto-refresh-indicator">
-              <span class="pulse-dot"></span>
-              Auto-refreshing
-            </span>
+            <button class="btn btn-secondary btn-sm" type="button" on:click={refreshLogs} disabled={logsLoading}>
+              {#if logsLoading}
+                <span class="spinner"></span>
+              {/if}
+              Refresh
+            </button>
           {/if}
           <button class="close-btn" type="button" on:click={closeLogsModal} aria-label="Close">
             &times;
@@ -588,31 +569,18 @@
     text-align: right;
   }
 
-  .auto-refresh-indicator {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--text-muted);
+  .job-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
   }
 
-  .pulse-dot {
-    width: 8px;
-    height: 8px;
-    background: var(--success);
-    border-radius: 50%;
-    animation: pulse 1.5s ease-in-out infinite;
+  .job-row:hover {
+    background-color: var(--gray-100);
   }
 
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 0.5;
-      transform: scale(0.8);
-    }
+  .job-row:focus {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
   }
 
   /* Notification toast */
