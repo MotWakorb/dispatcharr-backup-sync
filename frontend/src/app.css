@@ -6,8 +6,8 @@
   --success-dark: #059669;
   --danger: #ef4444;
   --danger-dark: #dc2626;
-  --warning: #f59e0b;
-  --warning-dark: #d97706;
+  --warning: #0ea5e9;
+  --warning-dark: #0284c7;
 
   /* Gray scale */
   --gray-50: #f9fafb;
@@ -40,10 +40,10 @@
   --text-success: #065f46;
   --bg-error: #fee2e2;
   --text-error: #991b1b;
-  --bg-warning: #fef3c7;
-  --bg-warning-light: #fffbeb;
-  --text-warning: #92400e;
-  --border-warning: #f59e0b;
+  --bg-warning: #e0f2fe;
+  --bg-warning-light: #f0f9ff;
+  --text-warning: #0369a1;
+  --border-warning: #7dd3fc;
 
   /* Interactive states */
   --bg-selected: #dbeafe;
@@ -51,9 +51,9 @@
   --focus-ring: rgba(59, 130, 246, 0.1);
 
   /* Dropzone */
-  --bg-dropzone: #fefce8;
+  --bg-dropzone: #f0f9ff;
   --bg-dropzone-drag: #e0ecff;
-  --border-dropzone: #fbbf24;
+  --border-dropzone: #7dd3fc;
 }
 
 /* Dark mode */
@@ -86,18 +86,18 @@
   --text-success: #86efac;
   --bg-error: #450a0a;
   --text-error: #fca5a5;
-  --bg-warning: #451a03;
-  --bg-warning-light: #78350f;
-  --text-warning: #fcd34d;
-  --border-warning: #b45309;
+  --bg-warning: #0c4a6e;
+  --bg-warning-light: #0e4f75;
+  --text-warning: #7dd3fc;
+  --border-warning: #0284c7;
 
   --bg-selected: #1e3a5f;
   --bg-hover: #334155;
   --focus-ring: rgba(59, 130, 246, 0.3);
 
-  --bg-dropzone: #422006;
+  --bg-dropzone: #0c4a6e;
   --bg-dropzone-drag: #1e3a5f;
-  --border-dropzone: #b45309;
+  --border-dropzone: #0284c7;
 }
 
 /* Auto dark mode (respects system preference when no explicit theme set) */
@@ -131,18 +131,18 @@
     --text-success: #86efac;
     --bg-error: #450a0a;
     --text-error: #fca5a5;
-    --bg-warning: #451a03;
-    --bg-warning-light: #78350f;
-    --text-warning: #fcd34d;
-    --border-warning: #b45309;
+    --bg-warning: #0c4a6e;
+    --bg-warning-light: #0e4f75;
+    --text-warning: #7dd3fc;
+    --border-warning: #0284c7;
 
     --bg-selected: #1e3a5f;
     --bg-hover: #334155;
     --focus-ring: rgba(59, 130, 246, 0.3);
 
-    --bg-dropzone: #422006;
+    --bg-dropzone: #0c4a6e;
     --bg-dropzone-drag: #1e3a5f;
-    --border-dropzone: #b45309;
+    --border-dropzone: #0284c7;
   }
 }
 

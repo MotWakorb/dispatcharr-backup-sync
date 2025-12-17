@@ -236,10 +236,11 @@ export class ImportService {
       // If logos were provided as images in the archive, fold them into config data
       // Note: data.logos may be an object like { count: X } from export, not an array
       if (!data.logos || !Array.isArray(data.logos)) {
-        const logoFiles = await this.loadLogosFromFolder(path.dirname(configFilePath), jobId);
-        if (logoFiles.length) {
-          data.logos = logoFiles;
-          jobManager.addLog(jobId, `Loaded ${logoFiles.length} logos from archive logos/ folder`);
+        const { fileLogos, urlLogos } = await this.loadLogosFromFolder(path.dirname(configFilePath), jobId);
+        if (fileLogos.length || urlLogos.length) {
+          data.logos = fileLogos;  // File-based logos for upload
+          data.urlLogos = urlLogos;  // URL-based logos for POST creation
+          jobManager.addLog(jobId, `Loaded ${fileLogos.length} file logos and ${urlLogos.length} URL logos from archive logos/ folder`);
         } else {
           jobManager.addLog(jobId, `No logo files found in archive logos/ folder (data.logos was ${typeof data.logos}: ${JSON.stringify(data.logos)})`);
         }
@@ -371,13 +372,11 @@ export class ImportService {
         jobManager.addLog(jobId, `Stream profile ID mapping (existing profiles): ${JSON.stringify(streamProfileMap)}`);
       }
 
-      // Everything else follows the new prerequisites
-
       // Import Logos BEFORE channels so we can map logo IDs
       let logoMap: Record<string, number> = {};
-      if (data.logos && this.isEnabled('logos', request.options)) {
+      if ((data.logos || data.urlLogos) && this.isEnabled('logos', request.options)) {
         jobManager.setProgress(jobId, currentProgress, 'Importing logos...');
-        const logoResult = await this.importLogos(client, data.logos, jobId);
+        const logoResult = await this.importLogos(client, data.logos || [], data.urlLogos || [], jobId);
         results.imported.logos = { imported: logoResult.imported, skipped: logoResult.skipped, errors: logoResult.errors };
         logoMap = logoResult.logoMap;
         currentProgress += progressPerStep;
@@ -556,8 +555,16 @@ export class ImportService {
     return { configPath, baseDir: extractDir };
   }
 
-  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<{ name: string; data: string; ext: string; original_name?: string }[]> {
+  private async loadLogosFromFolder(baseDir: string, jobId?: string): Promise<{
+    fileLogos: { name: string; data: string; ext: string; original_name?: string; source_id?: number }[];
+    urlLogos: { name: string; url: string; source_id: number }[];
+  }> {
     const logosDir = path.join(baseDir, 'logos');
+    const result = {
+      fileLogos: [] as { name: string; data: string; ext: string; original_name?: string; source_id?: number }[],
+      urlLogos: [] as { name: string; url: string; source_id: number }[],
+    };
+
     try {
       const files = await fsp.readdir(logosDir, { withFileTypes: true });
       const images = files.filter((f) =>
@@ -567,7 +574,22 @@ export class ImportService {
         jobManager.addLog(jobId, `Found ${files.length} files in logos folder, ${images.length} are image files`);
       }
 
-      // Try to read metadata.json for original name mapping
+      // Try to load URL-based logos from url_logos.json
+      const urlLogosPath = path.join(logosDir, 'url_logos.json');
+      try {
+        const urlLogosContent = await readFile(urlLogosPath, 'utf-8');
+        result.urlLogos = JSON.parse(urlLogosContent);
+        if (jobId) {
+          jobManager.addLog(jobId, `Loaded ${result.urlLogos.length} URL-based logos from url_logos.json`);
+        }
+      } catch {
+        // No url_logos.json file (older backup format)
+        if (jobId) {
+          jobManager.addLog(jobId, `No url_logos.json found (older backup format or no URL logos)`);
+        }
+      }
+
+      // Try to read metadata.json for local file logo mapping
       let metadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
       const metadataPath = path.join(logosDir, 'metadata.json');
       try {
@@ -577,13 +599,12 @@ export class ImportService {
           jobManager.addLog(jobId, `Loaded logo metadata with ${metadata.length} entries`);
         }
       } catch {
-        // No metadata file, will use filename as name (legacy behavior)
         if (jobId) {
           jobManager.addLog(jobId, `No logo metadata.json found, using filenames as logo names`);
         }
       }
 
-      // Build filename -> metadata lookup (original_name and source_id)
+      // Build filename -> metadata lookup
       const filenameToMetadata: Record<string, { original_name: string; source_id: number }> = {};
       for (const entry of metadata) {
         filenameToMetadata[entry.filename.toLowerCase()] = {
@@ -592,35 +613,24 @@ export class ImportService {
         };
       }
 
-      // Debug: log first 10 metadata mappings
-      if (jobId && metadata.length > 0) {
-        jobManager.addLog(jobId, `DEBUG METADATA: First 10 metadata entries:`);
-        for (let i = 0; i < Math.min(10, metadata.length); i++) {
-          const entry = metadata[i];
-          jobManager.addLog(jobId, `  "${entry.filename}" -> original_name="${entry.original_name}" (source_id=${entry.source_id})`);
-        }
-      }
-
-      const logos: { name: string; data: string; ext: string; original_name?: string; source_id?: number }[] = [];
+      // Load local file logos
       let loggedCount = 0;
       for (const img of images) {
         const fullPath = path.join(logosDir, img.name);
         const buffer = await readFile(fullPath);
-        const ext = path.extname(img.name).toLowerCase().slice(1); // Remove the dot
+        const ext = path.extname(img.name).toLowerCase().slice(1);
         const filenameWithoutExt = img.name.replace(/\.(png|jpe?g|webp|gif|svg)$/i, '');
 
-        // Use metadata if available, otherwise use filename
         const meta = filenameToMetadata[img.name.toLowerCase()];
         const originalName = meta?.original_name;
         const sourceId = meta?.source_id;
 
-        // Debug: log first 10 logos loaded
         if (jobId && loggedCount < 10) {
           jobManager.addLog(jobId, `DEBUG LOAD: file="${img.name}" -> name="${filenameWithoutExt}", original_name="${originalName || 'NONE'}", source_id=${sourceId || 'NONE'}`);
           loggedCount++;
         }
 
-        logos.push({
+        result.fileLogos.push({
           name: filenameWithoutExt,
           data: buffer.toString('base64'),
           ext,
@@ -628,12 +638,13 @@ export class ImportService {
           source_id: sourceId,
         });
       }
-      return logos;
+
+      return result;
     } catch (e: any) {
       if (jobId) {
         jobManager.addLog(jobId, `No logos folder found or error reading: ${e.message}`);
       }
-      return [];
+      return result;
     }
   }
 
@@ -677,9 +688,10 @@ export class ImportService {
 
       // Load logo files from folder if data.logos is not an array (may be object like { count: X })
       if (!data.logos || !Array.isArray(data.logos)) {
-        const logoFiles = await this.loadLogosFromFolder(path.dirname(configFilePath));
-        if (logoFiles.length) {
-          data.logos = logoFiles;
+        const { fileLogos, urlLogos } = await this.loadLogosFromFolder(path.dirname(configFilePath));
+        if (fileLogos.length || urlLogos.length) {
+          data.logos = fileLogos;
+          data.urlLogos = urlLogos;
         }
       }
 
@@ -1123,7 +1135,8 @@ export class ImportService {
 
         // Map logo using logoMap
         // Priority: 1) logo_source_id (most reliable), 2) logo_name, 3) sanitized name
-        if (opts?.logoMap && Object.keys(opts.logoMap).length > 0) {
+        // Skip logo assignment for auto-created channels (from auto channel groups)
+        if (opts?.logoMap && Object.keys(opts.logoMap).length > 0 && !channel.auto_created) {
           let mappedLogoId: number | undefined;
           let lookupMethod = '';
 
@@ -2176,7 +2189,8 @@ export class ImportService {
 
   private async importLogos(
     client: DispatcharrClient,
-    logos: any[],
+    fileLogos: any[],
+    urlLogos: { name: string; url: string; source_id: number }[],
     jobId?: string
   ): Promise<{ imported: number; skipped: number; errors: number; logoMap: Record<string, number> }> {
     let imported = 0;
@@ -2188,16 +2202,14 @@ export class ImportService {
     // - "file:abc" (filename lowercase) - fallback for sanitized names
     const logoMap: Record<string, number> = {};
 
-    if (!Array.isArray(logos)) {
-      if (jobId) {
-        jobManager.addLog(jobId, `[ERROR] Logos data is not an array: ${typeof logos} = ${JSON.stringify(logos)}`);
-      }
-      return { imported, skipped: logos ? 0 : 1, errors: logos ? 1 : 0, logoMap };
-    }
+    // Validate fileLogos - default to empty array if not provided
+    const safeFileLogos = Array.isArray(fileLogos) ? fileLogos : [];
+    const safeUrlLogos = Array.isArray(urlLogos) ? urlLogos : [];
+    const totalLogos = safeFileLogos.length + safeUrlLogos.length;
 
-    if (logos.length === 0) {
+    if (totalLogos === 0) {
       if (jobId) {
-        jobManager.addLog(jobId, `No logos to import (empty array)`);
+        jobManager.addLog(jobId, `No logos to import (0 file logos, 0 URL logos)`);
       }
       return { imported, skipped, errors, logoMap };
     }
@@ -2252,11 +2264,11 @@ export class ImportService {
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Found ${logos.length} logos to import`);
-      // Log first logo structure for debugging
-      if (logos[0]) {
-        const sample = logos[0];
-        jobManager.addLog(jobId, `Sample logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`);
+      jobManager.addLog(jobId, `Found ${safeFileLogos.length} file logos and ${safeUrlLogos.length} URL logos to import`);
+      // Log first file logo structure for debugging
+      if (safeFileLogos[0]) {
+        const sample = safeFileLogos[0];
+        jobManager.addLog(jobId, `Sample file logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`);
       }
     }
 
@@ -2264,9 +2276,11 @@ export class ImportService {
     // Use source_id if available, otherwise fall back to name
     const uploadedSourceIds = new Set<number>();
     const uploadedNames = new Set<string>();
+    const sentFilenames = new Set<string>();  // Track filenames sent to detect collisions
 
-    for (let i = 0; i < logos.length; i++) {
-      const logo = logos[i];
+    // === IMPORT FILE-BASED LOGOS ===
+    for (let i = 0; i < safeFileLogos.length; i++) {
+      const logo = safeFileLogos[i];
       // Use original_name from metadata if available (for new backups with metadata.json)
       // Otherwise fall back to filename-based name (legacy backups)
       const originalName = logo?.original_name;
@@ -2344,9 +2358,19 @@ export class ImportService {
           knownLength: freshBuffer.length,
         });
 
+        const sentFilename = `${filenameName}.${ext}`;
+
+        // Check for filename collision
+        if (sentFilenames.has(sentFilename.toLowerCase())) {
+          if (jobId) {
+            jobManager.addLog(jobId, `WARNING: FILENAME COLLISION! "${sentFilename}" already sent! Logo "${uploadName}" will overwrite previous.`);
+          }
+        }
+        sentFilenames.add(sentFilename.toLowerCase());
+
         if (jobId) {
           const metadataInfo = originalName ? ` (original: "${originalName}")` : '';
-          jobManager.addLog(jobId, `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType})...`);
+          jobManager.addLog(jobId, `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType}) -> filename="${sentFilename}"...`);
         }
 
         const uploadResult = await client.post('/api/channels/logos/upload/', formData, {
@@ -2400,6 +2424,88 @@ export class ImportService {
         errors++;
         if (jobId) {
           jobManager.addLog(jobId, `[FAIL] Logo "${uploadName}" - ${errMsg} (status=${errStatus}, response=${JSON.stringify(errData)})`);
+        }
+      }
+    }
+
+    // === IMPORT URL-BASED LOGOS ===
+    // URL logos are created via POST /api/channels/logos/ with {name, url}
+    // No file upload needed - just provide the remote URL
+    if (safeUrlLogos.length > 0) {
+      if (jobId) {
+        jobManager.addLog(jobId, `Starting URL logo import (${safeUrlLogos.length} logos)...`);
+      }
+
+      for (let i = 0; i < safeUrlLogos.length; i++) {
+        const urlLogo = safeUrlLogos[i];
+        const logoName = urlLogo.name;
+        const logoUrl = urlLogo.url;
+        const sourceId = urlLogo.source_id;
+
+        if (!logoName || !logoUrl) {
+          skipped++;
+          if (jobId) {
+            jobManager.addLog(jobId, `[SKIP] URL logo index ${i} - missing name or url`);
+          }
+          continue;
+        }
+
+        // Skip if we already uploaded this logo in THIS session
+        if (sourceId && uploadedSourceIds.has(sourceId)) {
+          skipped++;
+          if (jobId) {
+            jobManager.addLog(jobId, `[SKIP] URL logo "${logoName}" (source_id=${sourceId}) - duplicate source_id`);
+          }
+          continue;
+        }
+        if (!sourceId && uploadedNames.has(logoName.toLowerCase())) {
+          skipped++;
+          if (jobId) {
+            jobManager.addLog(jobId, `[SKIP] URL logo "${logoName}" - duplicate name`);
+          }
+          continue;
+        }
+
+        try {
+          if (jobId && imported < 20) {
+            jobManager.addLog(jobId, `Creating URL logo "${logoName}" -> ${logoUrl}`);
+          }
+
+          // Create logo via POST with name and url
+          const createResult = await client.post('/api/channels/logos/', {
+            name: logoName,
+            url: logoUrl,
+          });
+
+          const newDestId = createResult?.id || createResult?.data?.id;
+          imported++;
+
+          // Track that we created this logo in this session
+          if (sourceId) {
+            uploadedSourceIds.add(sourceId);
+          }
+          uploadedNames.add(logoName.toLowerCase());
+
+          // Add to logoMap for channel assignment
+          if (newDestId) {
+            if (sourceId) {
+              logoMap[`src:${sourceId}`] = newDestId;
+            }
+            logoMap[`name:${logoName.toLowerCase()}`] = newDestId;
+          }
+
+          if (jobId) {
+            jobManager.addLog(jobId, `[OK] URL logo "${logoName}" (source_id=${sourceId}, dest=${newDestId})`);
+          }
+        } catch (error: any) {
+          const errData = error?.response?.data;
+          const errStatus = error?.response?.status;
+          const errMsg = errData?.detail || errData?.error || error?.message || 'Unknown error';
+          console.error(`Failed to create URL logo "${logoName}" (status=${errStatus}):`, JSON.stringify(errData) || error?.message);
+          errors++;
+          if (jobId) {
+            jobManager.addLog(jobId, `[FAIL] URL logo "${logoName}" - ${errMsg} (status=${errStatus})`);
+          }
         }
       }
     }

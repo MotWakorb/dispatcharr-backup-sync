@@ -18,6 +18,7 @@
   let logs: JobLogEntry[] = [];
   let logsLoading = false;
   let logsError: string | null = null;
+  let logsPollInterval: number | null = null;
 
   // Toast notification state
   let toast: { message: string; type: 'success' | 'error' } | null = null;
@@ -33,6 +34,9 @@
   onDestroy(() => {
     if (pollInterval) {
       clearInterval(pollInterval);
+    }
+    if (logsPollInterval) {
+      clearInterval(logsPollInterval);
     }
   });
 
@@ -137,6 +141,22 @@
     } finally {
       logsLoading = false;
     }
+
+    // Start auto-refresh for running/pending jobs
+    if (logsPollInterval) {
+      clearInterval(logsPollInterval);
+      logsPollInterval = null;
+    }
+    if (job.status === 'running' || job.status === 'pending') {
+      logsPollInterval = window.setInterval(async () => {
+        if (!logsModalJob) return;
+        try {
+          logs = await getJobLogs(logsModalJob.jobId);
+        } catch {
+          // Ignore errors during auto-refresh
+        }
+      }, 2000);
+    }
   }
 
   async function refreshLogs() {
@@ -157,6 +177,10 @@
     logsModalJob = null;
     logs = [];
     logsError = null;
+    if (logsPollInterval) {
+      clearInterval(logsPollInterval);
+      logsPollInterval = null;
+    }
   }
 
   async function handleClearHistory() {
@@ -198,11 +222,12 @@
               <th>Message</th>
               <th>Progress</th>
               <th>Started</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {#each jobs.slice().reverse() as job (job.jobId)}
-              <tr class="job-row" on:click={() => viewLogs(job)} role="button" tabindex="0" on:keydown={(e) => e.key === 'Enter' && viewLogs(job)}>
+              <tr>
                 <td class="mono">{job.jobId}</td>
                 <td>{job.jobType || 'unknown'}</td>
                 <td>
@@ -211,21 +236,24 @@
                 <td class="text-sm text-gray">{job.message || job.error || '-'}</td>
                 <td class="progress-cell">
                   {#if job.progress !== undefined}
-                    {#if job.progress !== undefined}
-                      <div class="progress-bar">
-                        <div
-                          class="progress-fill"
-                          style={`width: ${Math.round(job.progress)}%;`}
-                        >
-                          <span class="progress-label">{Math.round(job.progress)}%</span>
-                        </div>
+                    <div class="progress-bar">
+                      <div
+                        class="progress-fill"
+                        style={`width: ${Math.round(job.progress)}%;`}
+                      >
+                        <span class="progress-label">{Math.round(job.progress)}%</span>
                       </div>
-                    {/if}
+                    </div>
                   {:else}
                     -
                   {/if}
                 </td>
                 <td class="text-sm">{new Date(job.startedAt).toLocaleString()}</td>
+                <td class="actions">
+                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
+                    Logs
+                  </button>
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -288,9 +316,6 @@
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
-                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
-                    Logs
-                  </button>
                   {#if job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
@@ -301,6 +326,9 @@
                       </button>
                     {/if}
                   {/if}
+                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
+                    Logs
+                  </button>
                 </td>
               </tr>
             {/each}
@@ -322,12 +350,10 @@
         </div>
         <div class="modal-actions">
           {#if logsModalJob?.status === 'running' || logsModalJob?.status === 'pending'}
-            <button class="btn btn-secondary btn-sm" type="button" on:click={refreshLogs} disabled={logsLoading}>
-              {#if logsLoading}
-                <span class="spinner"></span>
-              {/if}
-              Refresh
-            </button>
+            <span class="auto-refresh-indicator">
+              <span class="pulse-dot"></span>
+              Auto-refreshing
+            </span>
           {/if}
           <button class="close-btn" type="button" on:click={closeLogsModal} aria-label="Close">
             &times;
@@ -562,18 +588,31 @@
     text-align: right;
   }
 
-  .job-row {
-    cursor: pointer;
-    transition: background-color 0.15s ease;
+  .auto-refresh-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
   }
 
-  .job-row:hover {
-    background-color: var(--gray-100);
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
   }
 
-  .job-row:focus {
-    outline: 2px solid var(--primary);
-    outline-offset: -2px;
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(0.8);
+    }
   }
 
   /* Notification toast */
