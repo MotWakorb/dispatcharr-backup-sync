@@ -22,7 +22,6 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 | Channel Groups | Yes | Yes | Yes |
 | Channel Profiles | Yes | Yes | Yes |
 | Channels | Yes | Yes | Yes |
-| Logos | Yes | Yes | Yes |
 | M3U Sources | Yes | Yes | Yes |
 | Stream Profiles | Yes | Yes | Yes |
 | User Agents | Yes | Yes | Yes |
@@ -32,6 +31,7 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 | DVR Rules | Yes | Yes | Yes |
 | Comskip Config | Yes | Yes | Yes |
 | Users | Yes | Yes | Yes |
+| Logos | Yes | Yes | No |
 
 ## Quick Start with Docker Compose
 
@@ -221,36 +221,15 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `/api/notifications/settings` | GET/PUT | Manage notification settings |
 | `/api/info` | GET | Get version info and update availability |
 
-## Sync Behavior
-
-### Logo Sync
-
-Logo sync downloads all uploaded logos from the source instance and uploads them to the destination. Some logos may fail to sync if:
-- The original URL is no longer accessible (external logos from websites that are down)
-- Network timeouts for slow external servers
-- 404 errors for logos that were deleted at the source URL
-
-Failed logos are logged as warnings but don't stop the sync process. Channel-logo associations are properly mapped so that channels on the destination correctly reference their synced logos.
-
-**Note**: Including logos significantly increases sync time as each logo must be downloaded and re-uploaded individually.
-
-### User Sync
-
-User sync handles admin and non-admin users differently:
-- **Admin users** (user_level='admin' or is_superuser=true): Only their `custom_properties` (XC password) are synced to existing admin accounts on the destination. New admin users are never created automatically - they should be set up manually on the destination.
-- **Non-admin users** (streamers, etc.): Fully synced - created if they don't exist, updated if they do.
-
-This behavior prevents accidental creation of admin accounts on the destination instance.
-
-### Custom Streams
-
-Channels with direct URL streams (not from M3U sources) are handled specially during sync. The tool will attempt to create custom streams for these channels on the destination. This works for channels like weather feeds or other hand-configured streams with direct URLs.
-
-### Comskip Config
-
-If no comskip configuration exists on the source instance, it will be reported as "skipped" rather than synced. This is expected behavior - there's nothing to sync if no config exists.
-
 ## Known Issues
+
+### Logo Backup/Restore
+
+Logo backup and restore is supported as of v1.3.0. The tool handles two types of logos:
+- **URL-based logos** (e.g., `https://logo.m3uassets.com/...`): Stored as name→URL mappings and restored via API
+- **Local file logos** (stored in `/data/logos`): Downloaded during backup and uploaded during restore
+
+**Note**: Logo sync between instances is not yet supported - only backup/restore operations.
 
 ### M3U Auto Channel Sync Limitation
 
@@ -260,6 +239,14 @@ When syncing M3U sources, the **auto channel sync** feature cannot be properly p
 1. Go to your destination Dispatcharr instance
 2. Navigate to M3U Sources
 3. Edit each M3U source and configure the auto channel sync settings as desired
+
+### Custom Streams for Non-M3U Channels
+
+Channels with direct URL streams (not from M3U sources) are handled specially during sync. The tool will attempt to create custom streams for these channels on the destination. This works for channels like weather feeds or other hand-configured streams with direct URLs.
+
+### Comskip Config
+
+If no comskip configuration exists on the source instance, it will be reported as "skipped" rather than synced. This is expected behavior - there's nothing to sync if no config exists.
 
 ## Data Persistence
 
@@ -279,12 +266,36 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
   node smoke.playwright.mjs"
 ```
 
+## Changelog
+
+### v1.3.1
+- **UI Improvements**: Added Logs button to active jobs table, auto-refresh logs modal for running jobs
+- **Visual Polish**: Softer notification colors (sky blue instead of yellow) for plugin mismatch notices
+- **Button Order Fix**: History section buttons now show Download, Logos, then Logs (rightmost)
+
+### v1.3.0
+- **Logo Backup/Restore**: Full support for backing up and restoring logos
+  - URL-based logos stored as mappings (no redundant downloads)
+  - Local file logos downloaded and uploaded as needed
+- **Improved Performance**: Significantly faster backups when most logos are URL-based
+
+### v1.2.0
+- **Dark Mode**: Light, dark, and auto theme support (follows system preference)
+- **Version Display**: Shows current version in header
+- **Update Notifications**: Automatic check for new releases with dismissible banner
+
+### v1.1.0
+- **Job Scheduler**: Schedule recurring backup and sync jobs
+- **Notification System**: Alerts via Discord, Email, Slack, and Telegram
+- **Backup Retention**: Automatically clean up old backups
+
 ## Roadmap
 
 - ~~**Job Scheduler**: Schedule recurring sync and backup jobs to run automatically~~ (Added in v1.1.0)
 - ~~**Notification System**: Alert on job success or failure via Discord, Email, Slack, and Telegram~~ (Added in v1.1.0)
 - ~~**Dark Mode**: Light, dark, and auto theme support~~ (Added in v1.2.0)
 - ~~**Version Display & Update Notifications**: Show current version and notify when updates are available~~ (Added in v1.2.0)
+- ~~**Logo Backup/Restore**: Backup and restore channel logos~~ (Added in v1.3.0)
 - **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
 
 ## License
