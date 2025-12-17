@@ -11,6 +11,7 @@ import { settingsRouter } from './routes/settings.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { infoRouter } from './routes/info.js';
 import { schedulerService } from './services/schedulerService.js';
+import { jobManager } from './services/jobManager.js';
 import { createLogger } from './services/logger.js';
 
 const log = createLogger('server');
@@ -78,11 +79,13 @@ app.listen(PORT, () => {
 process.on('SIGTERM', () => {
   log.info('SIGTERM received, shutting down');
   schedulerService.shutdown();
+  jobManager.shutdown();
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
   log.info('SIGINT received, shutting down');
   schedulerService.shutdown();
+  jobManager.shutdown();
   process.exit(0);
 });

@@ -12,9 +12,37 @@ class JobManager {
   private jobs: Map<string, JobStatus> = new Map();
   private logs: Map<string, JobLogEntry[]> = new Map();
   private history: JobStatus[] = [];
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.loadFromDisk();
+    this.startCleanupInterval();
+  }
+
+  /**
+   * Start the periodic cleanup interval (every hour)
+   */
+  private startCleanupInterval(): void {
+    // Clear any existing interval first (safety for hot-reload scenarios)
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+    this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    // Ensure the interval doesn't prevent process exit
+    if (this.cleanupInterval.unref) {
+      this.cleanupInterval.unref();
+    }
+  }
+
+  /**
+   * Stop the periodic cleanup interval (call on shutdown)
+   */
+  shutdown(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      logger.debug('JobManager cleanup interval stopped');
+    }
   }
 
   private loadFromDisk(): void {
@@ -264,6 +292,3 @@ class JobManager {
 
 // Singleton instance
 export const jobManager = new JobManager();
-
-// Run cleanup every hour
-setInterval(() => jobManager.cleanup(), 60 * 60 * 1000);
