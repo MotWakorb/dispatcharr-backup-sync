@@ -80,13 +80,16 @@ app.listen(PORT, () => {
   });
 
   // Cleanup stale temp files on startup
-  importService.cleanupStaleTempFiles().then((result) => {
-    if (result.deleted.length > 0) {
-      log.info({ count: result.deleted.length }, 'Startup: Cleaned up stale temp files');
-    }
-  }).catch((error) => {
-    log.error({ err: error }, 'Startup: Failed to cleanup temp files');
-  });
+  importService
+    .cleanupStaleTempFiles()
+    .then((result) => {
+      if (result.deleted.length > 0) {
+        log.info({ count: result.deleted.length }, 'Startup: Cleaned up stale temp files');
+      }
+    })
+    .catch((error) => {
+      log.error({ err: error }, 'Startup: Failed to cleanup temp files');
+    });
 
   // Start periodic temp file cleanup (every hour)
   tempCleanupInterval = setInterval(() => {

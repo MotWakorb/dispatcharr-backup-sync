@@ -1,7 +1,13 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
-import type { SyncRequest, SyncOptions, SyncResult, SyncResultWithLogoMap, AssignmentResult } from '../types/index.js';
+import type {
+  SyncRequest,
+  SyncOptions,
+  SyncResult,
+  SyncResultWithLogoMap,
+  AssignmentResult,
+} from '../types/index.js';
 import {
   DEFAULT_PAGE_SIZE,
   EPG_PAGE_SIZE,
@@ -59,7 +65,9 @@ export class SyncService {
           this.throwIfCancelled(jobId);
         }
         const fullEndpoint = `${endpoint}?page=${page}&page_size=${pageSize}`;
-        const response = await client.get(fullEndpoint).catch(this.warnOnFail(fullEndpoint, null, jobId));
+        const response = await client
+          .get(fullEndpoint)
+          .catch(this.warnOnFail(fullEndpoint, null, jobId));
 
         if (!response) {
           break;
@@ -107,12 +115,21 @@ export class SyncService {
       ]);
 
       if (!Array.isArray(destChannels) || !Array.isArray(destEpgData) || destEpgData.length === 0) {
-        jobManager.addLog(jobId, `EPG assignment: No destination EPG data available (${destEpgData?.length || 0} entries)`);
+        jobManager.addLog(
+          jobId,
+          `EPG assignment: No destination EPG data available (${destEpgData?.length || 0} entries)`
+        );
         return { assigned: 0, skipped: destChannels?.length || 0, errors: 0 };
       }
 
-      jobManager.addLog(jobId, `EPG assignment: Source has ${sourceChannels?.length || 0} channels, ${sourceEpgData?.length || 0} EPG entries`);
-      jobManager.addLog(jobId, `EPG assignment: Destination has ${destChannels.length} channels, ${destEpgData.length} EPG entries`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: Source has ${sourceChannels?.length || 0} channels, ${sourceEpgData?.length || 0} EPG entries`
+      );
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: Destination has ${destChannels.length} channels, ${destEpgData.length} EPG entries`
+      );
 
       // Build source EPG lookup by ID (to get metadata from source EPG)
       const sourceEpgById: Record<number, any> = {};
@@ -160,7 +177,7 @@ export class SyncService {
 
       // Find channels that need EPG assignment using source channel relationships
       const channelsToUpdate: { channel: any; epgId: number; strategy: string }[] = [];
-      let matchStats = {
+      const matchStats = {
         sourceEpgTvg: 0,
         sourceEpgName: 0,
         channelTvg: 0,
@@ -181,9 +198,10 @@ export class SyncService {
           const stationKey = this.normalizeKey(srcChannel?.tvc_guide_stationid);
           const composite = nameKey ? `${nameKey}|${num}` : '';
 
-          const destChannel = (composite && destByNameNumber[composite]) ||
-                              (tvgKey && destByTvg[tvgKey]) ||
-                              (nameKey && destByNameOnly[nameKey]);
+          const destChannel =
+            (composite && destByNameNumber[composite]) ||
+            (tvgKey && destByTvg[tvgKey]) ||
+            (nameKey && destByNameOnly[nameKey]);
 
           if (!destChannel) continue;
 
@@ -196,7 +214,8 @@ export class SyncService {
           let matchStrategy: string | undefined;
 
           // Get source EPG metadata if source channel has an EPG assignment
-          const sourceEpg = srcChannel?.epg_data_id != null ? sourceEpgById[srcChannel.epg_data_id] : undefined;
+          const sourceEpg =
+            srcChannel?.epg_data_id != null ? sourceEpgById[srcChannel.epg_data_id] : undefined;
           const sourceEpgTvgKey = this.normalizeKey(sourceEpg?.tvg_id);
           const sourceEpgNameKey = this.normalizeKey(sourceEpg?.name);
 
@@ -241,16 +260,22 @@ export class SyncService {
         }
       }
 
-      jobManager.addLog(jobId, `EPG from source: sourceEpgTvg=${matchStats.sourceEpgTvg}, sourceEpgName=${matchStats.sourceEpgName}, channelTvg=${matchStats.channelTvg}, channelStation=${matchStats.channelStation}, channelName=${matchStats.channelName}, noMatch=${matchStats.noMatch}, alreadyCorrect=${matchStats.alreadyCorrect}`);
+      jobManager.addLog(
+        jobId,
+        `EPG from source: sourceEpgTvg=${matchStats.sourceEpgTvg}, sourceEpgName=${matchStats.sourceEpgName}, channelTvg=${matchStats.channelTvg}, channelStation=${matchStats.channelStation}, channelName=${matchStats.channelName}, noMatch=${matchStats.noMatch}, alreadyCorrect=${matchStats.alreadyCorrect}`
+      );
 
       // Log first few matches for debugging
       for (let i = 0; i < Math.min(5, channelsToUpdate.length); i++) {
         const { channel, epgId, strategy } = channelsToUpdate[i];
-        jobManager.addLog(jobId, `EPG match example: "${channel.name}" -> EPG ID ${epgId} via ${strategy}`);
+        jobManager.addLog(
+          jobId,
+          `EPG match example: "${channel.name}" -> EPG ID ${epgId} via ${strategy}`
+        );
       }
 
       // Second pass: fill remaining channels using target metadata (like import does)
-      const alreadyQueued = new Set(channelsToUpdate.map(c => c.channel.id));
+      const alreadyQueued = new Set(channelsToUpdate.map((c) => c.channel.id));
       let targetMetadataMatches = 0;
 
       for (const ch of destChannels) {
@@ -282,13 +307,22 @@ export class SyncService {
       }
 
       if (targetMetadataMatches > 0) {
-        jobManager.addLog(jobId, `EPG from target metadata: ${targetMetadataMatches} additional matches`);
+        jobManager.addLog(
+          jobId,
+          `EPG from target metadata: ${targetMetadataMatches} additional matches`
+        );
       }
 
-      jobManager.addLog(jobId, `EPG assignment: Total ${channelsToUpdate.length} EPG associations to apply`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: Total ${channelsToUpdate.length} EPG associations to apply`
+      );
 
       if (channelsToUpdate.length === 0) {
-        jobManager.addLog(jobId, 'No EPG associations found - channels may need manual EPG assignment');
+        jobManager.addLog(
+          jobId,
+          'No EPG associations found - channels may need manual EPG assignment'
+        );
         return { assigned: 0, skipped, errors: 0 };
       }
 
@@ -304,17 +338,26 @@ export class SyncService {
 
           // Log progress every 100 channels
           if ((i + 1) % 100 === 0) {
-            jobManager.addLog(jobId, `EPG assignment progress: ${i + 1}/${channelsToUpdate.length}`);
+            jobManager.addLog(
+              jobId,
+              `EPG assignment progress: ${i + 1}/${channelsToUpdate.length}`
+            );
           }
         } catch (error: any) {
           errors++;
           if (errors <= 5) {
-            jobManager.addLog(jobId, `EPG assignment failed for channel "${channel.name}": ${error.message}`);
+            jobManager.addLog(
+              jobId,
+              `EPG assignment failed for channel "${channel.name}": ${error.message}`
+            );
           }
         }
       }
 
-      jobManager.addLog(jobId, `EPG assignment: ${assigned} assigned, ${skipped} skipped, ${errors} errors`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: ${assigned} assigned, ${skipped} skipped, ${errors} errors`
+      );
     } catch (error: any) {
       jobManager.addLog(jobId, `EPG assignment error: ${error.message}`);
     }
@@ -351,12 +394,18 @@ export class SyncService {
       }
       jobManager.addLog(jobId, `Initial EPG data count: ${previousCount}`);
     } catch (error) {
-      jobManager.addLog(jobId, 'Could not get initial EPG data count, will wait for data to appear');
+      jobManager.addLog(
+        jobId,
+        'Could not get initial EPG data count, will wait for data to appear'
+      );
     }
 
     // Phase 1: Wait for EPG data to appear (count > 0)
     if (previousCount === 0) {
-      jobManager.addLog(jobId, 'Waiting for EPG sources to download and parse data (this may take several minutes)...');
+      jobManager.addLog(
+        jobId,
+        'Waiting for EPG sources to download and parse data (this may take several minutes)...'
+      );
       const phaseStart = Date.now();
       let checkCount = 0;
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
@@ -375,7 +424,10 @@ export class SyncService {
 
           // Log every 3rd check (every 30 seconds)
           if (checkCount % 3 === 0) {
-            jobManager.addLog(jobId, `Still waiting for EPG data... (count: ${currentCount}, elapsed: ${Math.floor((Date.now() - phaseStart) / 1000)}s)`);
+            jobManager.addLog(
+              jobId,
+              `Still waiting for EPG data... (count: ${currentCount}, elapsed: ${Math.floor((Date.now() - phaseStart) / 1000)}s)`
+            );
           }
 
           if (currentCount > 0) {
@@ -391,13 +443,19 @@ export class SyncService {
 
       // If still 0 after waiting, warn and proceed
       if (previousCount === 0) {
-        jobManager.addLog(jobId, 'Warning: No EPG data appeared after 6 minutes. EPG sources may not be configured or have no data. Proceeding anyway...');
+        jobManager.addLog(
+          jobId,
+          'Warning: No EPG data appeared after 6 minutes. EPG sources may not be configured or have no data. Proceeding anyway...'
+        );
         return;
       }
     }
 
     // Phase 2: Wait for EPG data to stabilize (stop growing)
-    jobManager.addLog(jobId, `EPG data found (${previousCount} entries), waiting for parsing to complete...`);
+    jobManager.addLog(
+      jobId,
+      `EPG data found (${previousCount} entries), waiting for parsing to complete...`
+    );
     const observationStart = Date.now();
     while (Date.now() - start < timeoutMs) {
       this.throwIfCancelled(jobId);
@@ -418,11 +476,17 @@ export class SyncService {
           stableCount++;
           // Require both stability AND minimum observation time
           if (stableCount >= stabilityChecks && observationTime >= minObservationTime) {
-            jobManager.addLog(jobId, `EPG data stable at ${currentCount} entries after ${Math.floor(observationTime / 1000)}s, proceeding with EPG assignment`);
+            jobManager.addLog(
+              jobId,
+              `EPG data stable at ${currentCount} entries after ${Math.floor(observationTime / 1000)}s, proceeding with EPG assignment`
+            );
             return;
           } else if (stableCount >= stabilityChecks && observationTime < minObservationTime) {
             const remaining = Math.floor((minObservationTime - observationTime) / 1000);
-            jobManager.addLog(jobId, `EPG appears stable at ${currentCount} entries, but waiting ${remaining}s more to ensure all sources are parsed...`);
+            jobManager.addLog(
+              jobId,
+              `EPG appears stable at ${currentCount} entries, but waiting ${remaining}s more to ensure all sources are parsed...`
+            );
           }
         } else {
           // Count changed, reset stability counter
@@ -436,7 +500,10 @@ export class SyncService {
       await new Promise((res) => globalThis.setTimeout(res, intervalMs));
     }
 
-    jobManager.addLog(jobId, `Timed out waiting for EPG data to stabilize (current count: ${previousCount}), proceeding anyway`);
+    jobManager.addLog(
+      jobId,
+      `Timed out waiting for EPG data to stabilize (current count: ${previousCount}), proceeding anyway`
+    );
   }
 
   private async waitForStreams(
@@ -460,7 +527,10 @@ export class SyncService {
           if (count === lastCount) {
             stableChecks++;
             if (stableChecks >= requiredStableChecks) {
-              jobManager.addLog(jobId, `Streams stable at ${count} entries; proceeding with channel-stream mapping`);
+              jobManager.addLog(
+                jobId,
+                `Streams stable at ${count} entries; proceeding with channel-stream mapping`
+              );
               return;
             }
           } else {
@@ -476,7 +546,10 @@ export class SyncService {
       }
       await new Promise((res) => globalThis.setTimeout(res, intervalMs));
     }
-    jobManager.addLog(jobId, `Timed out waiting for streams (count: ${lastCount}); channel-stream mapping may be incomplete`);
+    jobManager.addLog(
+      jobId,
+      `Timed out waiting for streams (count: ${lastCount}); channel-stream mapping may be incomplete`
+    );
   }
 
   async sync(request: SyncRequest, jobId: string): Promise<void> {
@@ -546,14 +619,22 @@ export class SyncService {
         // Trigger EPG refresh to force sources to download fresh data
         // (existing sources may not auto-refresh when updated via PUT)
         if (!request.dryRun) {
-          jobManager.setProgress(jobId, currentProgress, 'Triggering EPG sources to download data...');
+          jobManager.setProgress(
+            jobId,
+            currentProgress,
+            'Triggering EPG sources to download data...'
+          );
           await this.triggerEpgRefresh(destClient, jobId);
         }
 
         // Wait for EPG data to be downloaded BEFORE syncing channels
         // (matches import order: EPG sources → wait for EPG data → channel profiles → channels)
         if (!request.dryRun) {
-          jobManager.setProgress(jobId, currentProgress, 'Waiting for EPG data to be downloaded from sources...');
+          jobManager.setProgress(
+            jobId,
+            currentProgress,
+            'Waiting for EPG data to be downloaded from sources...'
+          );
           await this.waitForEpgData(destClient, jobId);
         }
       }
@@ -600,13 +681,12 @@ export class SyncService {
       if (request.options.syncLogos) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing logos...');
-        const logoResult = await this.syncLogos(
-          sourceClient,
-          destClient,
-          request.dryRun,
-          jobId
-        );
-        results.synced.logos = { synced: logoResult.synced, skipped: logoResult.skipped, errors: logoResult.errors };
+        const logoResult = await this.syncLogos(sourceClient, destClient, request.dryRun, jobId);
+        results.synced.logos = {
+          synced: logoResult.synced,
+          skipped: logoResult.skipped,
+          errors: logoResult.errors,
+        };
         logoMap = logoResult.logoMap;
         currentProgress += progressPerStep;
       }
@@ -629,13 +709,21 @@ export class SyncService {
         // NOTE: Do this regardless of syncEPGSources - dest may already have EPG data from previous sync/import
         if (!request.dryRun) {
           jobManager.setProgress(jobId, currentProgress, 'Assigning EPG data to channels...');
-          results.synced.epgAssignment = await this.assignEpgToChannels(sourceClient, destClient, jobId);
+          results.synced.epgAssignment = await this.assignEpgToChannels(
+            sourceClient,
+            destClient,
+            jobId
+          );
         }
 
         // Apply channel profile associations AFTER channels are synced
         // (matches import order: channels → EPG assignment → channel profile associations)
         if (request.options.syncChannelProfiles && !request.dryRun) {
-          jobManager.setProgress(jobId, currentProgress, 'Applying channel profile associations...');
+          jobManager.setProgress(
+            jobId,
+            currentProgress,
+            'Applying channel profile associations...'
+          );
           await this.syncChannelProfileAssociations(sourceClient, destClient);
           jobManager.addLog(jobId, 'Channel profile associations synced');
         }
@@ -677,11 +765,7 @@ export class SyncService {
       if (request.options.syncDVRRules) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Syncing DVR rules...');
-        results.synced.dvrRules = await this.syncDVRRules(
-          sourceClient,
-          destClient,
-          request.dryRun
-        );
+        results.synced.dvrRules = await this.syncDVRRules(sourceClient, destClient, request.dryRun);
         currentProgress += progressPerStep;
       }
 
@@ -746,7 +830,9 @@ export class SyncService {
       'syncLogos',
     ]);
 
-    return Object.entries(options).filter(([key, value]) => value === true && supportedKeys.has(key)).length;
+    return Object.entries(options).filter(
+      ([key, value]) => value === true && supportedKeys.has(key)
+    ).length;
   }
 
   private async syncChannelGroups(
@@ -768,7 +854,9 @@ export class SyncService {
 
     for (const group of sourceList) {
       try {
-        const existing = destGroupList.find((g: any) => g.name?.toLowerCase() === group.name?.toLowerCase());
+        const existing = destGroupList.find(
+          (g: any) => g.name?.toLowerCase() === group.name?.toLowerCase()
+        );
 
         // Skip if group already exists on destination (likely created by M3U refresh)
         if (existing) {
@@ -785,7 +873,11 @@ export class SyncService {
         await dest.post('/api/channels/groups/', groupData);
         synced++;
       } catch (error: any) {
-        const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
+        const errMsg =
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Unknown error';
         if (jobId) {
           jobManager.addLog(jobId, `Channel group "${group.name}": Failed - ${errMsg}`);
         }
@@ -794,7 +886,10 @@ export class SyncService {
     }
 
     if (jobId && skipped > 0) {
-      jobManager.addLog(jobId, `Channel groups: ${skipped} already existed (from M3U refresh), ${synced} created`);
+      jobManager.addLog(
+        jobId,
+        `Channel groups: ${skipped} already existed (from M3U refresh), ${synced} created`
+      );
     }
 
     return { synced, skipped, errors };
@@ -809,7 +904,7 @@ export class SyncService {
     const destProfiles = await dest.get('/api/channels/profiles/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     // First, sync the profiles themselves
@@ -847,17 +942,24 @@ export class SyncService {
   ): Promise<void> {
     const sourceProfiles = await source.get('/api/channels/profiles/');
     const destProfiles = await dest.get('/api/channels/profiles/');
-    const sourceChannels = await source.get('/api/channels/channels/').catch(() => ({ results: [] }));
+    const sourceChannels = await source
+      .get('/api/channels/channels/')
+      .catch(() => ({ results: [] }));
     const destChannels = await dest.get('/api/channels/channels/').catch(() => ({ results: [] }));
 
-    const sourceChannelsList = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
-    const destChannelsList = Array.isArray(destChannels) ? destChannels : destChannels.results || [];
+    const sourceChannelsList = Array.isArray(sourceChannels)
+      ? sourceChannels
+      : sourceChannels.results || [];
+    const destChannelsList = Array.isArray(destChannels)
+      ? destChannels
+      : destChannels.results || [];
 
     // Build channel mapping (source channel -> dest channel)
     const channelMap: Record<number, number> = {};
     for (const sourceChannel of sourceChannelsList) {
       const destChannel = destChannelsList.find(
-        (dc: any) => dc.name === sourceChannel.name && dc.channel_number === sourceChannel.channel_number
+        (dc: any) =>
+          dc.name === sourceChannel.name && dc.channel_number === sourceChannel.channel_number
       );
       if (sourceChannel.id && destChannel?.id) {
         channelMap[sourceChannel.id] = destChannel.id;
@@ -871,7 +973,9 @@ export class SyncService {
         if (!destProfile) continue;
 
         // Get channel IDs from source profile (already in profile.channels array)
-        const sourceChannelIds = Array.isArray(sourceProfile.channels) ? sourceProfile.channels : [];
+        const sourceChannelIds = Array.isArray(sourceProfile.channels)
+          ? sourceProfile.channels
+          : [];
 
         // Map to destination channel IDs
         const enabledDestChannelIds = sourceChannelIds
@@ -883,7 +987,7 @@ export class SyncService {
           for (const channelId of enabledDestChannelIds) {
             try {
               await dest.patch(`/api/channels/profiles/${destProfile.id}/channels/${channelId}/`, {
-                enabled: true
+                enabled: true,
               });
             } catch (err) {
               // Continue with other channels even if one fails
@@ -912,11 +1016,15 @@ export class SyncService {
     const destChannels = await dest.get('/api/channels/channels/');
 
     // Build stream profile mapping by name
-    const sourceProfiles = await source.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
-    const destProfiles = await dest.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
+    const sourceProfiles = await source
+      .get('/api/core/streamprofiles/')
+      .catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
+    const destProfiles = await dest
+      .get('/api/core/streamprofiles/')
+      .catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
     const profileMap: Record<number, number> = {};
 
-    for (const sourceProfile of (Array.isArray(sourceProfiles) ? sourceProfiles : [])) {
+    for (const sourceProfile of Array.isArray(sourceProfiles) ? sourceProfiles : []) {
       const destProfile = (Array.isArray(destProfiles) ? destProfiles : []).find(
         (p: any) => p.name === sourceProfile.name
       );
@@ -926,8 +1034,12 @@ export class SyncService {
     }
 
     // Build channel group mapping by name
-    const sourceGroups = await source.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
-    const destGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const sourceGroups = await source
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const destGroups = await dest
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const sourceGroupList = Array.isArray(sourceGroups) ? sourceGroups : sourceGroups.results || [];
     const destGroupList = Array.isArray(destGroups) ? destGroups : destGroups.results || [];
 
@@ -957,7 +1069,10 @@ export class SyncService {
           }
         }
         if (jobId) {
-          jobManager.addLog(jobId, `Built source logo ID->name mapping with ${Object.keys(sourceLogoIdToName).length} entries`);
+          jobManager.addLog(
+            jobId,
+            `Built source logo ID->name mapping with ${Object.keys(sourceLogoIdToName).length} entries`
+          );
         }
       } catch (e) {
         // Ignore errors fetching source logos
@@ -982,7 +1097,10 @@ export class SyncService {
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Fetched ${Object.keys(sourceStreamById).length} source streams for metadata lookup`);
+      jobManager.addLog(
+        jobId,
+        `Fetched ${Object.keys(sourceStreamById).length} source streams for metadata lookup`
+      );
     }
 
     // Fetch destination streams and build lookup tables for stream matching
@@ -1019,11 +1137,14 @@ export class SyncService {
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Dest stream lookup sizes -> byHash:${Object.keys(streamByHash).length} byTvg:${Object.keys(streamByTvgId).length} byName:${Object.keys(streamByName).length} byStation:${Object.keys(streamByStation).length}`);
+      jobManager.addLog(
+        jobId,
+        `Dest stream lookup sizes -> byHash:${Object.keys(streamByHash).length} byTvg:${Object.keys(streamByTvgId).length} byName:${Object.keys(streamByName).length} byStation:${Object.keys(streamByStation).length}`
+      );
     }
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     let streamsMatched = 0;
     let streamsUnmatched = 0;
@@ -1032,12 +1153,17 @@ export class SyncService {
     let debugLogged = 0;
     const debugLimit = 5;
 
-    const allChannels = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
+    const allChannels = Array.isArray(sourceChannels)
+      ? sourceChannels
+      : sourceChannels.results || [];
     // Filter out auto-created channels (those created via M3U auto channel sync)
     const channels = allChannels.filter((c: any) => !c.auto_created);
 
     if (jobId && allChannels.length !== channels.length) {
-      jobManager.addLog(jobId, `Skipping ${allChannels.length - channels.length} auto-created channels (from M3U auto sync)`);
+      jobManager.addLog(
+        jobId,
+        `Skipping ${allChannels.length - channels.length} auto-created channels (from M3U auto sync)`
+      );
     }
 
     for (const channel of channels) {
@@ -1087,7 +1213,10 @@ export class SyncService {
 
         // Debug logging for first few channels
         if (jobId && debugLogged < debugLimit) {
-          jobManager.addLog(jobId, `Channel "${channel.name}" #${channel.channel_number}: group_id=${channel.channel_group_id}->${channelData.channel_group_id}, tvg_id=${channel.tvg_id}`);
+          jobManager.addLog(
+            jobId,
+            `Channel "${channel.name}" #${channel.channel_number}: group_id=${channel.channel_group_id}->${channelData.channel_group_id}, tvg_id=${channel.tvg_id}`
+          );
           debugLogged++;
         }
 
@@ -1115,7 +1244,10 @@ export class SyncService {
               if (destLogoId) {
                 channelData.logo_id = destLogoId;
                 if (debugLogged < debugLimit && jobId) {
-                  jobManager.addLog(jobId, `Channel "${channel.name}" logo: "${logoName}" (src=${sourceLogoId}) -> dest=${destLogoId}`);
+                  jobManager.addLog(
+                    jobId,
+                    `Channel "${channel.name}" logo: "${logoName}" (src=${sourceLogoId}) -> dest=${destLogoId}`
+                  );
                 }
               }
             }
@@ -1219,7 +1351,9 @@ export class SyncService {
               }
 
               // Map stream profile if present
-              const mappedProfileId = stream.stream_profile_id ? profileMap[stream.stream_profile_id] : undefined;
+              const mappedProfileId = stream.stream_profile_id
+                ? profileMap[stream.stream_profile_id]
+                : undefined;
               if (mappedProfileId) {
                 streamPayload.stream_profile_id = mappedProfileId;
               }
@@ -1241,12 +1375,18 @@ export class SyncService {
                 matchedStreams.add(created.id);
                 customStreamsCreated++;
                 if (jobId && customStreamsCreated <= 5) {
-                  jobManager.addLog(jobId, `Created custom stream "${streamPayload.name}" for channel "${channel.name}"`);
+                  jobManager.addLog(
+                    jobId,
+                    `Created custom stream "${streamPayload.name}" for channel "${channel.name}"`
+                  );
                 }
               }
             } catch (err: any) {
               if (jobId) {
-                jobManager.addLog(jobId, `Failed to create custom stream for "${channel.name}": ${err.message}`);
+                jobManager.addLog(
+                  jobId,
+                  `Failed to create custom stream for "${channel.name}": ${err.message}`
+                );
               }
             }
           }
@@ -1266,16 +1406,26 @@ export class SyncService {
         }
         synced++;
       } catch (error: any) {
-        const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
+        const errMsg =
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Unknown error';
         if (jobId) {
-          jobManager.addLog(jobId, `Channel "${channel.name}" (#${channel.channel_number}): Failed - ${errMsg}`);
+          jobManager.addLog(
+            jobId,
+            `Channel "${channel.name}" (#${channel.channel_number}): Failed - ${errMsg}`
+          );
         }
         errors++;
       }
     }
 
     if (jobId) {
-      jobManager.addLog(jobId, `Channels: ${streamsMatched} with streams matched, ${streamsUnmatched} without stream matches, ${groupsAssigned} with groups assigned, ${customStreamsCreated} custom streams created`);
+      jobManager.addLog(
+        jobId,
+        `Channels: ${streamsMatched} with streams matched, ${streamsUnmatched} without stream matches, ${groupsAssigned} with groups assigned, ${customStreamsCreated} custom streams created`
+      );
     }
 
     return { synced, skipped, errors };
@@ -1290,12 +1440,10 @@ export class SyncService {
     const destUsers = await dest.get('/api/accounts/users/');
 
     // Filter out admin users
-    const filteredUsers = sourceUsers.filter(
-      (u: any) => !u.is_staff && u.user_level !== 0
-    );
+    const filteredUsers = sourceUsers.filter((u: any) => !u.is_staff && u.user_level !== 0);
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     for (const user of filteredUsers) {
@@ -1344,8 +1492,12 @@ export class SyncService {
     const destPluginsResp = await dest.get('/api/plugins/plugins/');
 
     // API returns {"plugins": [...]} - extract the array
-    const sourcePlugins = Array.isArray(sourcePluginsResp) ? sourcePluginsResp : (sourcePluginsResp?.plugins || []);
-    const destPlugins = Array.isArray(destPluginsResp) ? destPluginsResp : (destPluginsResp?.plugins || []);
+    const sourcePlugins = Array.isArray(sourcePluginsResp)
+      ? sourcePluginsResp
+      : sourcePluginsResp?.plugins || [];
+    const destPlugins = Array.isArray(destPluginsResp)
+      ? destPluginsResp
+      : destPluginsResp?.plugins || [];
 
     let synced = 0;
     let skipped = 0;
@@ -1394,16 +1546,14 @@ export class SyncService {
     const destRules = await dest.get('/api/channels/recurring-rules/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     for (const rule of sourceRules) {
       try {
         const existing = destRules.find(
           (r: any) =>
-            r.name === rule.name &&
-            r.start_time === rule.start_time &&
-            r.end_time === rule.end_time
+            r.name === rule.name && r.start_time === rule.start_time && r.end_time === rule.end_time
         );
 
         if (dryRun) {
@@ -1445,15 +1595,21 @@ export class SyncService {
     const destAccounts = await dest.get('/api/m3u/accounts/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
-    const sourceList = Array.isArray(sourceAccounts) ? sourceAccounts : sourceAccounts.results || [];
+    const sourceList = Array.isArray(sourceAccounts)
+      ? sourceAccounts
+      : sourceAccounts.results || [];
     const destList = Array.isArray(destAccounts) ? destAccounts : destAccounts.results || [];
 
     // Build channel group mappings for ID translation
-    const sourceGroups = await source.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
-    const destGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const sourceGroups = await source
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const destGroups = await dest
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
 
     const sourceGroupList = Array.isArray(sourceGroups) ? sourceGroups : sourceGroups.results || [];
     const destGroupList = Array.isArray(destGroups) ? destGroups : destGroups.results || [];
@@ -1488,7 +1644,9 @@ export class SyncService {
         }
       } catch {
         // Group might already exist, try to find it
-        const refreshed = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+        const refreshed = await dest
+          .get('/api/channels/groups/')
+          .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
         const refreshedList = Array.isArray(refreshed) ? refreshed : refreshed.results || [];
         const found = refreshedList.find((g: any) => g.name?.toLowerCase() === lowerName);
         if (found?.id) {
@@ -1520,7 +1678,10 @@ export class SyncService {
 
             if (!groupName) {
               if (jobId) {
-                jobManager.addLog(jobId, `M3U ${account.name}: Could not find name for source group ID ${sourceGroupId}, skipping`);
+                jobManager.addLog(
+                  jobId,
+                  `M3U ${account.name}: Could not find name for source group ID ${sourceGroupId}, skipping`
+                );
               }
               continue;
             }
@@ -1529,7 +1690,10 @@ export class SyncService {
             const destGroupId = await ensureDestGroup(groupName);
             if (!destGroupId) {
               if (jobId) {
-                jobManager.addLog(jobId, `M3U ${account.name}: Could not map group "${groupName}" to destination, skipping`);
+                jobManager.addLog(
+                  jobId,
+                  `M3U ${account.name}: Could not map group "${groupName}" to destination, skipping`
+                );
               }
               continue;
             }
@@ -1541,7 +1705,6 @@ export class SyncService {
               channel_group_name: groupName, // Preserve name for reference
             });
           }
-
         }
 
         // Create/update the M3U account WITHOUT channel_groups
@@ -1557,7 +1720,9 @@ export class SyncService {
         // If we have channel_groups settings to apply, refresh and then PATCH
         if (transformedChannelGroups && transformedChannelGroups.length > 0) {
           // Trigger refresh to discover channel groups
-          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
+          await dest
+            .post(`/api/m3u/refresh/${accountId}/`)
+            .catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
 
           // Wait for refresh to complete
           const maxWait = 60000;
@@ -1565,8 +1730,10 @@ export class SyncService {
           const startTime = Date.now();
           while (Date.now() - startTime < maxWait) {
             this.throwIfCancelled(jobId);
-            await new Promise(r => globalThis.setTimeout(r, pollInterval));
-            const acct = await dest.get(`/api/m3u/accounts/${accountId}/`).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/`, null, jobId));
+            await new Promise((r) => globalThis.setTimeout(r, pollInterval));
+            const acct = await dest
+              .get(`/api/m3u/accounts/${accountId}/`)
+              .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/`, null, jobId));
             if (acct && acct.status !== 'refreshing' && acct.status !== 'pending_setup') {
               break;
             }
@@ -1577,8 +1744,12 @@ export class SyncService {
           const discoveredGroups = currentAccount?.channel_groups || [];
 
           // Refresh dest group mapping
-          const refreshedDestGroups = await dest.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
-          const refreshedDestList = Array.isArray(refreshedDestGroups) ? refreshedDestGroups : refreshedDestGroups.results || [];
+          const refreshedDestGroups = await dest
+            .get('/api/channels/groups/')
+            .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+          const refreshedDestList = Array.isArray(refreshedDestGroups)
+            ? refreshedDestGroups
+            : refreshedDestGroups.results || [];
           for (const g of refreshedDestList) {
             if (g?.id != null && g?.name) {
               destGroupNameToId[g.name.toLowerCase()] = g.id;
@@ -1611,9 +1782,15 @@ export class SyncService {
               return {
                 channel_group: dg.channel_group,
                 enabled: sourceSettings.enabled !== undefined ? sourceSettings.enabled : dg.enabled,
-                ...(sourceSettings.auto_channel_sync !== undefined && { auto_channel_sync: sourceSettings.auto_channel_sync }),
-                ...(sourceSettings.auto_sync_channel_start !== undefined && { auto_sync_channel_start: sourceSettings.auto_sync_channel_start }),
-                ...(sourceSettings.custom_properties !== undefined && { custom_properties: sourceSettings.custom_properties }),
+                ...(sourceSettings.auto_channel_sync !== undefined && {
+                  auto_channel_sync: sourceSettings.auto_channel_sync,
+                }),
+                ...(sourceSettings.auto_sync_channel_start !== undefined && {
+                  auto_sync_channel_start: sourceSettings.auto_sync_channel_start,
+                }),
+                ...(sourceSettings.custom_properties !== undefined && {
+                  custom_properties: sourceSettings.custom_properties,
+                }),
               };
             } else {
               return {
@@ -1626,7 +1803,10 @@ export class SyncService {
           const enabledCount = completePayload.filter((cg: any) => cg.enabled).length;
           const autoSyncCount = completePayload.filter((cg: any) => cg.auto_channel_sync).length;
           if (jobId) {
-            jobManager.addLog(jobId, `M3U ${account.name}: Applying ${enabledCount} enabled, ${completePayload.length - enabledCount} disabled channel groups`);
+            jobManager.addLog(
+              jobId,
+              `M3U ${account.name}: Applying ${enabledCount} enabled, ${completePayload.length - enabledCount} disabled channel groups`
+            );
           }
 
           // Apply channel group settings via PATCH
@@ -1638,19 +1818,28 @@ export class SyncService {
           // Note: Dispatcharr API may not persist these values (known limitation)
           if (autoSyncCount > 0) {
             const autoSyncGroups = completePayload.filter((cg: any) => cg.auto_channel_sync);
-            await dest.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
-              channel_groups: autoSyncGroups,
-            }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
+            await dest
+              .patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
+                channel_groups: autoSyncGroups,
+              })
+              .catch(
+                this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId)
+              );
           }
 
           // Trigger another refresh to apply the enabled/disabled states
-          await dest.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
+          await dest
+            .post(`/api/m3u/refresh/${accountId}/`)
+            .catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
         }
 
         synced++;
       } catch (error) {
         if (jobId) {
-          jobManager.addLog(jobId, `M3U ${account?.name}: Sync failed - ${error instanceof Error ? error.message : error}`);
+          jobManager.addLog(
+            jobId,
+            `M3U ${account?.name}: Sync failed - ${error instanceof Error ? error.message : error}`
+          );
         }
         errors++;
       }
@@ -1668,10 +1857,12 @@ export class SyncService {
     const destProfiles = await dest.get('/api/core/streamprofiles/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
-    const sourceList = Array.isArray(sourceProfiles) ? sourceProfiles : sourceProfiles.results || [];
+    const sourceList = Array.isArray(sourceProfiles)
+      ? sourceProfiles
+      : sourceProfiles.results || [];
     const destList = Array.isArray(destProfiles) ? destProfiles : destProfiles.results || [];
 
     for (const profile of sourceList) {
@@ -1708,7 +1899,7 @@ export class SyncService {
     const destAgents = await dest.get('/api/core/useragents/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     const sourceList = Array.isArray(sourceAgents) ? sourceAgents : sourceAgents.results || [];
@@ -1760,16 +1951,12 @@ export class SyncService {
         return { synced: sourceList.length, skipped: 0, errors: 0 };
       }
 
-      const destResp = await dest.get('/api/core/settings/').catch(this.warnOnFail('/api/core/settings/', []));
-      const destList = Array.isArray(destResp)
-        ? destResp
-        : destResp
-          ? [destResp]
-          : [];
+      const destResp = await dest
+        .get('/api/core/settings/')
+        .catch(this.warnOnFail('/api/core/settings/', []));
+      const destList = Array.isArray(destResp) ? destResp : destResp ? [destResp] : [];
       const destByKey = new Map<string, any>(
-        destList
-          .filter((s: any) => s?.key)
-          .map((s: any) => [s.key, s])
+        destList.filter((s: any) => s?.key).map((s: any) => [s.key, s])
       );
 
       let synced = 0;
@@ -1822,7 +2009,7 @@ export class SyncService {
     const destSources = await dest.get('/api/epg/sources/');
 
     let synced = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     const sourceList = Array.isArray(sourceSources) ? sourceSources : sourceSources.results || [];
@@ -1842,10 +2029,10 @@ export class SyncService {
           url: sourceItem.url,
           api_key: sourceItem.api_key,
           is_active: sourceItem.is_active,
-          ...(['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
+          ...['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
             if (sourceItem[key] !== undefined) acc[key] = sourceItem[key];
             return acc;
-          }, {})),
+          }, {}),
         };
 
         if (match) {
@@ -1855,7 +2042,11 @@ export class SyncService {
         }
         synced++;
       } catch (error: any) {
-        const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
+        const errMsg =
+          error?.response?.data?.error ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'Unknown error';
         if (jobId) {
           jobManager.addLog(jobId, `EPG source "${sourceItem.name}": Failed - ${errMsg}`);
         }
@@ -1907,7 +2098,11 @@ export class SyncService {
       }
       return { synced: 1, skipped: 0, errors: 0 };
     } catch (error: any) {
-      const errMsg = error?.response?.data?.error || error?.response?.data?.detail || error?.message || 'Unknown error';
+      const errMsg =
+        error?.response?.data?.error ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'Unknown error';
       const statusCode = error?.response?.status || 'N/A';
       log.error({ statusCode, err: errMsg }, 'syncComskipConfig failed');
       if (jobId) {
@@ -1927,8 +2122,12 @@ export class SyncService {
     const logoMap: Record<string, number> = {};
 
     // First, get all channels from source to find which logos are actually used by channels
-    const sourceChannels = await source.get('/api/channels/channels/').catch(this.warnOnFail('/api/channels/channels/', [], jobId));
-    const channelsList = Array.isArray(sourceChannels) ? sourceChannels : sourceChannels.results || [];
+    const sourceChannels = await source
+      .get('/api/channels/channels/')
+      .catch(this.warnOnFail('/api/channels/channels/', [], jobId));
+    const channelsList = Array.isArray(sourceChannels)
+      ? sourceChannels
+      : sourceChannels.results || [];
     const channelLogoIds = new Set<number>();
     for (const ch of channelsList) {
       if (ch.logo_id != null) channelLogoIds.add(ch.logo_id);
@@ -1941,7 +2140,10 @@ export class SyncService {
     const logoList = allLogos.filter((l: any) => channelLogoIds.has(l.id));
 
     if (jobId) {
-      jobManager.addLog(jobId, `Found ${allLogos.length} total logos, ${logoList.length} are channel logos (excluded ${allLogos.length - logoList.length} VOD posters)`);
+      jobManager.addLog(
+        jobId,
+        `Found ${allLogos.length} total logos, ${logoList.length} are channel logos (excluded ${allLogos.length - logoList.length} VOD posters)`
+      );
     }
 
     // Fetch existing logos on destination to avoid duplicates
@@ -1982,7 +2184,10 @@ export class SyncService {
       if (existingDestId) {
         skipped++;
         if (jobId) {
-          jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (src=${logo.id}, dest=${existingDestId}) - already exists on destination`);
+          jobManager.addLog(
+            jobId,
+            `[SKIP] Logo "${logoName}" (src=${logo.id}, dest=${existingDestId}) - already exists on destination`
+          );
         }
         continue;
       }
@@ -2009,7 +2214,10 @@ export class SyncService {
 
         if (buffer.length < 100) {
           if (jobId) {
-            jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
+            jobManager.addLog(
+              jobId,
+              `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`
+            );
           }
           skipped++;
           continue;
@@ -2054,7 +2262,10 @@ export class SyncService {
           logoMap[logoName.toString().toLowerCase()] = newDestId;
         }
         if (jobId) {
-          jobManager.addLog(jobId, `[OK] Logo "${logoName}" (src=${logo.id} -> dest=${newDestId}) - ${buffer.length} bytes synced`);
+          jobManager.addLog(
+            jobId,
+            `[OK] Logo "${logoName}" (src=${logo.id} -> dest=${newDestId}) - ${buffer.length} bytes synced`
+          );
         }
       } catch (error: any) {
         errors++;
@@ -2066,21 +2277,23 @@ export class SyncService {
 
     if (jobId) {
       jobManager.addLog(jobId, `Logos: ${synced} synced, ${skipped} skipped, ${errors} failed`);
-      jobManager.addLog(jobId, `Logo map has ${Object.keys(logoMap).length} entries for channel assignment`);
+      jobManager.addLog(
+        jobId,
+        `Logo map has ${Object.keys(logoMap).length} entries for channel assignment`
+      );
     }
 
     return { synced, skipped, errors, logoMap };
   }
 
-  private async triggerEpgRefresh(
-    client: DispatcharrClient,
-    jobId: string
-  ): Promise<void> {
+  private async triggerEpgRefresh(client: DispatcharrClient, jobId: string): Promise<void> {
     try {
       jobManager.addLog(jobId, 'Triggering EPG refresh by toggling EPG sources...');
 
       // Get all EPG sources
-      const epgSources = await client.get('/api/epg/sources/').catch(this.warnOnFail('/api/epg/sources/', [], jobId));
+      const epgSources = await client
+        .get('/api/epg/sources/')
+        .catch(this.warnOnFail('/api/epg/sources/', [], jobId));
 
       if (!Array.isArray(epgSources) || epgSources.length === 0) {
         jobManager.addLog(jobId, 'No EPG sources found to refresh');
@@ -2097,7 +2310,10 @@ export class SyncService {
           const wasActive = source.is_active !== false; // Default to true if undefined
 
           if (wasActive) {
-            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Toggling to trigger refresh...`);
+            jobManager.addLog(
+              jobId,
+              `EPG source "${source.name || source.id}": Toggling to trigger refresh...`
+            );
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
@@ -2108,10 +2324,16 @@ export class SyncService {
 
             jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Refresh triggered`);
           } else {
-            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Skipped (inactive)`);
+            jobManager.addLog(
+              jobId,
+              `EPG source "${source.name || source.id}": Skipped (inactive)`
+            );
           }
         } catch (error: any) {
-          jobManager.addLog(jobId, `EPG source refresh failed for "${source.name || source.id}": ${error.message}`);
+          jobManager.addLog(
+            jobId,
+            `EPG source refresh failed for "${source.name || source.id}": ${error.message}`
+          );
         }
       }
 

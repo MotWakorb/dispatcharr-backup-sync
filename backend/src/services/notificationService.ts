@@ -34,7 +34,8 @@ class NotificationService {
     // Check if this event type should trigger notifications
     if (event.type === 'job_started' && !settings.notifyOnStart) return [];
     if (event.type === 'job_completed' && !settings.notifyOnComplete) return [];
-    if (event.type === 'job_completed_with_errors' && !settings.notifyOnCompleteWithErrors) return [];
+    if (event.type === 'job_completed_with_errors' && !settings.notifyOnCompleteWithErrors)
+      return [];
     if (event.type === 'job_failed' && !settings.notifyOnFailure) return [];
 
     const providers = await notificationStore.getEnabledProviders();
@@ -80,7 +81,9 @@ class NotificationService {
   /**
    * Test a provider config directly (without saving)
    */
-  async testProviderConfig(input: NotificationProviderInput): Promise<{ success: boolean; message: string }> {
+  async testProviderConfig(
+    input: NotificationProviderInput
+  ): Promise<{ success: boolean; message: string }> {
     const testEvent: NotificationEvent = {
       type: 'job_completed',
       scheduleName: 'Test Schedule',
@@ -171,7 +174,11 @@ class NotificationService {
     });
   }
 
-  private async sendTelegram(config: TelegramConfig, event: NotificationEvent, isTest: boolean): Promise<void> {
+  private async sendTelegram(
+    config: TelegramConfig,
+    event: NotificationEvent,
+    isTest: boolean
+  ): Promise<void> {
     const message = this.formatTelegram(event, isTest);
     const url = `https://api.telegram.org/bot${config.botToken}/sendMessage`;
 
@@ -186,12 +193,16 @@ class NotificationService {
     });
 
     if (!response.ok) {
-      const error = await response.json() as { description?: string };
+      const error = (await response.json()) as { description?: string };
       throw new Error(error.description || `Telegram API error: ${response.status}`);
     }
   }
 
-  private async sendDiscord(config: DiscordConfig, event: NotificationEvent, isTest: boolean): Promise<void> {
+  private async sendDiscord(
+    config: DiscordConfig,
+    event: NotificationEvent,
+    isTest: boolean
+  ): Promise<void> {
     const payload = this.formatDiscord(event, isTest);
 
     const response = await fetch(config.webhookUrl, {
@@ -206,7 +217,11 @@ class NotificationService {
     }
   }
 
-  private async sendSlack(config: SlackConfig, event: NotificationEvent, isTest: boolean): Promise<void> {
+  private async sendSlack(
+    config: SlackConfig,
+    event: NotificationEvent,
+    isTest: boolean
+  ): Promise<void> {
     const payload = this.formatSlack(event, isTest);
 
     const response = await fetch(config.webhookUrl, {
@@ -275,7 +290,11 @@ class NotificationService {
     }
   }
 
-  private formatEmail(event: NotificationEvent, isTest: boolean, logs: JobLogEntry[] = []): { subject: string; html: string } {
+  private formatEmail(
+    event: NotificationEvent,
+    isTest: boolean,
+    logs: JobLogEntry[] = []
+  ): { subject: string; html: string } {
     const emoji = this.getStatusEmoji(event.type);
     const status = this.getStatusText(event.type);
     const jobType = event.jobType.charAt(0).toUpperCase() + event.jobType.slice(1);

@@ -173,9 +173,7 @@ class ScheduleStore {
     error?: string
   ): Promise<void> {
     const history = await loadHistoryFile();
-    const entry = history.entries.find(
-      (e) => e.scheduleId === scheduleId && e.jobId === jobId
-    );
+    const entry = history.entries.find((e) => e.scheduleId === scheduleId && e.jobId === jobId);
     if (entry) {
       entry.completedAt = new Date().toISOString();
       entry.status = status;

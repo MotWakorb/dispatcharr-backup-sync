@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Run lint-staged and tests for backend
+cd backend && npx lint-staged && npm test

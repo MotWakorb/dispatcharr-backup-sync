@@ -122,11 +122,9 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
     const jobId = jobManager.createJob('import');
 
     // Start import in background
-    importService
-      .import(request, jobId)
-      .catch((error) => {
-        log.error({ jobId, err: error }, 'Import job failed');
-      });
+    importService.import(request, jobId).catch((error) => {
+      log.error({ jobId, err: error }, 'Import job failed');
+    });
 
     // Return job ID immediately
     res.json({
@@ -235,7 +233,8 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
 
         // Check if this is an "already exists" error - treat as skipped, not error
         // Must be a 409 Conflict OR specifically mention plugin/version already exists
-        const isAlreadyExists = statusCode === 409 ||
+        const isAlreadyExists =
+          statusCode === 409 ||
           errorLower.includes('plugin already exists') ||
           errorLower.includes('already installed') ||
           (errorLower.includes('already exists') && errorLower.includes('plugin'));

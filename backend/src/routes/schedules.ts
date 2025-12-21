@@ -3,7 +3,12 @@ import { scheduleStore } from '../services/scheduleStore.js';
 import { schedulerService } from '../services/schedulerService.js';
 import { savedConnectionStore } from '../services/savedConnectionStore.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
-import type { ApiResponse, Schedule, ScheduleInput, ScheduleRunHistoryEntry } from '../types/index.js';
+import type {
+  ApiResponse,
+  Schedule,
+  ScheduleInput,
+  ScheduleRunHistoryEntry,
+} from '../types/index.js';
 import { createLogger } from '../services/logger.js';
 
 const log = createLogger('schedules-route');
@@ -23,7 +28,10 @@ async function validateInput(input: ScheduleInput): Promise<string | null> {
   if (!input.options) {
     return 'options are required';
   }
-  if (!input.schedulePreset || !['hourly', 'daily', 'weekly', 'monthly', 'custom'].includes(input.schedulePreset)) {
+  if (
+    !input.schedulePreset ||
+    !['hourly', 'daily', 'weekly', 'monthly', 'custom'].includes(input.schedulePreset)
+  ) {
     return 'schedulePreset must be one of: hourly, daily, weekly, monthly, custom';
   }
   if (input.schedulePreset === 'custom' && !input.cronExpression) {
@@ -56,7 +64,7 @@ schedulesRouter.get('/', async (_req, res) => {
   try {
     const schedules = await scheduleStore.getAll();
     // Add running status to each schedule
-    const schedulesWithStatus = schedules.map(s => ({
+    const schedulesWithStatus = schedules.map((s) => ({
       ...s,
       isRunning: schedulerService.isRunning(s.id),
       runningJobId: schedulerService.getRunningJobId(s.id),

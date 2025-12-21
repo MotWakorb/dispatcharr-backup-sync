@@ -14,11 +14,11 @@ const log = createLogger('scheduler');
 
 // Preset cron expressions
 const PRESET_CRONS: Record<SchedulePreset, string> = {
-  hourly: '0 * * * *',       // At minute 0 of every hour
-  daily: '0 2 * * *',        // At 2:00 AM every day
-  weekly: '0 2 * * 0',       // At 2:00 AM every Sunday
-  monthly: '0 2 1 * *',      // At 2:00 AM on the 1st of each month
-  custom: '',                // User-defined
+  hourly: '0 * * * *', // At minute 0 of every hour
+  daily: '0 2 * * *', // At 2:00 AM every day
+  weekly: '0 2 * * 0', // At 2:00 AM every Sunday
+  monthly: '0 2 1 * *', // At 2:00 AM on the 1st of each month
+  custom: '', // User-defined
 };
 
 class SchedulerService {
@@ -90,19 +90,31 @@ class SchedulerService {
       return;
     }
 
-    const task = cron.schedule(cronExpr, async () => {
-      await this.executeSchedule(schedule.id);
-    }, {
-      scheduled: true,
-      timezone: this.currentTimezone,
-    });
+    const task = cron.schedule(
+      cronExpr,
+      async () => {
+        await this.executeSchedule(schedule.id);
+      },
+      {
+        scheduled: true,
+        timezone: this.currentTimezone,
+      }
+    );
 
     this.scheduledTasks.set(schedule.id, task);
 
     // Calculate and store next run time
     await this.updateNextRunTime(schedule.id, cronExpr);
 
-    log.info({ scheduleName: schedule.name, scheduleId: schedule.id, cronExpr, timezone: this.currentTimezone }, 'Scheduled job');
+    log.info(
+      {
+        scheduleName: schedule.name,
+        scheduleId: schedule.id,
+        cronExpr,
+        timezone: this.currentTimezone,
+      },
+      'Scheduled job'
+    );
   }
 
   // Remove a scheduled job
@@ -137,7 +149,10 @@ class SchedulerService {
       // Get source connection
       const sourceConn = await savedConnectionStore.getById(schedule.sourceConnectionId);
       if (!sourceConn) {
-        log.error({ connectionId: schedule.sourceConnectionId, scheduleId }, 'Source connection not found');
+        log.error(
+          { connectionId: schedule.sourceConnectionId, scheduleId },
+          'Source connection not found'
+        );
         return undefined;
       }
 
@@ -152,24 +167,29 @@ class SchedulerService {
       log.info({ scheduleName: schedule.name, scheduleId, jobId }, 'Executing schedule');
 
       // Send start notification (async, don't wait)
-      notificationService.notify({
-        type: 'job_started',
-        scheduleName: schedule.name,
-        jobType: schedule.jobType,
-        jobId,
-        timestamp: new Date().toISOString(),
-      }).catch((err) => log.error({ err }, 'Failed to send start notification'));
+      notificationService
+        .notify({
+          type: 'job_started',
+          scheduleName: schedule.name,
+          jobType: schedule.jobType,
+          jobId,
+          timestamp: new Date().toISOString(),
+        })
+        .catch((err) => log.error({ err }, 'Failed to send start notification'));
 
       if (schedule.jobType === 'backup') {
-        await exportService.export({
-          source: {
-            url: sourceConn.instanceUrl,
-            username: sourceConn.username,
-            password: sourceConn.password,
+        await exportService.export(
+          {
+            source: {
+              url: sourceConn.instanceUrl,
+              username: sourceConn.username,
+              password: sourceConn.password,
+            },
+            options: schedule.options,
+            dryRun: false,
           },
-          options: schedule.options,
-          dryRun: false,
-        }, jobId);
+          jobId
+        );
 
         // Apply retention policy after successful backup
         if (schedule.retentionCount && schedule.retentionCount > 0) {
@@ -182,20 +202,23 @@ class SchedulerService {
           throw new Error(`Destination connection ${schedule.destinationConnectionId} not found`);
         }
 
-        await syncService.sync({
-          source: {
-            url: sourceConn.instanceUrl,
-            username: sourceConn.username,
-            password: sourceConn.password,
+        await syncService.sync(
+          {
+            source: {
+              url: sourceConn.instanceUrl,
+              username: sourceConn.username,
+              password: sourceConn.password,
+            },
+            destination: {
+              url: destConn.instanceUrl,
+              username: destConn.username,
+              password: destConn.password,
+            },
+            options: schedule.options,
+            dryRun: false,
           },
-          destination: {
-            url: destConn.instanceUrl,
-            username: destConn.username,
-            password: destConn.password,
-          },
-          options: schedule.options,
-          dryRun: false,
-        }, jobId);
+          jobId
+        );
       }
 
       // Record success
@@ -218,16 +241,17 @@ class SchedulerService {
 
       // Send appropriate completion notification (async, don't wait)
       const notificationType = totalErrors > 0 ? 'job_completed_with_errors' : 'job_completed';
-      notificationService.notify({
-        type: notificationType,
-        scheduleName: schedule.name,
-        jobType: schedule.jobType,
-        jobId,
-        timestamp: new Date().toISOString(),
-        duration: Date.now() - startTime,
-        ...(totalErrors > 0 && { errorCount: totalErrors }),
-      }).catch((err) => log.error({ err }, 'Failed to send completion notification'));
-
+      notificationService
+        .notify({
+          type: notificationType,
+          scheduleName: schedule.name,
+          jobType: schedule.jobType,
+          jobId,
+          timestamp: new Date().toISOString(),
+          duration: Date.now() - startTime,
+          ...(totalErrors > 0 && { errorCount: totalErrors }),
+        })
+        .catch((err) => log.error({ err }, 'Failed to send completion notification'));
     } catch (error: any) {
       log.error({ err: error, scheduleId }, 'Schedule failed');
       // Record failure
@@ -236,15 +260,17 @@ class SchedulerService {
 
         // Send failure notification (async, don't wait)
         if (schedule) {
-          notificationService.notify({
-            type: 'job_failed',
-            scheduleName: schedule.name,
-            jobType: schedule.jobType,
-            jobId,
-            timestamp: new Date().toISOString(),
-            error: error.message,
-            duration: Date.now() - startTime,
-          }).catch((err) => log.error({ err }, 'Failed to send failure notification'));
+          notificationService
+            .notify({
+              type: 'job_failed',
+              scheduleName: schedule.name,
+              jobType: schedule.jobType,
+              jobId,
+              timestamp: new Date().toISOString(),
+              error: error.message,
+              duration: Date.now() - startTime,
+            })
+            .catch((err) => log.error({ err }, 'Failed to send failure notification'));
         }
       }
     } finally {
@@ -317,7 +343,10 @@ class SchedulerService {
       const completedJobIds = await scheduleStore.getCompletedBackupJobIds(scheduleId);
 
       if (completedJobIds.length <= retentionCount) {
-        log.debug({ backupCount: completedJobIds.length, retentionCount }, 'Retention: no cleanup needed');
+        log.debug(
+          { backupCount: completedJobIds.length, retentionCount },
+          'Retention: no cleanup needed'
+        );
         return;
       }
 
@@ -332,11 +361,17 @@ class SchedulerService {
       // Delete the history entries for deleted backups
       if (result.deleted.length > 0) {
         await scheduleStore.deleteHistoryEntries(result.deleted);
-        log.info({ cleanedUp: result.deleted.length }, 'Retention: Cleaned up old backups and history entries');
+        log.info(
+          { cleanedUp: result.deleted.length },
+          'Retention: Cleaned up old backups and history entries'
+        );
       }
 
       if (result.errors.length > 0) {
-        log.error({ errorCount: result.errors.length, errors: result.errors }, 'Retention: Encountered errors during cleanup');
+        log.error(
+          { errorCount: result.errors.length, errors: result.errors },
+          'Retention: Encountered errors during cleanup'
+        );
       }
     } catch (error) {
       log.error({ err: error, scheduleId }, 'Retention: Failed to apply retention policy');

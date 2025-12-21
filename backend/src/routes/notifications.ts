@@ -53,7 +53,10 @@ function validateProviderInput(input: NotificationProviderInput): string | null 
       if (!config.webhookUrl) {
         return 'Discord config requires webhookUrl';
       }
-      if (!config.webhookUrl.startsWith('https://discord.com/api/webhooks/') && !config.webhookUrl.startsWith('https://discordapp.com/api/webhooks/')) {
+      if (
+        !config.webhookUrl.startsWith('https://discord.com/api/webhooks/') &&
+        !config.webhookUrl.startsWith('https://discordapp.com/api/webhooks/')
+      ) {
         return 'Invalid Discord webhook URL';
       }
       break;

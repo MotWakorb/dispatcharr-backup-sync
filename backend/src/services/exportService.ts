@@ -15,7 +15,9 @@ const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
 
 export class ExportService {
-  private backupDir = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'backups') : path.join(process.cwd(), 'data', 'backups');
+  private backupDir = process.env.DATA_DIR
+    ? path.join(process.env.DATA_DIR, 'backups')
+    : path.join(process.cwd(), 'data', 'backups');
 
   private throwIfCancelled(jobId: string) {
     const job = jobManager.getJob(jobId);
@@ -110,11 +112,16 @@ export class ExportService {
         const allGroups = await client.get('/api/channels/groups/');
         // Filter out groups created by M3U sources (those with m3u_account_count > 0)
         const manualGroups = Array.isArray(allGroups)
-          ? allGroups.filter((group: any) => !group.m3u_account_count || group.m3u_account_count === 0)
+          ? allGroups.filter(
+              (group: any) => !group.m3u_account_count || group.m3u_account_count === 0
+            )
           : allGroups;
         exportData.data.channelGroups = manualGroups;
         currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Exported ${Array.isArray(manualGroups) ? manualGroups.length : 0} channel groups`);
+        jobManager.addLog(
+          jobId,
+          `Exported ${Array.isArray(manualGroups) ? manualGroups.length : 0} channel groups`
+        );
       }
 
       // Export Channel Profiles
@@ -123,19 +130,27 @@ export class ExportService {
         const profiles = await client.get('/api/channels/profiles/');
 
         // The profile objects already contain the channel IDs in the 'channels' array
-        const profilesWithChannels = (Array.isArray(profiles) ? profiles : []).map((profile: any) => {
-          const channelIds = Array.isArray(profile.channels) ? profile.channels : [];
-          jobManager.addLog(jobId, `Profile "${profile.name}" (ID: ${profile.id}): has ${channelIds.length} channels`);
+        const profilesWithChannels = (Array.isArray(profiles) ? profiles : []).map(
+          (profile: any) => {
+            const channelIds = Array.isArray(profile.channels) ? profile.channels : [];
+            jobManager.addLog(
+              jobId,
+              `Profile "${profile.name}" (ID: ${profile.id}): has ${channelIds.length} channels`
+            );
 
-          return {
-            ...profile,
-            enabled_channels: channelIds
-          };
-        });
+            return {
+              ...profile,
+              enabled_channels: channelIds,
+            };
+          }
+        );
 
         exportData.data.channelProfiles = profilesWithChannels;
         currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles with channel associations`);
+        jobManager.addLog(
+          jobId,
+          `Exported ${Array.isArray(profiles) ? profiles.length : 0} channel profiles with channel associations`
+        );
       }
 
       // Export Channels
@@ -226,17 +241,30 @@ export class ExportService {
         // Debug: Log channels with logo assignments for troubleshooting
         if (channelsWithStreams.length > 0) {
           const firstChannel = channelsWithStreams[0];
-          const channelKeys = Object.keys(firstChannel).filter(k => !k.startsWith('_') && k !== 'streams');
+          const channelKeys = Object.keys(firstChannel).filter(
+            (k) => !k.startsWith('_') && k !== 'streams'
+          );
           jobManager.addLog(jobId, `Sample exported channel fields: ${channelKeys.join(', ')}`);
-          jobManager.addLog(jobId, `First channel stream_profile_id: ${firstChannel.stream_profile_id}, logo_source_id: ${firstChannel.logo_source_id}, logo_name: ${firstChannel.logo_name}`);
+          jobManager.addLog(
+            jobId,
+            `First channel stream_profile_id: ${firstChannel.stream_profile_id}, logo_source_id: ${firstChannel.logo_source_id}, logo_name: ${firstChannel.logo_name}`
+          );
 
           // Log all channel logo assignments for debugging
-          const channelsWithLogos = channelsWithStreams.filter((ch: any) => ch.logo_source_id || ch.logo_name);
-          jobManager.addLog(jobId, `DEBUG: ${channelsWithLogos.length} channels have logo assignments`);
+          const channelsWithLogos = channelsWithStreams.filter(
+            (ch: any) => ch.logo_source_id || ch.logo_name
+          );
+          jobManager.addLog(
+            jobId,
+            `DEBUG: ${channelsWithLogos.length} channels have logo assignments`
+          );
           // Log first 20 for debugging
           for (let i = 0; i < Math.min(20, channelsWithLogos.length); i++) {
             const ch = channelsWithLogos[i];
-            jobManager.addLog(jobId, `DEBUG EXPORT: Channel "${ch.name}" (id=${ch.id}) -> logo_source_id=${ch.logo_source_id}, logo_name="${ch.logo_name}"`);
+            jobManager.addLog(
+              jobId,
+              `DEBUG EXPORT: Channel "${ch.name}" (id=${ch.id}) -> logo_source_id=${ch.logo_source_id}, logo_name="${ch.logo_name}"`
+            );
           }
         }
 
@@ -265,11 +293,11 @@ export class ExportService {
           const { username, password, ...rest } = acct;
           const channel_groups = Array.isArray(rest.channel_groups)
             ? rest.channel_groups.map((cg: any) => ({
-              ...cg,
-              channel_group_name:
-                cg?.channel_group_name ||
-                (cg?.channel_group != null ? channelGroupMap[cg.channel_group] : undefined),
-            }))
+                ...cg,
+                channel_group_name:
+                  cg?.channel_group_name ||
+                  (cg?.channel_group != null ? channelGroupMap[cg.channel_group] : undefined),
+              }))
             : rest.channel_groups;
 
           return {
@@ -293,7 +321,10 @@ export class ExportService {
           jobId
         );
         currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Exported ${exportData.data.streamProfiles.length} stream profiles`);
+        jobManager.addLog(
+          jobId,
+          `Exported ${exportData.data.streamProfiles.length} stream profiles`
+        );
       }
 
       // Export User Agents
@@ -338,9 +369,15 @@ export class ExportService {
         jobManager.addLog(jobId, `Exported ${epgDataCount} EPG data rows`);
 
         if (epgDataCount === 0) {
-          jobManager.addLog(jobId, 'WARNING: No EPG data found on source instance! EPG sources may not have downloaded/parsed data yet. Channel EPG matching during import will rely on Dispatcharr\'s server-side matcher.');
+          jobManager.addLog(
+            jobId,
+            "WARNING: No EPG data found on source instance! EPG sources may not have downloaded/parsed data yet. Channel EPG matching during import will rely on Dispatcharr's server-side matcher."
+          );
         } else {
-          jobManager.addLog(jobId, `EPG data will be included in backup file for accurate channel matching during import`);
+          jobManager.addLog(
+            jobId,
+            `EPG data will be included in backup file for accurate channel matching during import`
+          );
         }
       }
 
@@ -349,7 +386,7 @@ export class ExportService {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Exporting plugins...');
         const pluginsResp = await client.get('/api/plugins/plugins/');
         // API returns {"plugins": [...]} - extract the array
-        const plugins = Array.isArray(pluginsResp) ? pluginsResp : (pluginsResp?.plugins || []);
+        const plugins = Array.isArray(pluginsResp) ? pluginsResp : pluginsResp?.plugins || [];
         exportData.data.plugins = plugins;
         currentProgress += progressPerStep;
         jobManager.addLog(jobId, `Exported ${plugins.length} plugins`);
@@ -361,7 +398,10 @@ export class ExportService {
         const dvrRules = await client.get('/api/channels/recurring-rules/');
         exportData.data.dvrRules = dvrRules;
         currentProgress += progressPerStep;
-        jobManager.addLog(jobId, `Exported ${Array.isArray(dvrRules) ? dvrRules.length : 0} DVR rules`);
+        jobManager.addLog(
+          jobId,
+          `Exported ${Array.isArray(dvrRules) ? dvrRules.length : 0} DVR rules`
+        );
       }
 
       // Export Comskip Config
@@ -409,14 +449,24 @@ export class ExportService {
         currentProgress += progressPerStep;
         const autoCreatedCount = channels.length - manualChannels.length;
         const excludedLogos = allLogos.length - logosToExport.length;
-        jobManager.addLog(jobId, `Found ${channels.length} channels (${manualChannels.length} manual, ${autoCreatedCount} auto-created)`);
-        jobManager.addLog(jobId, `Found ${allLogos.length} total logos, ${logosToExport.length} are manual channel logos (excluded ${excludedLogos} VOD/auto-created logos)`);
+        jobManager.addLog(
+          jobId,
+          `Found ${channels.length} channels (${manualChannels.length} manual, ${autoCreatedCount} auto-created)`
+        );
+        jobManager.addLog(
+          jobId,
+          `Found ${allLogos.length} total logos, ${logosToExport.length} are manual channel logos (excluded ${excludedLogos} VOD/auto-created logos)`
+        );
       }
 
       if (request.dryRun) {
         // For dry run, include logo count in summary
         if (logosToExport.length > 0) {
-          exportData.data.logos = logosToExport.map((l: any) => ({ id: l.id, name: l.name, url: l.url }));
+          exportData.data.logos = logosToExport.map((l: any) => ({
+            id: l.id,
+            name: l.name,
+            url: l.url,
+          }));
         }
         jobManager.completeJob(jobId, {
           message: 'Dry run completed - no files created',
@@ -437,7 +487,11 @@ export class ExportService {
         // Logo download gets 35% of progress (from 60% to 95%)
         const logoStartProgress = 60;
         const logoEndProgress = 95;
-        jobManager.setProgress(jobId, logoStartProgress, `Downloading ${logosToExport.length} logos...`);
+        jobManager.setProgress(
+          jobId,
+          logoStartProgress,
+          `Downloading ${logosToExport.length} logos...`
+        );
         const logosDir = path.join(workDir, 'logos');
         await mkdir(logosDir, { recursive: true });
 
@@ -447,13 +501,17 @@ export class ExportService {
 
         // Track used filenames to avoid collisions, and store metadata
         const usedFilenames = new Set<string>();
-        const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
+        const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> =
+          [];
 
         // Log first 10 logos to verify order
         if (logosToExport.length > 0) {
           jobManager.addLog(jobId, `First 10 logos to export (in API order):`);
           for (let i = 0; i < Math.min(10, logosToExport.length); i++) {
-            jobManager.addLog(jobId, `  [${i}] id=${logosToExport[i].id}, name="${logosToExport[i].name}"`);
+            jobManager.addLog(
+              jobId,
+              `  [${i}] id=${logosToExport[i].id}, name="${logosToExport[i].name}"`
+            );
           }
         }
 
@@ -463,8 +521,14 @@ export class ExportService {
 
           // Update progress every 50 logos
           if (i % 50 === 0) {
-            const logoProgress = logoStartProgress + ((i / logosToExport.length) * (logoEndProgress - logoStartProgress));
-            jobManager.setProgress(jobId, Math.round(logoProgress), `Downloading logos: ${i + 1}/${logosToExport.length}...`);
+            const logoProgress =
+              logoStartProgress +
+              (i / logosToExport.length) * (logoEndProgress - logoStartProgress);
+            jobManager.setProgress(
+              jobId,
+              Math.round(logoProgress),
+              `Downloading logos: ${i + 1}/${logosToExport.length}...`
+            );
           }
 
           // Log every 500 logos
@@ -492,7 +556,10 @@ export class ExportService {
 
             if (buffer.length < 100) {
               tooSmall++;
-              jobManager.addLog(jobId, `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`);
+              jobManager.addLog(
+                jobId,
+                `[SKIP] Logo "${logoName}" (id=${logo.id}) - too small (${buffer.length} bytes)`
+              );
               continue;
             }
 
@@ -505,7 +572,7 @@ export class ExportService {
             else if (urlLower.includes('.svg')) ext = 'svg';
 
             // Use logo name or ID as filename, handle collisions
-            let safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const safeName = logoName.replace(/[^a-zA-Z0-9_-]/g, '_');
             let filename = `${safeName}.${ext}`;
             let suffix = 2;
 
@@ -517,7 +584,7 @@ export class ExportService {
             usedFilenames.add(filename.toLowerCase());
 
             // Calculate checksum for verification
-            const checksum = buffer.slice(0, 100).reduce((sum, byte) => (sum + byte) & 0xFFFF, 0);
+            const checksum = buffer.slice(0, 100).reduce((sum, byte) => (sum + byte) & 0xffff, 0);
 
             const filePath = path.join(logosDir, filename);
             await writeFile(filePath, buffer);
@@ -531,13 +598,22 @@ export class ExportService {
 
             downloaded++;
             if (downloaded <= 30) {
-              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes, checksum=${checksum.toString(16)} -> ${filename}`);
+              jobManager.addLog(
+                jobId,
+                `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes, checksum=${checksum.toString(16)} -> ${filename}`
+              );
             } else {
-              jobManager.addLog(jobId, `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`);
+              jobManager.addLog(
+                jobId,
+                `[OK] Logo "${logoName}" (id=${logo.id}) - ${buffer.length} bytes -> ${filename}`
+              );
             }
           } catch (error: any) {
             failed++;
-            jobManager.addLog(jobId, `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`);
+            jobManager.addLog(
+              jobId,
+              `[FAIL] Logo "${logoName}" (id=${logo.id}) - ${error.message}`
+            );
           }
         }
 
@@ -547,10 +623,16 @@ export class ExportService {
           logoMetadata.sort((a, b) => a.filename.localeCompare(b.filename));
           const metadataPath = path.join(logosDir, 'metadata.json');
           await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
-          jobManager.addLog(jobId, `Saved logo metadata for ${logoMetadata.length} logos (sorted alphabetically)`);
+          jobManager.addLog(
+            jobId,
+            `Saved logo metadata for ${logoMetadata.length} logos (sorted alphabetically)`
+          );
         }
 
-        jobManager.addLog(jobId, `Logos: ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`);
+        jobManager.addLog(
+          jobId,
+          `Logos: ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`
+        );
         exportData.data.logos = { count: downloaded, failed, tooSmall };
       }
 

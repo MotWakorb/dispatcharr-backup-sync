@@ -24,7 +24,11 @@ async function ensureStorage(): Promise<void> {
     const connections: SavedConnection[] = [];
 
     // Only add default connections if environment variables are set
-    if (process.env.DEFAULT_PROD_URL && process.env.DEFAULT_USERNAME && process.env.DEFAULT_PASSWORD) {
+    if (
+      process.env.DEFAULT_PROD_URL &&
+      process.env.DEFAULT_USERNAME &&
+      process.env.DEFAULT_PASSWORD
+    ) {
       connections.push({
         id: uuidv4(),
         name: 'Prod',
@@ -36,7 +40,11 @@ async function ensureStorage(): Promise<void> {
       });
     }
 
-    if (process.env.DEFAULT_DEV_URL && process.env.DEFAULT_USERNAME && process.env.DEFAULT_PASSWORD) {
+    if (
+      process.env.DEFAULT_DEV_URL &&
+      process.env.DEFAULT_USERNAME &&
+      process.env.DEFAULT_PASSWORD
+    ) {
       connections.push({
         id: uuidv4(),
         name: 'Dev',

@@ -82,13 +82,16 @@ class JobManager {
             if (job.startedAt) job.startedAt = new Date(job.startedAt);
             if (job.completedAt) job.completedAt = new Date(job.completedAt);
             // Avoid duplicates
-            if (!this.history.find(h => h.jobId === job.jobId)) {
+            if (!this.history.find((h) => h.jobId === job.jobId)) {
               this.history.push(job);
             }
           }
         }
 
-        logger.debug({ jobCount: this.jobs.size, historyCount: this.history.length }, 'Loaded jobs from disk');
+        logger.debug(
+          { jobCount: this.jobs.size, historyCount: this.history.length },
+          'Loaded jobs from disk'
+        );
       }
 
       // Load logs
@@ -133,7 +136,8 @@ class JobManager {
 
   createJob(jobType?: JobStatus['jobType']): string {
     const now = new Date();
-    const jobId = now.getFullYear().toString() +
+    const jobId =
+      now.getFullYear().toString() +
       String(now.getMonth() + 1).padStart(2, '0') +
       String(now.getDate()).padStart(2, '0') +
       String(now.getHours()).padStart(2, '0') +

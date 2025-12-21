@@ -144,7 +144,9 @@ export class ImportService {
       // Use & if endpoint already has query params, otherwise use ?
       const separator = endpoint.includes('?') ? '&' : '?';
       const fullEndpoint = `${endpoint}${separator}page=${page}&page_size=${pageSize}`;
-      const response = await client.get(fullEndpoint).catch(this.warnOnFail(fullEndpoint, null, jobId));
+      const response = await client
+        .get(fullEndpoint)
+        .catch(this.warnOnFail(fullEndpoint, null, jobId));
       if (!response) {
         break;
       }
@@ -176,7 +178,8 @@ export class ImportService {
     log.error({ section, label, details }, 'Import section failed');
   }
 
-  private static readonly SENSITIVE_KEYS = /password|passwd|pass|token|secret|apikey|api_key|api-key|auth|authorization|credential|bearer|jwt|session|cookie/i;
+  private static readonly SENSITIVE_KEYS =
+    /password|passwd|pass|token|secret|apikey|api_key|api-key|auth|authorization|credential|bearer|jwt|session|cookie/i;
 
   private redact(obj: any): any {
     if (!obj || typeof obj !== 'object') return obj;
@@ -206,14 +209,16 @@ export class ImportService {
       }
     }
     // Redact common patterns in strings (e.g., "password=xxx" or "token: xxx")
-    return str
-      .replace(/(password|passwd|pass|token|secret|apikey|api_key|api-key|authorization|bearer|jwt)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi, '$1$2***redacted***');
+    return str.replace(
+      /(password|passwd|pass|token|secret|apikey|api_key|api-key|authorization|bearer|jwt)(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi,
+      '$1$2***redacted***'
+    );
   }
 
   private formatErrorDetails(error: any): string | Record<string, any> {
     const status = error?.response?.status;
     const statusText = error?.response?.statusText;
-    let data = error?.response?.data ?? error?.message ?? error;
+    const data = error?.response?.data ?? error?.message ?? error;
 
     const config = error?.config || {};
     const url = config?.url || config?.baseURL;
@@ -229,9 +234,15 @@ export class ImportService {
       if (typeof data === 'string') {
         const trimmed = data.trim();
         if (trimmed.startsWith('<!doctype html')) {
-          return trimmed.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+          return trimmed
+            .replace(/<[^>]+>/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
         }
-        const truncated = trimmed.length > ERROR_TRUNCATE_LENGTH ? `${trimmed.slice(0, ERROR_TRUNCATE_LENGTH)}...` : trimmed;
+        const truncated =
+          trimmed.length > ERROR_TRUNCATE_LENGTH
+            ? `${trimmed.slice(0, ERROR_TRUNCATE_LENGTH)}...`
+            : trimmed;
         return this.redactString(truncated);
       }
       if (data && typeof data === 'object') return this.redact(data);
@@ -246,7 +257,7 @@ export class ImportService {
     if (requestData) result.request = requestData;
     if (responsePayload !== undefined) result.response = responsePayload;
 
-    return Object.keys(result).length ? result : (error?.message || 'Unknown error');
+    return Object.keys(result).length ? result : error?.message || 'Unknown error';
   }
 
   async import(request: ImportRequest, jobId: string): Promise<void> {
@@ -269,22 +280,28 @@ export class ImportService {
 
         const lockedAccounts = m3uAccounts.filter((acc: any) => acc.locked === true);
         if (lockedAccounts.length > 0) {
-          jobManager.addLog(jobId, `Locked accounts: ${lockedAccounts.map((a: any) => a.name).join(', ')}`);
+          jobManager.addLog(
+            jobId,
+            `Locked accounts: ${lockedAccounts.map((a: any) => a.name).join(', ')}`
+          );
         }
 
         // Try multiple possible names for the custom account
-        const customAccount = m3uAccounts.find((acc: any) =>
-          acc.locked === true && (
-            acc.name === 'Custom' ||
-            acc.name === 'Custom Streams' ||
-            acc.name === 'Manual' ||
-            acc.name === 'Manual Streams' ||
-            acc.name?.toLowerCase().includes('custom')
-          )
+        const customAccount = m3uAccounts.find(
+          (acc: any) =>
+            acc.locked === true &&
+            (acc.name === 'Custom' ||
+              acc.name === 'Custom Streams' ||
+              acc.name === 'Manual' ||
+              acc.name === 'Manual Streams' ||
+              acc.name?.toLowerCase().includes('custom'))
         );
 
         if (!customAccount) {
-          jobManager.addLog(jobId, 'Creating special "Custom" M3U account (required for custom streams)');
+          jobManager.addLog(
+            jobId,
+            'Creating special "Custom" M3U account (required for custom streams)'
+          );
           await client.post('/api/m3u/accounts/', {
             name: 'Custom',
             url: 'http://localhost/custom.m3u',
@@ -296,7 +313,10 @@ export class ImportService {
           jobManager.addLog(jobId, `Custom M3U account already exists: ${customAccount.name}`);
         }
       } catch (error: any) {
-        jobManager.addLog(jobId, `Warning: Could not ensure Custom M3U account exists: ${error.message}`);
+        jobManager.addLog(
+          jobId,
+          `Warning: Could not ensure Custom M3U account exists: ${error.message}`
+        );
       }
 
       // Decode and save uploaded file
@@ -331,18 +351,26 @@ export class ImportService {
       const data = (configData as any)?.data ?? {};
 
       // Log what sections are available in the backup file
-      const availableSections = Object.keys(data).filter(key => data[key] != null);
-      jobManager.addLog(jobId, `Backup file contains sections: ${availableSections.join(', ') || 'none'}`);
+      const availableSections = Object.keys(data).filter((key) => data[key] != null);
+      jobManager.addLog(
+        jobId,
+        `Backup file contains sections: ${availableSections.join(', ') || 'none'}`
+      );
 
       // Log import options
-      const enabledOptions = Object.keys(request.options).filter(k => (request.options as any)[k] === true);
+      const enabledOptions = Object.keys(request.options).filter(
+        (k) => (request.options as any)[k] === true
+      );
       jobManager.addLog(jobId, `Import options enabled: ${enabledOptions.join(', ') || 'none'}`);
 
       if (availableSections.includes('epgData')) {
         const epgDataCount = Array.isArray(data.epgData) ? data.epgData.length : 'not an array';
         jobManager.addLog(jobId, `Backup file contains ${epgDataCount} EPG data entries`);
       } else {
-        jobManager.addLog(jobId, 'WARNING: Backup file does NOT contain epgData section - export may have been created without EPG Sources enabled or before EPG data was downloaded');
+        jobManager.addLog(
+          jobId,
+          'WARNING: Backup file does NOT contain epgData section - export may have been created without EPG Sources enabled or before EPG data was downloaded'
+        );
       }
 
       // If logos were provided as images in the archive, fold them into config data
@@ -353,7 +381,10 @@ export class ImportService {
           data.logos = logoFiles;
           jobManager.addLog(jobId, `Loaded ${logoFiles.length} logos from archive logos/ folder`);
         } else {
-          jobManager.addLog(jobId, `No logo files found in archive logos/ folder (data.logos was ${typeof data.logos}: ${JSON.stringify(data.logos)})`);
+          jobManager.addLog(
+            jobId,
+            `No logo files found in archive logos/ folder (data.logos was ${typeof data.logos}: ${JSON.stringify(data.logos)})`
+          );
         }
       }
 
@@ -375,11 +406,7 @@ export class ImportService {
       if (data.m3uSources && this.isEnabled('m3uSources', request.options)) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing M3U sources...');
-        results.imported.m3uSources = await this.importM3USources(
-          client,
-          data.m3uSources,
-          jobId
-        );
+        results.imported.m3uSources = await this.importM3USources(client, data.m3uSources, jobId);
         currentProgress += progressPerStep;
       }
 
@@ -387,10 +414,7 @@ export class ImportService {
       if (data.epgSources && this.isEnabled('epgSources', request.options)) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing EPG sources...');
-        const epgSourcesResult = await this.importEPGSources(
-          client,
-          data.epgSources
-        );
+        const epgSourcesResult = await this.importEPGSources(client, data.epgSources);
         results.imported.epgSources = epgSourcesResult;
         epgSourceMap = epgSourcesResult.idMap;
         currentProgress += progressPerStep;
@@ -401,13 +425,20 @@ export class ImportService {
       // 2. EPG data is automatically generated when EPG sources download and parse their feeds
       // 3. We only use EPG data from backup as reference metadata for channel matching (see setEpgForChannels below)
       if (data.epgData && Array.isArray(data.epgData) && data.epgData.length > 0) {
-        jobManager.addLog(jobId, `Backup contains ${data.epgData.length} EPG data entries - will be used for channel matching only (not imported)`);
+        jobManager.addLog(
+          jobId,
+          `Backup contains ${data.epgData.length} EPG data entries - will be used for channel matching only (not imported)`
+        );
       }
 
       // Wait for EPG data to be downloaded from EPG sources
       // This is necessary so the target system has fresh EPG data for matching
       if (data.epgSources && this.isEnabled('epgSources', request.options)) {
-        jobManager.setProgress(jobId, currentProgress, 'Waiting for EPG data to be downloaded from sources...');
+        jobManager.setProgress(
+          jobId,
+          currentProgress,
+          'Waiting for EPG data to be downloaded from sources...'
+        );
         await this.waitForEpgDataReady(client, jobId);
         currentProgress += progressPerStep;
       }
@@ -427,10 +458,7 @@ export class ImportService {
       if (data.channelGroups && this.isEnabled('channelGroups', request.options)) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing channel groups...');
-        const channelGroupResult = await this.importChannelGroups(
-          client,
-          data.channelGroups
-        );
+        const channelGroupResult = await this.importChannelGroups(client, data.channelGroups);
         results.imported.channelGroups = channelGroupResult;
         channelGroupMap = channelGroupResult.idMap;
         jobManager.addLog(jobId, `Channel group ID mapping: ${JSON.stringify(channelGroupMap)}`);
@@ -442,9 +470,14 @@ export class ImportService {
       } else if (data.channelGroups && data.channels) {
         // Even if not importing channel groups (they already exist), we need to build the mapping
         // so that channels can be assigned to the correct groups
-        jobManager.addLog(jobId, 'Building channel group ID mapping (groups not being imported but needed for channel assignment)...');
+        jobManager.addLog(
+          jobId,
+          'Building channel group ID mapping (groups not being imported but needed for channel assignment)...'
+        );
         channelGroupMap = {}; // Initialize the map
-        const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+        const existingGroups = await client
+          .get('/api/channels/groups/')
+          .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
         const groupByName: Record<string, number> = Array.isArray(existingGroups)
           ? Object.fromEntries(existingGroups.map((g: any) => [g.name, g.id]))
           : {};
@@ -455,7 +488,10 @@ export class ImportService {
             channelGroupMap[backupGroup.id] = groupByName[backupGroup.name];
           }
         }
-        jobManager.addLog(jobId, `Channel group ID mapping (existing groups): ${JSON.stringify(channelGroupMap)}`);
+        jobManager.addLog(
+          jobId,
+          `Channel group ID mapping (existing groups): ${JSON.stringify(channelGroupMap)}`
+        );
       }
 
       // Stream profiles should be in place before channels
@@ -472,20 +508,32 @@ export class ImportService {
         currentProgress += progressPerStep;
       } else if (data.streamProfiles && data.channels) {
         // Even if not importing stream profiles (they already exist), build the mapping for channel assignment
-        jobManager.addLog(jobId, 'Building stream profile ID mapping (profiles not being imported but needed for channel assignment)...');
+        jobManager.addLog(
+          jobId,
+          'Building stream profile ID mapping (profiles not being imported but needed for channel assignment)...'
+        );
         streamProfileMap = {}; // Initialize the map
-        const existingProfiles = await client.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
+        const existingProfiles = await client
+          .get('/api/core/streamprofiles/')
+          .catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
         const profileByName: Record<string, number> = Array.isArray(existingProfiles)
           ? Object.fromEntries(existingProfiles.map((p: any) => [p.name, p.id]))
           : {};
 
         // Map backup profile IDs to target profile IDs by name
         for (const backupProfile of data.streamProfiles) {
-          if (backupProfile?.id != null && backupProfile?.name && profileByName[backupProfile.name]) {
+          if (
+            backupProfile?.id != null &&
+            backupProfile?.name &&
+            profileByName[backupProfile.name]
+          ) {
             streamProfileMap[backupProfile.id] = profileByName[backupProfile.name];
           }
         }
-        jobManager.addLog(jobId, `Stream profile ID mapping (existing profiles): ${JSON.stringify(streamProfileMap)}`);
+        jobManager.addLog(
+          jobId,
+          `Stream profile ID mapping (existing profiles): ${JSON.stringify(streamProfileMap)}`
+        );
       }
 
       // Everything else follows the new prerequisites
@@ -497,7 +545,11 @@ export class ImportService {
         jobManager.setProgress(jobId, currentProgress, 'Importing logos...');
         jobManager.addLog(jobId, '[SIMPLE IMPORT] Using new simple logo import implementation');
         const logoResult = await simpleImportLogos(client, data.logos, jobId);
-        results.imported.logos = { imported: logoResult.imported, skipped: 0, errors: logoResult.errors };
+        results.imported.logos = {
+          imported: logoResult.imported,
+          skipped: 0,
+          errors: logoResult.errors,
+        };
         logoMap = logoResult.logoMap;
         currentProgress += progressPerStep;
       }
@@ -520,13 +572,24 @@ export class ImportService {
       }
 
       // Apply channel profile associations AFTER channels are imported
-      jobManager.addLog(jobId, `Checking channel profile associations: channelProfiles=${!!data.channelProfiles}, channels=${!!data.channels}, channelProfiles enabled=${this.isEnabled('channelProfiles', request.options)}, channels enabled=${this.isEnabled('channels', request.options)}`);
+      jobManager.addLog(
+        jobId,
+        `Checking channel profile associations: channelProfiles=${!!data.channelProfiles}, channels=${!!data.channels}, channelProfiles enabled=${this.isEnabled('channelProfiles', request.options)}, channels enabled=${this.isEnabled('channels', request.options)}`
+      );
 
-      if (data.channelProfiles && data.channels &&
-          this.isEnabled('channelProfiles', request.options) &&
-          this.isEnabled('channels', request.options)) {
+      if (
+        data.channelProfiles &&
+        data.channels &&
+        this.isEnabled('channelProfiles', request.options) &&
+        this.isEnabled('channels', request.options)
+      ) {
         jobManager.setProgress(jobId, currentProgress, 'Applying channel profile associations...');
-        await this.applyChannelProfileAssociations(client, data.channelProfiles, data.channels, jobId);
+        await this.applyChannelProfileAssociations(
+          client,
+          data.channelProfiles,
+          data.channels,
+          jobId
+        );
       } else {
         jobManager.addLog(jobId, `Skipping channel profile associations due to unmet conditions`);
       }
@@ -535,11 +598,7 @@ export class ImportService {
       if (data.userAgents && this.isEnabled('userAgents', request.options)) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing user agents...');
-        const userAgentResult = await this.importUserAgents(
-          client,
-          data.userAgents,
-          jobId
-        );
+        const userAgentResult = await this.importUserAgents(client, data.userAgents, jobId);
         results.imported.userAgents = userAgentResult;
         userAgentMap = userAgentResult.idMap;
         currentProgress += progressPerStep;
@@ -667,8 +726,13 @@ export class ImportService {
       const targetPath = path.join(extractDir, entry.entryName);
       // Resolve to absolute path and verify it's within extractDir (path traversal protection)
       const resolvedTargetPath = path.resolve(targetPath);
-      if (!resolvedTargetPath.startsWith(resolvedExtractDir + path.sep) && resolvedTargetPath !== resolvedExtractDir) {
-        throw new Error(`Zip entry "${entry.entryName}" attempts path traversal outside extraction directory`);
+      if (
+        !resolvedTargetPath.startsWith(resolvedExtractDir + path.sep) &&
+        resolvedTargetPath !== resolvedExtractDir
+      ) {
+        throw new Error(
+          `Zip entry "${entry.entryName}" attempts path traversal outside extraction directory`
+        );
       }
       if (entry.isDirectory) {
         await mkdir(targetPath, { recursive: true });
@@ -707,11 +771,14 @@ export class ImportService {
     const logosDir = path.join(baseDir, 'logos');
     try {
       const files = await fsp.readdir(logosDir, { withFileTypes: true });
-      const images = files.filter((f) =>
-        f.isFile() && f.name.toLowerCase().match(/\.(png|jpe?g|webp|gif|svg)$/)
+      const images = files.filter(
+        (f) => f.isFile() && f.name.toLowerCase().match(/\.(png|jpe?g|webp|gif|svg)$/)
       );
       if (jobId) {
-        jobManager.addLog(jobId, `Found ${files.length} files in logos folder, ${images.length} are image files`);
+        jobManager.addLog(
+          jobId,
+          `Found ${files.length} files in logos folder, ${images.length} are image files`
+        );
       }
 
       // Try to read metadata.json for original name mapping
@@ -744,18 +811,30 @@ export class ImportService {
         jobManager.addLog(jobId, `DEBUG METADATA: First 10 metadata entries:`);
         for (let i = 0; i < Math.min(10, metadata.length); i++) {
           const entry = metadata[i];
-          jobManager.addLog(jobId, `  "${entry.filename}" -> original_name="${entry.original_name}" (source_id=${entry.source_id})`);
+          jobManager.addLog(
+            jobId,
+            `  "${entry.filename}" -> original_name="${entry.original_name}" (source_id=${entry.source_id})`
+          );
         }
       }
 
-      const logos: { name: string; data: string; ext: string; original_name?: string; source_id?: number }[] = [];
+      const logos: {
+        name: string;
+        data: string;
+        ext: string;
+        original_name?: string;
+        source_id?: number;
+      }[] = [];
 
       // CRITICAL: Sort images by filename to ensure consistent order
       // readdir() may return files in filesystem/inode order, not alphabetical
       const sortedImages = images.sort((a, b) => a.name.localeCompare(b.name));
 
       if (jobId) {
-        jobManager.addLog(jobId, `Loading ${sortedImages.length} logo files (sorted alphabetically)`);
+        jobManager.addLog(
+          jobId,
+          `Loading ${sortedImages.length} logo files (sorted alphabetically)`
+        );
       }
 
       let loggedCount = 0;
@@ -781,8 +860,13 @@ export class ImportService {
 
         // Debug: log first 20 logos loaded with more detail
         if (jobId && loggedCount < 20) {
-          const bufferChecksum = buffer.slice(0, 100).reduce((sum, byte) => (sum + byte) & 0xFFFF, 0);
-          jobManager.addLog(jobId, `DEBUG LOAD[${loggedCount}]: file="${img.name}", size=${buffer.length}, checksum=${bufferChecksum.toString(16)}, original_name="${originalName || 'NONE'}", source_id=${sourceId || 'NONE'}`);
+          const bufferChecksum = buffer
+            .slice(0, 100)
+            .reduce((sum, byte) => (sum + byte) & 0xffff, 0);
+          jobManager.addLog(
+            jobId,
+            `DEBUG LOAD[${loggedCount}]: file="${img.name}", size=${buffer.length}, checksum=${bufferChecksum.toString(16)}, original_name="${originalName || 'NONE'}", source_id=${sourceId || 'NONE'}`
+          );
           loggedCount++;
         }
 
@@ -925,7 +1009,7 @@ export class ImportService {
   ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/channels/groups/');
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     const idMap: Record<string | number, number> = {};
     const groupDetails: Array<{ backupId: number; backupName: string; targetId: number }> = [];
@@ -964,7 +1048,7 @@ export class ImportService {
   ): Promise<ImportResult> {
     const existing = await client.get('/api/channels/profiles/');
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     for (const profile of profiles) {
@@ -994,24 +1078,33 @@ export class ImportService {
   ): Promise<void> {
     const destProfiles = await client.get('/api/channels/profiles/');
     const destChannels = await client.get('/api/channels/channels/').catch(() => ({ results: [] }));
-    const destChannelsList = Array.isArray(destChannels) ? destChannels : destChannels.results || [];
+    const destChannelsList = Array.isArray(destChannels)
+      ? destChannels
+      : destChannels.results || [];
 
     // Build a mapping from backup channel IDs to destination channel IDs
     const channelIdMap: Record<number, number> = {};
     for (const backupChannel of channels) {
       const destChannel = destChannelsList.find(
-        (dc: any) => dc.name === backupChannel.name && dc.channel_number === backupChannel.channel_number
+        (dc: any) =>
+          dc.name === backupChannel.name && dc.channel_number === backupChannel.channel_number
       );
       if (backupChannel.id && destChannel?.id) {
         channelIdMap[backupChannel.id] = destChannel.id;
       }
     }
 
-    jobManager.addLog(jobId, `Built channel ID mapping: ${Object.keys(channelIdMap).length} channels mapped`);
+    jobManager.addLog(
+      jobId,
+      `Built channel ID mapping: ${Object.keys(channelIdMap).length} channels mapped`
+    );
 
     // For each profile, apply the channel associations
     for (const backupProfile of profiles) {
-      jobManager.addLog(jobId, `Profile "${backupProfile.name}": has ${backupProfile.enabled_channels?.length || 0} enabled channels in backup`);
+      jobManager.addLog(
+        jobId,
+        `Profile "${backupProfile.name}": has ${backupProfile.enabled_channels?.length || 0} enabled channels in backup`
+      );
 
       if (!backupProfile.enabled_channels || !Array.isArray(backupProfile.enabled_channels)) {
         continue;
@@ -1019,7 +1112,10 @@ export class ImportService {
 
       const destProfile = destProfiles.find((p: any) => p.name === backupProfile.name);
       if (!destProfile) {
-        jobManager.addLog(jobId, `Profile "${backupProfile.name}" not found on destination, skipping associations`);
+        jobManager.addLog(
+          jobId,
+          `Profile "${backupProfile.name}" not found on destination, skipping associations`
+        );
         continue;
       }
 
@@ -1028,10 +1124,16 @@ export class ImportService {
         .map((backupChannelId: number) => channelIdMap[backupChannelId])
         .filter((id: number | undefined) => id != null);
 
-      jobManager.addLog(jobId, `Profile "${backupProfile.name}": mapped ${destChannelIds.length} channels (from ${backupProfile.enabled_channels.length} in backup)`);
+      jobManager.addLog(
+        jobId,
+        `Profile "${backupProfile.name}": mapped ${destChannelIds.length} channels (from ${backupProfile.enabled_channels.length} in backup)`
+      );
 
       if (destChannelIds.length === 0) {
-        jobManager.addLog(jobId, `Profile "${backupProfile.name}": no channels to enable after mapping`);
+        jobManager.addLog(
+          jobId,
+          `Profile "${backupProfile.name}": no channels to enable after mapping`
+        );
         continue;
       }
 
@@ -1048,7 +1150,7 @@ export class ImportService {
         for (const channelId of destChannelIds) {
           try {
             await client.patch(`/api/channels/profiles/${destProfile.id}/channels/${channelId}/`, {
-              enabled: true
+              enabled: true,
             });
             successCount++;
           } catch (err: any) {
@@ -1064,7 +1166,9 @@ export class ImportService {
           `Profile "${backupProfile.name}": successfully enabled ${successCount}/${destChannelIds.length} channels`
         );
       } catch (error: any) {
-        const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+        const errorDetails = error.response?.data
+          ? JSON.stringify(error.response.data)
+          : error.message;
         jobManager.addLog(
           jobId,
           `Profile "${backupProfile.name}": failed to apply associations - ${errorDetails}`
@@ -1083,10 +1187,18 @@ export class ImportService {
       logoMap?: Record<string, number>;
     }
   ): Promise<ImportResult> {
-    const existingChannels = await client.get('/api/channels/channels/').catch(this.warnOnFail('/api/channels/channels/', [], jobId));
-    const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
-    const existingProfiles = await client.get('/api/channels/profiles/').catch(this.warnOnFail('/api/channels/profiles/', [], jobId));
-    const existingM3UAccounts = await client.get('/api/m3u/accounts/').catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
+    const existingChannels = await client
+      .get('/api/channels/channels/')
+      .catch(this.warnOnFail('/api/channels/channels/', [], jobId));
+    const existingGroups = await client
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const existingProfiles = await client
+      .get('/api/channels/profiles/')
+      .catch(this.warnOnFail('/api/channels/profiles/', [], jobId));
+    const existingM3UAccounts = await client
+      .get('/api/m3u/accounts/')
+      .catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
 
     // If backup channels reference streams but none are present yet (refresh lag), wait briefly
     const backupHasStreams = Array.isArray(channels)
@@ -1118,14 +1230,14 @@ export class ImportService {
     // Find the Custom M3U account ID for creating custom streams
     let customM3UAccountId: number | undefined;
     try {
-      const customAccount = existingM3UAccounts.find((acc: any) =>
-        acc.locked === true && (
-          acc.name === 'Custom' ||
-          acc.name === 'Custom Streams' ||
-          acc.name === 'Manual' ||
-          acc.name === 'Manual Streams' ||
-          acc.name?.toLowerCase().includes('custom')
-        )
+      const customAccount = existingM3UAccounts.find(
+        (acc: any) =>
+          acc.locked === true &&
+          (acc.name === 'Custom' ||
+            acc.name === 'Custom Streams' ||
+            acc.name === 'Manual' ||
+            acc.name === 'Manual Streams' ||
+            acc.name?.toLowerCase().includes('custom'))
       );
       if (customAccount?.id) {
         customM3UAccountId = customAccount.id;
@@ -1204,20 +1316,22 @@ export class ImportService {
     jobManager.addLog(
       jobId,
       `Channel import: found ${existingList.length} existing channels, ` +
-      `${Object.keys(groupByName).length} groups, ${Object.keys(profileByName).length} profiles, ` +
-      `${Array.isArray(existingStreams) ? existingStreams.length : 0} streams`
+        `${Object.keys(groupByName).length} groups, ${Object.keys(profileByName).length} profiles, ` +
+        `${Array.isArray(existingStreams) ? existingStreams.length : 0} streams`
     );
     jobManager.addLog(
       jobId,
       `Stream lookup sizes -> byHash:${Object.keys(streamByHash).length} byTvg:${Object.keys(streamByTvgId).length} byName:${Object.keys(streamByName).length} byStation:${Object.keys(streamByStation).length}`
     );
     try {
-      const sample = (Array.isArray(existingStreams) ? existingStreams.slice(0, 5) : []).map((s: any) => ({
-        id: s?.id,
-        name: s?.name,
-        tvg_id: s?.tvg_id,
-        hash: s?.stream_hash || s?.hash,
-      }));
+      const sample = (Array.isArray(existingStreams) ? existingStreams.slice(0, 5) : []).map(
+        (s: any) => ({
+          id: s?.id,
+          name: s?.name,
+          tvg_id: s?.tvg_id,
+          hash: s?.stream_hash || s?.hash,
+        })
+      );
       jobManager.addLog(jobId, `Stream samples: ${JSON.stringify(sample)}`);
     } catch {
       // ignore sample log errors
@@ -1241,7 +1355,7 @@ export class ImportService {
     };
 
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     let unmatchedLogged = 0;
     const unmatchedLimit = 10;
@@ -1249,7 +1363,9 @@ export class ImportService {
 
     // Log first channel fields for debugging
     if (channels.length > 0 && channels[0]) {
-      const sampleFields = Object.keys(channels[0]).filter(k => !k.startsWith('_') && k !== 'streams');
+      const sampleFields = Object.keys(channels[0]).filter(
+        (k) => !k.startsWith('_') && k !== 'streams'
+      );
       jobManager.addLog(jobId, `Sample channel fields from backup: ${sampleFields.join(', ')}`);
     }
 
@@ -1275,7 +1391,10 @@ export class ImportService {
           }
           // Debug logging for first few channels
           if (!channelGroupDebugLogged && imported < 5) {
-            jobManager.addLog(jobId, `Channel "${channel.name}" group mapping: backup_id=${channel.channel_group_id} -> target_id=${mappedGroupId} (group_name="${channel.channel_group}")`);
+            jobManager.addLog(
+              jobId,
+              `Channel "${channel.name}" group mapping: backup_id=${channel.channel_group_id} -> target_id=${mappedGroupId} (group_name="${channel.channel_group}")`
+            );
           }
         }
 
@@ -1290,12 +1409,16 @@ export class ImportService {
             }
           }
           if (!channelGroupDebugLogged && imported < 5) {
-            jobManager.addLog(jobId, `Channel "${channel.name}" group fallback: group_name="${channel.channel_group}" -> target_id=${channelData.channel_group_id}`);
+            jobManager.addLog(
+              jobId,
+              `Channel "${channel.name}" group fallback: group_name="${channel.channel_group}" -> target_id=${channelData.channel_group_id}`
+            );
           }
         }
         if (imported === 4) channelGroupDebugLogged = true;
         if (channel.tvg_id != null) channelData.tvg_id = channel.tvg_id;
-        if (channel.tvc_guide_stationid != null) channelData.tvc_guide_stationid = channel.tvc_guide_stationid;
+        if (channel.tvc_guide_stationid != null)
+          channelData.tvc_guide_stationid = channel.tvc_guide_stationid;
         // Do not carry over epg_data_id; IDs are instance-specific and will fail
 
         // Map logo using logoMap
@@ -1334,11 +1457,17 @@ export class ImportService {
           if (mappedLogoId) {
             channelData.logo_id = mappedLogoId;
             if (imported < 20) {
-              jobManager.addLog(jobId, `DEBUG CHANNEL LOGO: "${channel.name}" -> logo_source_id=${logoSourceId}, logo_name="${logoName}" -> ${lookupMethod} -> logo_id=${mappedLogoId}`);
+              jobManager.addLog(
+                jobId,
+                `DEBUG CHANNEL LOGO: "${channel.name}" -> logo_source_id=${logoSourceId}, logo_name="${logoName}" -> ${lookupMethod} -> logo_id=${mappedLogoId}`
+              );
             }
           } else if (logoSourceId || logoName) {
             // Always log failures for debugging
-            jobManager.addLog(jobId, `DEBUG CHANNEL LOGO MISS: "${channel.name}" -> logo_source_id=${logoSourceId}, logo_name="${logoName}" NOT FOUND`);
+            jobManager.addLog(
+              jobId,
+              `DEBUG CHANNEL LOGO MISS: "${channel.name}" -> logo_source_id=${logoSourceId}, logo_name="${logoName}" NOT FOUND`
+            );
           }
         }
 
@@ -1346,15 +1475,24 @@ export class ImportService {
         if (mappedProfileId != null) {
           channelData.stream_profile_id = mappedProfileId;
           if (imported < 5) {
-            jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} -> target_id=${mappedProfileId}`);
+            jobManager.addLog(
+              jobId,
+              `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} -> target_id=${mappedProfileId}`
+            );
           }
         } else if (channel.stream_profile && profileByName[channel.stream_profile]) {
           channelData.stream_profile_id = profileByName[channel.stream_profile];
           if (imported < 5) {
-            jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: by_name="${channel.stream_profile}" -> target_id=${profileByName[channel.stream_profile]}`);
+            jobManager.addLog(
+              jobId,
+              `Channel "${channel.name}" stream profile: by_name="${channel.stream_profile}" -> target_id=${profileByName[channel.stream_profile]}`
+            );
           }
         } else if (imported < 5) {
-          jobManager.addLog(jobId, `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} not mapped (profileMap has ${Object.keys(opts?.streamProfileMap || {}).length} entries)`);
+          jobManager.addLog(
+            jobId,
+            `Channel "${channel.name}" stream profile: backup_id=${channel.stream_profile_id} not mapped (profileMap has ${Object.keys(opts?.streamProfileMap || {}).length} entries)`
+          );
         }
 
         // Attempt to map streams by tvg_id / station / name / stream_hash onto newly refreshed streams
@@ -1421,10 +1559,7 @@ export class ImportService {
         // If no matches, try creating custom streams from provided metadata (useful for hand-made channels)
         if (matchedStreams.size === 0 && Array.isArray(channel.streams)) {
           const creatable = channel.streams.filter(
-            (s: any) =>
-              s &&
-              typeof s === 'object' &&
-              (s.url || s.name || s.tvg_id || s.tvgId)
+            (s: any) => s && typeof s === 'object' && (s.url || s.name || s.tvg_id || s.tvgId)
           );
           for (const s of creatable) {
             try {
@@ -1432,7 +1567,9 @@ export class ImportService {
                 name: s.name || channel.name,
                 url: s.url,
                 tvg_id: s.tvg_id || s.tvgId,
-                stream_profile_id: mapProfileId(s.stream_profile_id ?? channelData.stream_profile_id),
+                stream_profile_id: mapProfileId(
+                  s.stream_profile_id ?? channelData.stream_profile_id
+                ),
                 // Don't set is_custom - let Dispatcharr infer it from m3u_account being null
               };
               if (s.stream_hash || s.hash) basePayload.stream_hash = s.stream_hash || s.hash;
@@ -1447,7 +1584,9 @@ export class ImportService {
                 basePayload.m3u_account = customM3UAccountId;
               }
               // Map channel_group ID from backup to destination system
-              const mappedGroupId = mapChannelGroupId(s.channel_group ?? channelData.channel_group_id);
+              const mappedGroupId = mapChannelGroupId(
+                s.channel_group ?? channelData.channel_group_id
+              );
               if (mappedGroupId != null) {
                 basePayload.channel_group = mappedGroupId;
               }
@@ -1500,35 +1639,37 @@ export class ImportService {
           jobManager.addLog(
             jobId,
             `Channel "${channel?.name}"#${channel?.channel_number ?? ''} has no stream matches ` +
-            `(tvg_id=${channel?.tvg_id}, station=${channel?.tvc_guide_stationid}, ` +
-            `streams in backup=${Array.isArray(channel?.streams) ? channel.streams.length : 0}, ` +
-            `tvgMatches=${matchedByTvg}, stationMatches=${matchedByStation}, ` +
-            `nameMatches=${matchedByName}, hashMatches=${matchedByHash})`
+              `(tvg_id=${channel?.tvg_id}, station=${channel?.tvc_guide_stationid}, ` +
+              `streams in backup=${Array.isArray(channel?.streams) ? channel.streams.length : 0}, ` +
+              `tvgMatches=${matchedByTvg}, stationMatches=${matchedByStation}, ` +
+              `nameMatches=${matchedByName}, hashMatches=${matchedByHash})`
           );
-          const details =
-            Array.isArray(channel?.streams)
-              ? channel.streams.slice(0, 3).map((s: any) => {
-                  const hashKey = this.normalizeKey(s?.stream_hash || s?.hash);
-                  const stvgKey = this.normalizeKey(s?.tvg_id || s?.tvgId);
-                  const snameKey = this.normalizeKey(s?.name);
-                  return {
-                    id: s?.id,
-                    name: s?.name,
-                    tvg: s?.tvg_id || s?.tvgId,
-                    hash: s?.stream_hash || s?.hash,
-                    hashHit: hashKey && streamByHash[hashKey] ? true : false,
-                    tvgHit: stvgKey && streamByTvgId[stvgKey] ? true : false,
-                    nameHit: snameKey && streamByName[snameKey] ? true : false,
-                  };
-                })
-              : [];
+          const details = Array.isArray(channel?.streams)
+            ? channel.streams.slice(0, 3).map((s: any) => {
+                const hashKey = this.normalizeKey(s?.stream_hash || s?.hash);
+                const stvgKey = this.normalizeKey(s?.tvg_id || s?.tvgId);
+                const snameKey = this.normalizeKey(s?.name);
+                return {
+                  id: s?.id,
+                  name: s?.name,
+                  tvg: s?.tvg_id || s?.tvgId,
+                  hash: s?.stream_hash || s?.hash,
+                  hashHit: hashKey && streamByHash[hashKey] ? true : false,
+                  tvgHit: stvgKey && streamByTvgId[stvgKey] ? true : false,
+                  nameHit: snameKey && streamByName[snameKey] ? true : false,
+                };
+              })
+            : [];
           jobManager.addLog(jobId, `  Backup stream samples: ${JSON.stringify(details)}`);
           unmatchedLogged++;
         }
 
         // Debug: log first few channel payloads
         if (!channelGroupDebugLogged && imported < 5) {
-          jobManager.addLog(jobId, `Channel "${channel.name}" final payload channel_group_id: ${channelData.channel_group_id}`);
+          jobManager.addLog(
+            jobId,
+            `Channel "${channel.name}" final payload channel_group_id: ${channelData.channel_group_id}`
+          );
         }
 
         if (existingChannel) {
@@ -1551,17 +1692,21 @@ export class ImportService {
     sources: any[],
     jobId: string
   ): Promise<ImportResult> {
-    const existing = await client.get('/api/m3u/accounts/').catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
-    const existingGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+    const existing = await client
+      .get('/api/m3u/accounts/')
+      .catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
+    const existingGroups = await client
+      .get('/api/channels/groups/')
+      .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
     const groupByName: Record<string, number> = Array.isArray(existingGroups)
       ? Object.fromEntries(existingGroups.map((g: any) => [g.name, g.id]))
       : {};
     const groupByXcId: Record<string, number> = Array.isArray(existingGroups)
       ? existingGroups.reduce((acc: any, g: any) => {
-        const xc = g?.custom_properties?.xc_id;
-        if (xc != null) acc[String(xc)] = g.id;
-        return acc;
-      }, {})
+          const xc = g?.custom_properties?.xc_id;
+          if (xc != null) acc[String(xc)] = g.id;
+          return acc;
+        }, {})
       : {};
     const createdGroups: Record<string, number> = {};
 
@@ -1589,7 +1734,8 @@ export class ImportService {
           const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
           const status = acct?.status || acct?.data?.status;
           const message = acct?.last_message || acct?.message || acct?.data?.last_message;
-          const readyMessage = typeof message === 'string' && message.toLowerCase().includes('m3u groups loaded');
+          const readyMessage =
+            typeof message === 'string' && message.toLowerCase().includes('m3u groups loaded');
           const busy = status && ['fetching', 'parsing'].includes(String(status));
           if (readyMessage || (!busy && status !== 'pending_setup')) {
             return { status, message };
@@ -1603,7 +1749,11 @@ export class ImportService {
     };
 
     // Wait for streams to be loaded for an M3U account
-    const waitForStreamsLoaded = async (accountId: any, accountName: string, refreshFailed: boolean = false) => {
+    const waitForStreamsLoaded = async (
+      accountId: any,
+      accountName: string,
+      refreshFailed: boolean = false
+    ) => {
       const maxAttempts = 15; // Up to 30 seconds
       let lastStreamCount = 0;
       let stableCount = 0;
@@ -1617,19 +1767,30 @@ export class ImportService {
           const message = acct?.last_message || '';
 
           // Get stream count for this M3U account
-          const streams = await this.getAllPaginated(client, `/api/channels/streams/?m3u_account=${accountId}`, 1000, jobId);
+          const streams = await this.getAllPaginated(
+            client,
+            `/api/channels/streams/?m3u_account=${accountId}`,
+            1000,
+            jobId
+          );
           const streamCount = Array.isArray(streams) ? streams.length : 0;
 
           // Only log every 3rd poll to reduce noise
           if (i % 3 === 0 || streamCount > 0) {
-            jobManager.addLog(jobId, `M3U ${accountName}: Polling... status=${status}, streams=${streamCount}`);
+            jobManager.addLog(
+              jobId,
+              `M3U ${accountName}: Polling... status=${status}, streams=${streamCount}`
+            );
           }
 
           // If status is pending_setup and refresh failed, don't wait forever
           if (status === 'pending_setup' && refreshFailed) {
             pendingSetupCount++;
             if (pendingSetupCount >= 5) {
-              jobManager.addLog(jobId, `M3U ${accountName}: Still pending_setup after refresh failed, skipping stream wait`);
+              jobManager.addLog(
+                jobId,
+                `M3U ${accountName}: Still pending_setup after refresh failed, skipping stream wait`
+              );
               return streamCount;
             }
           }
@@ -1657,7 +1818,10 @@ export class ImportService {
         await new Promise((res) => setTimeout(res, 2000));
       }
 
-      jobManager.addLog(jobId, `M3U ${accountName}: Timeout waiting for streams (got ${lastStreamCount})`);
+      jobManager.addLog(
+        jobId,
+        `M3U ${accountName}: Timeout waiting for streams (got ${lastStreamCount})`
+      );
       return lastStreamCount;
     };
     let imported = 0;
@@ -1706,11 +1870,9 @@ export class ImportService {
           channelGroupsPayload = [];
           for (const cg of source.channel_groups) {
             const raw = cg?.channel_group ?? cg;
-            const nameCandidate = cg?.name
-              || cg?.channel_group_name
-              || raw?.name
-              || raw?.channel_group_name;
-            const idCandidate = Array.isArray(raw) ? raw[0] : raw?.id ?? raw;
+            const nameCandidate =
+              cg?.name || cg?.channel_group_name || raw?.name || raw?.channel_group_name;
+            const idCandidate = Array.isArray(raw) ? raw[0] : (raw?.id ?? raw);
             const xcId = cg?.custom_properties?.xc_id ?? cg?.xc_id ?? raw?.custom_properties?.xc_id;
             let groupId: number | undefined;
 
@@ -1725,7 +1887,13 @@ export class ImportService {
             }
 
             if (groupId == null) {
-              const fallbackName = nameCandidate || (xcId != null ? `XC ${xcId}` : (idCandidate != null ? `Group ${idCandidate}` : undefined));
+              const fallbackName =
+                nameCandidate ||
+                (xcId != null
+                  ? `XC ${xcId}`
+                  : idCandidate != null
+                    ? `Group ${idCandidate}`
+                    : undefined);
               if (fallbackName) {
                 groupId = await ensureGroup(fallbackName);
               }
@@ -1733,9 +1901,14 @@ export class ImportService {
 
             if (groupId == null) {
               skipped++;
-              this.logJobError(jobId, 'M3U group map failed', nameCandidate || xcId || idCandidate || 'unknown', {
-                message: 'Could not map or create channel group for M3U entry',
-              });
+              this.logJobError(
+                jobId,
+                'M3U group map failed',
+                nameCandidate || xcId || idCandidate || 'unknown',
+                {
+                  message: 'Could not map or create channel group for M3U entry',
+                }
+              );
               continue;
             }
 
@@ -1747,9 +1920,12 @@ export class ImportService {
             if (cg?.custom_properties !== undefined) entry.custom_properties = cg.custom_properties;
             if (cg?.stream_profile_id !== undefined) entry.stream_profile_id = cg.stream_profile_id;
             if (cg?.group_override !== undefined) entry.group_override = cg.group_override;
-            if (cg?.channel_sort_order !== undefined) entry.channel_sort_order = cg.channel_sort_order;
-            if (cg?.channel_sort_reverse !== undefined) entry.channel_sort_reverse = cg.channel_sort_reverse;
-            if (cg?.channel_profile_ids !== undefined) entry.channel_profile_ids = cg.channel_profile_ids;
+            if (cg?.channel_sort_order !== undefined)
+              entry.channel_sort_order = cg.channel_sort_order;
+            if (cg?.channel_sort_reverse !== undefined)
+              entry.channel_sort_reverse = cg.channel_sort_reverse;
+            if (cg?.channel_profile_ids !== undefined)
+              entry.channel_profile_ids = cg.channel_profile_ids;
 
             // Store the group name for matching
             entry._groupName = nameCandidate;
@@ -1772,7 +1948,10 @@ export class ImportService {
         if (accountId) {
           // Try the refresh API first
           const refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(() => {
-            jobManager.addLog(jobId, `M3U ${source.name}: Refresh API failed (known Dispatcharr bug), will rely on auto-processing`);
+            jobManager.addLog(
+              jobId,
+              `M3U ${source.name}: Refresh API failed (known Dispatcharr bug), will rely on auto-processing`
+            );
             return null;
           });
 
@@ -1780,10 +1959,20 @@ export class ImportService {
             jobManager.addLog(jobId, `M3U ${source.name}: Refresh API succeeded`);
           } else {
             // Try toggling is_active as a workaround to trigger processing
-            jobManager.addLog(jobId, `M3U ${source.name}: Trying is_active toggle to trigger processing...`);
-            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: false }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (deactivate)`, null, jobId));
-            await new Promise((res) => { const t = globalThis.setTimeout(res, 500); return t; });
-            await client.patch(`/api/m3u/accounts/${accountId}/`, { is_active: true }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (activate)`, null, jobId));
+            jobManager.addLog(
+              jobId,
+              `M3U ${source.name}: Trying is_active toggle to trigger processing...`
+            );
+            await client
+              .patch(`/api/m3u/accounts/${accountId}/`, { is_active: false })
+              .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (deactivate)`, null, jobId));
+            await new Promise((res) => {
+              const t = globalThis.setTimeout(res, 500);
+              return t;
+            });
+            await client
+              .patch(`/api/m3u/accounts/${accountId}/`, { is_active: true })
+              .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (activate)`, null, jobId));
           }
 
           // Wait for refresh to complete before applying group settings
@@ -1797,7 +1986,9 @@ export class ImportService {
 
             // Fetch all channel groups to get ID -> name mapping
             // The M3U account's channel_groups only has IDs, not names
-            const allChannelGroups = await client.get('/api/channels/groups/').catch(this.warnOnFail('/api/channels/groups/', [], jobId));
+            const allChannelGroups = await client
+              .get('/api/channels/groups/')
+              .catch(this.warnOnFail('/api/channels/groups/', [], jobId));
             const groupIdToName: Record<number, string> = {};
             if (Array.isArray(allChannelGroups)) {
               for (const g of allChannelGroups) {
@@ -1815,15 +2006,16 @@ export class ImportService {
             }
             const enabledGroupNames = new Set(
               channelGroupsPayload
-                .filter(cg => cg.enabled !== false)
-                .map(cg => cg._groupName?.toLowerCase())
+                .filter((cg) => cg.enabled !== false)
+                .map((cg) => cg._groupName?.toLowerCase())
                 .filter(Boolean)
             );
 
             // Build complete payload with all discovered groups, setting enabled/disabled based on backup
             const completePayload = discoveredGroups.map((dg: any) => {
               const groupId = dg.channel_group;
-              const actualGroupName = groupIdToName[groupId] || dg.name || dg.channel_group_name || '';
+              const actualGroupName =
+                groupIdToName[groupId] || dg.name || dg.channel_group_name || '';
               const discoveredName = actualGroupName.toLowerCase();
               const backupGroup = backupGroupsByName[discoveredName];
               const shouldBeEnabled = enabledGroupNames.has(discoveredName);
@@ -1831,20 +2023,39 @@ export class ImportService {
               return {
                 ...dg,
                 enabled: shouldBeEnabled,
-                ...(backupGroup?.auto_channel_sync !== undefined && { auto_channel_sync: backupGroup.auto_channel_sync }),
-                ...(backupGroup?.auto_sync_channel_start !== undefined && { auto_sync_channel_start: backupGroup.auto_sync_channel_start }),
-                ...(backupGroup?.custom_properties !== undefined && { custom_properties: backupGroup.custom_properties }),
-                ...(backupGroup?.stream_profile_id !== undefined && { stream_profile_id: backupGroup.stream_profile_id }),
-                ...(backupGroup?.group_override !== undefined && { group_override: backupGroup.group_override }),
-                ...(backupGroup?.channel_sort_order !== undefined && { channel_sort_order: backupGroup.channel_sort_order }),
-                ...(backupGroup?.channel_sort_reverse !== undefined && { channel_sort_reverse: backupGroup.channel_sort_reverse }),
-                ...(backupGroup?.channel_profile_ids !== undefined && { channel_profile_ids: backupGroup.channel_profile_ids }),
+                ...(backupGroup?.auto_channel_sync !== undefined && {
+                  auto_channel_sync: backupGroup.auto_channel_sync,
+                }),
+                ...(backupGroup?.auto_sync_channel_start !== undefined && {
+                  auto_sync_channel_start: backupGroup.auto_sync_channel_start,
+                }),
+                ...(backupGroup?.custom_properties !== undefined && {
+                  custom_properties: backupGroup.custom_properties,
+                }),
+                ...(backupGroup?.stream_profile_id !== undefined && {
+                  stream_profile_id: backupGroup.stream_profile_id,
+                }),
+                ...(backupGroup?.group_override !== undefined && {
+                  group_override: backupGroup.group_override,
+                }),
+                ...(backupGroup?.channel_sort_order !== undefined && {
+                  channel_sort_order: backupGroup.channel_sort_order,
+                }),
+                ...(backupGroup?.channel_sort_reverse !== undefined && {
+                  channel_sort_reverse: backupGroup.channel_sort_reverse,
+                }),
+                ...(backupGroup?.channel_profile_ids !== undefined && {
+                  channel_profile_ids: backupGroup.channel_profile_ids,
+                }),
               };
             });
 
-            const enabledCount = completePayload.filter(cg => cg.enabled).length;
-            const autoSyncCount = completePayload.filter(cg => cg.auto_channel_sync).length;
-            jobManager.addLog(jobId, `M3U ${source?.name}: Applying ${enabledCount} enabled, ${completePayload.length - enabledCount} disabled channel groups`);
+            const enabledCount = completePayload.filter((cg) => cg.enabled).length;
+            const autoSyncCount = completePayload.filter((cg) => cg.auto_channel_sync).length;
+            jobManager.addLog(
+              jobId,
+              `M3U ${source?.name}: Applying ${enabledCount} enabled, ${completePayload.length - enabledCount} disabled channel groups`
+            );
 
             // Apply channel group settings via PATCH
             await client.patch(`/api/m3u/accounts/${accountId}/`, {
@@ -1854,25 +2065,37 @@ export class ImportService {
             // Also try dedicated group-settings endpoint for auto_channel_sync settings
             // Note: Dispatcharr API may not persist these values (known limitation)
             if (autoSyncCount > 0) {
-              const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
-              await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
-                channel_groups: autoSyncGroups,
-              }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
+              const autoSyncGroups = completePayload.filter((cg) => cg.auto_channel_sync);
+              await client
+                .patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
+                  channel_groups: autoSyncGroups,
+                })
+                .catch(
+                  this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId)
+                );
             }
 
             // Wait for Dispatcharr to process the group changes before triggering refresh
             await new Promise((resolve) => globalThis.setTimeout(resolve, M3U_REFRESH_WAIT_MS));
 
             // Trigger refresh to pull streams for enabled groups
-            let refreshResult = await client.post(`/api/m3u/refresh/${accountId}/`).catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
+            let refreshResult = await client
+              .post(`/api/m3u/refresh/${accountId}/`)
+              .catch(this.warnOnFail(`/api/m3u/refresh/${accountId}/`, null, jobId));
 
             // If account-specific refresh fails, try global refresh
             if (!refreshResult) {
-              refreshResult = await client.post(`/api/m3u/refresh/`).catch(this.warnOnFail('/api/m3u/refresh/', null, jobId));
+              refreshResult = await client
+                .post(`/api/m3u/refresh/`)
+                .catch(this.warnOnFail('/api/m3u/refresh/', null, jobId));
             }
 
             // Wait for streams to be loaded
-            const streamCount = await waitForStreamsLoaded(accountId, source?.name || 'Unknown', !refreshResult);
+            const streamCount = await waitForStreamsLoaded(
+              accountId,
+              source?.name || 'Unknown',
+              !refreshResult
+            );
             jobManager.addLog(jobId, `M3U ${source?.name}: ${streamCount} streams loaded`);
 
             // Re-apply settings after refresh in case it reset them
@@ -1882,10 +2105,14 @@ export class ImportService {
               });
 
               if (autoSyncCount > 0) {
-                const autoSyncGroups = completePayload.filter(cg => cg.auto_channel_sync);
-                await client.patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
-                  channel_groups: autoSyncGroups,
-                }).catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId));
+                const autoSyncGroups = completePayload.filter((cg) => cg.auto_channel_sync);
+                await client
+                  .patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
+                    channel_groups: autoSyncGroups,
+                  })
+                  .catch(
+                    this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId)
+                  );
               }
             }
           }
@@ -1905,9 +2132,11 @@ export class ImportService {
     profiles: any[],
     jobId: string
   ): Promise<ImportResultWithIdMap> {
-    const existing = await client.get('/api/core/streamprofiles/').catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
+    const existing = await client
+      .get('/api/core/streamprofiles/')
+      .catch(this.warnOnFail('/api/core/streamprofiles/', [], jobId));
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     const idMap: Record<string | number, number> = {};
 
@@ -1943,9 +2172,11 @@ export class ImportService {
     agents: any[],
     jobId: string
   ): Promise<ImportResultWithIdMap> {
-    const existing = await client.get('/api/core/useragents/').catch(this.warnOnFail('/api/core/useragents/', [], jobId));
+    const existing = await client
+      .get('/api/core/useragents/')
+      .catch(this.warnOnFail('/api/core/useragents/', [], jobId));
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     const idMap: Record<string | number, number> = {};
 
@@ -1982,7 +2213,7 @@ export class ImportService {
   ): Promise<ImportResultWithIdMap> {
     const existing = await client.get('/api/epg/sources/');
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
     const idMap: Record<string | number, number> = {};
 
@@ -1996,10 +2227,10 @@ export class ImportService {
           api_key: source.api_key,
           is_active: source.is_active,
           // include other optional fields if present
-          ...(['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
-          if (source[key] !== undefined) acc[key] = source[key];
-          return acc;
-        }, {})),
+          ...['username', 'password', 'token', 'priority'].reduce((acc: any, key) => {
+            if (source[key] !== undefined) acc[key] = source[key];
+            return acc;
+          }, {}),
         };
 
         if (match) {
@@ -2085,10 +2316,7 @@ export class ImportService {
     return { imported, skipped, errors };
   }
 
-  private async importPlugins(
-    client: DispatcharrClient,
-    plugins: any
-  ): Promise<ImportResult> {
+  private async importPlugins(client: DispatcharrClient, plugins: any): Promise<ImportResult> {
     const existingResponse = await client.get('/api/plugins/plugins/');
     const existingList = Array.isArray(existingResponse)
       ? existingResponse
@@ -2096,7 +2324,9 @@ export class ImportService {
 
     const pluginList: any[] = Array.isArray(plugins)
       ? plugins
-      : (plugins?.plugins ? plugins.plugins : Object.values(plugins || {}));
+      : plugins?.plugins
+        ? plugins.plugins
+        : Object.values(plugins || {});
 
     if (!Array.isArray(pluginList) || pluginList.length === 0) {
       return { imported: 0, skipped: 1, errors: 0 };
@@ -2129,13 +2359,10 @@ export class ImportService {
     return { imported, skipped, errors };
   }
 
-  private async importDVRRules(
-    client: DispatcharrClient,
-    rules: any[]
-  ): Promise<ImportResult> {
+  private async importDVRRules(client: DispatcharrClient, rules: any[]): Promise<ImportResult> {
     const existing = await client.get('/api/channels/recurring-rules/');
     let imported = 0;
-    let skipped = 0;
+    const skipped = 0;
     let errors = 0;
 
     for (const rule of rules) {
@@ -2182,18 +2409,27 @@ export class ImportService {
     for (const user of users) {
       try {
         const existingUser = existing.find((u: any) => u.username === user.username);
-        const isAdmin = user.user_level === 'admin' || user.is_superuser === true || existingUser?.is_superuser === true;
+        const isAdmin =
+          user.user_level === 'admin' ||
+          user.is_superuser === true ||
+          existingUser?.is_superuser === true;
 
         // For admin users that already exist, only update XC password (in custom_properties)
         if (isAdmin && existingUser) {
           if (user.custom_properties) {
-            jobManager.addLog(jobId, `User ${user.username}: Admin user - only updating custom_properties (XC password)`);
+            jobManager.addLog(
+              jobId,
+              `User ${user.username}: Admin user - only updating custom_properties (XC password)`
+            );
             await client.patch(`/api/accounts/users/${existingUser.id}/`, {
               custom_properties: user.custom_properties,
             });
             imported++;
           } else {
-            jobManager.addLog(jobId, `User ${user.username}: Admin user - skipping (no custom_properties to restore)`);
+            jobManager.addLog(
+              jobId,
+              `User ${user.username}: Admin user - skipping (no custom_properties to restore)`
+            );
             skipped++;
           }
           continue;
@@ -2246,16 +2482,16 @@ export class ImportService {
         return { imported: 0, skipped: 1, errors: 0 };
       }
 
-      const existingResp = await client.get('/api/core/settings/').catch(this.warnOnFail('/api/core/settings/', [], jobId));
+      const existingResp = await client
+        .get('/api/core/settings/')
+        .catch(this.warnOnFail('/api/core/settings/', [], jobId));
       const existingList = Array.isArray(existingResp)
         ? existingResp
         : existingResp
           ? [existingResp]
           : [];
       const existingByKey = new Map<string, any>(
-        existingList
-          .filter((s: any) => s?.key)
-          .map((s: any) => [s.key, s])
+        existingList.filter((s: any) => s?.key).map((s: any) => [s.key, s])
       );
 
       let imported = 0;
@@ -2275,10 +2511,7 @@ export class ImportService {
         // Remap IDs for defaults if we imported new ones
         const mapValue = (value: any, map?: Record<string | number, number>) => {
           if (value === undefined || value === null || !map) return value;
-          const mapped =
-            map[value] ??
-            map[String(value)] ??
-            map[Number(value)];
+          const mapped = map[value] ?? map[String(value)] ?? map[Number(value)];
           return mapped !== undefined ? mapped.toString() : value;
         };
 
@@ -2367,7 +2600,10 @@ export class ImportService {
 
     if (!Array.isArray(logos)) {
       if (jobId) {
-        jobManager.addLog(jobId, `[ERROR] Logos data is not an array: ${typeof logos} = ${JSON.stringify(logos)}`);
+        jobManager.addLog(
+          jobId,
+          `[ERROR] Logos data is not an array: ${typeof logos} = ${JSON.stringify(logos)}`
+        );
       }
       return { imported, skipped: logos ? 0 : 1, errors: logos ? 1 : 0, logoMap };
     }
@@ -2388,7 +2624,10 @@ export class ImportService {
       const existingLogos = await this.getAllPaginated(client, '/api/channels/logos/', 1000, jobId);
       if (Array.isArray(existingLogos) && existingLogos.length > 0) {
         if (jobId) {
-          jobManager.addLog(jobId, `Found ${existingLogos.length} existing logos on destination, using bulk delete...`);
+          jobManager.addLog(
+            jobId,
+            `Found ${existingLogos.length} existing logos on destination, using bulk delete...`
+          );
         }
         const logoIds = existingLogos.map((l: any) => l.id).filter(Boolean);
         if (logoIds.length > 0) {
@@ -2400,7 +2639,10 @@ export class ImportService {
             }
           } catch (e: any) {
             if (jobId) {
-              jobManager.addLog(jobId, `Bulk delete failed: ${e.message}, trying individual delete...`);
+              jobManager.addLog(
+                jobId,
+                `Bulk delete failed: ${e.message}, trying individual delete...`
+              );
             }
             // Fallback to individual delete
             let deleted = 0;
@@ -2433,7 +2675,10 @@ export class ImportService {
       // Log first logo structure for debugging
       if (logos[0]) {
         const sample = logos[0];
-        jobManager.addLog(jobId, `Sample logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`);
+        jobManager.addLog(
+          jobId,
+          `Sample logo structure: name=${sample.name}, ext=${sample.ext}, source_id=${sample.source_id}, data length=${sample.data?.length || 0}`
+        );
       }
     }
 
@@ -2470,14 +2715,20 @@ export class ImportService {
       if (sourceId && uploadedSourceIds.has(sourceId)) {
         skipped++;
         if (jobId) {
-          jobManager.addLog(jobId, `[SKIP] Logo "${uploadName}" (source_id=${sourceId}) - duplicate source_id in backup`);
+          jobManager.addLog(
+            jobId,
+            `[SKIP] Logo "${uploadName}" (source_id=${sourceId}) - duplicate source_id in backup`
+          );
         }
         continue;
       }
       if (!sourceId && uploadedNames.has(uploadName.toString().toLowerCase())) {
         skipped++;
         if (jobId) {
-          jobManager.addLog(jobId, `[SKIP] Logo "${uploadName}" - duplicate name in backup (no source_id)`);
+          jobManager.addLog(
+            jobId,
+            `[SKIP] Logo "${uploadName}" - duplicate name in backup (no source_id)`
+          );
         }
         continue;
       }
@@ -2503,9 +2754,12 @@ export class ImportService {
         if (jobId && imported < 20) {
           let checksum = 0;
           for (let i = 0; i < bufferCopy.length; i++) {
-            checksum = (checksum + bufferCopy[i]) & 0xFFFF;
+            checksum = (checksum + bufferCopy[i]) & 0xffff;
           }
-          jobManager.addLog(jobId, `DEBUG FILE: "${uploadName}" - ${fileSize} bytes, checksum: ${checksum.toString(16).padStart(4, '0')}`);
+          jobManager.addLog(
+            jobId,
+            `DEBUG FILE: "${uploadName}" - ${fileSize} bytes, checksum: ${checksum.toString(16).padStart(4, '0')}`
+          );
         }
 
         // Use counter + timestamp + random to ensure absolutely unique filenames
@@ -2523,7 +2777,10 @@ export class ImportService {
 
         if (jobId) {
           const metadataInfo = originalName ? ` (original: "${originalName}")` : '';
-          jobManager.addLog(jobId, `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType})...`);
+          jobManager.addLog(
+            jobId,
+            `Uploading logo "${uploadName}"${metadataInfo} (${fileSize} bytes, ${contentType})...`
+          );
         }
 
         const uploadResult = await client.post('/api/channels/logos/upload/', formData, {
@@ -2556,36 +2813,54 @@ export class ImportService {
           if (originalName) {
             logoMap[`name:${originalName.toLowerCase()}`] = newDestId;
             if (jobId && imported <= 15) {
-              jobManager.addLog(jobId, `DEBUG LOGOMAP: Added "name:${originalName.toLowerCase()}" -> ${newDestId}`);
+              jobManager.addLog(
+                jobId,
+                `DEBUG LOGOMAP: Added "name:${originalName.toLowerCase()}" -> ${newDestId}`
+              );
             }
           }
           // Fallback: filename-based key for sanitized name lookup
           logoMap[`file:${filenameName.toString().toLowerCase()}`] = newDestId;
           if (jobId && imported <= 15) {
-            jobManager.addLog(jobId, `DEBUG LOGOMAP: Added "file:${filenameName.toString().toLowerCase()}" -> ${newDestId}`);
+            jobManager.addLog(
+              jobId,
+              `DEBUG LOGOMAP: Added "file:${filenameName.toString().toLowerCase()}" -> ${newDestId}`
+            );
           }
         }
         if (jobId) {
           const returnedName = uploadResult?.name || uploadResult?.data?.name;
           const returnedUrl = uploadResult?.url || uploadResult?.data?.url;
-          jobManager.addLog(jobId, `[OK] Logo "${uploadName}" (source_id=${sourceId}, dest=${newDestId}, returned_name="${returnedName}", url="${returnedUrl}") - ${fileSize} bytes imported`);
+          jobManager.addLog(
+            jobId,
+            `[OK] Logo "${uploadName}" (source_id=${sourceId}, dest=${newDestId}, returned_name="${returnedName}", url="${returnedUrl}") - ${fileSize} bytes imported`
+          );
         }
       } catch (error: any) {
         const errData = error?.response?.data;
         const errStatus = error?.response?.status;
         const errMsg = errData?.detail || errData?.error || error?.message || 'Unknown error';
         // Log the full error response for debugging
-        log.error({ logoName: uploadName, status: errStatus, errData, errMsg }, 'Failed to import logo');
+        log.error(
+          { logoName: uploadName, status: errStatus, errData, errMsg },
+          'Failed to import logo'
+        );
         errors++;
         if (jobId) {
-          jobManager.addLog(jobId, `[FAIL] Logo "${uploadName}" - ${errMsg} (status=${errStatus}, response=${JSON.stringify(errData)})`);
+          jobManager.addLog(
+            jobId,
+            `[FAIL] Logo "${uploadName}" - ${errMsg} (status=${errStatus}, response=${JSON.stringify(errData)})`
+          );
         }
       }
     }
 
     if (jobId) {
       jobManager.addLog(jobId, `Logos: ${imported} imported, ${skipped} skipped, ${errors} failed`);
-      jobManager.addLog(jobId, `Logo map has ${Object.keys(logoMap).length} entries for channel assignment`);
+      jobManager.addLog(
+        jobId,
+        `Logo map has ${Object.keys(logoMap).length} entries for channel assignment`
+      );
 
       // Debug: dump all logoMap keys for troubleshooting
       const allKeys = Object.keys(logoMap).sort();
@@ -2630,7 +2905,10 @@ export class ImportService {
 
       const associations: { channel_id: number; epg_data_id: number }[] = [];
 
-      jobManager.addLog(jobId, `EPG assignment: ${epgIds.size} EPG data entries available on target`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: ${epgIds.size} EPG data entries available on target`
+      );
       jobManager.addLog(jobId, `EPG assignment: ${channels.length} channels to process`);
 
       // Build lookup for target channels by multiple keys
@@ -2662,9 +2940,15 @@ export class ImportService {
           }
         }
         hasBackupEpgMetadata = Object.keys(backupEpgMap).length > 0;
-        jobManager.addLog(jobId, `EPG assignment: Built lookup map from ${Object.keys(backupEpgMap).length} backup EPG entries`);
+        jobManager.addLog(
+          jobId,
+          `EPG assignment: Built lookup map from ${Object.keys(backupEpgMap).length} backup EPG entries`
+        );
       } else {
-        jobManager.addLog(jobId, 'EPG assignment: No backup EPG metadata available (export without EPG Sources enabled?)');
+        jobManager.addLog(
+          jobId,
+          'EPG assignment: No backup EPG metadata available (export without EPG Sources enabled?)'
+        );
       }
 
       // First, try to honor backup epg_data_id when it exists on target
@@ -2677,65 +2961,73 @@ export class ImportService {
       let backupNoMatch = 0;
 
       if (Array.isArray(backupChannels)) {
-        jobManager.addLog(jobId, `EPG assignment: Processing ${backupChannels.length} backup channels`);
+        jobManager.addLog(
+          jobId,
+          `EPG assignment: Processing ${backupChannels.length} backup channels`
+        );
         for (const bc of backupChannels) {
           if (!bc) continue;
           const nameKey = this.normalizeKey(bc?.name);
           const num = bc?.channel_number != null ? String(bc.channel_number) : '';
           const tvgKey = this.normalizeKey(bc?.tvg_id);
           const stationKey = this.normalizeKey(bc?.tvc_guide_stationid);
-        const composite = nameKey ? `${nameKey}|${num}` : '';
+          const composite = nameKey ? `${nameKey}|${num}` : '';
 
-        let target = (composite && byNameNumber[composite]) || (tvgKey && byTvg[tvgKey]) || (nameKey && byNameOnly[nameKey]);
-        if (!target || target.epg_data_id) continue;
+          const target =
+            (composite && byNameNumber[composite]) ||
+            (tvgKey && byTvg[tvgKey]) ||
+            (nameKey && byNameOnly[nameKey]);
+          if (!target || target.epg_data_id) continue;
 
-        let epgId: number | undefined;
-        let matchStrategy: string | undefined;
+          let epgId: number | undefined;
+          let matchStrategy: string | undefined;
 
-        // Get backup EPG metadata if available
-        const backupEpg = bc?.epg_data_id != null ? backupEpgMap[bc.epg_data_id] : undefined;
-        const backupEpgTvgKey = this.normalizeKey(backupEpg?.tvg_id);
-        const backupEpgNameKey = this.normalizeKey(backupEpg?.name);
+          // Get backup EPG metadata if available
+          const backupEpg = bc?.epg_data_id != null ? backupEpgMap[bc.epg_data_id] : undefined;
+          const backupEpgTvgKey = this.normalizeKey(backupEpg?.tvg_id);
+          const backupEpgNameKey = this.normalizeKey(backupEpg?.name);
 
-        // Try to match by EPG metadata first (most reliable)
-        if (backupEpgTvgKey && epgByTvg[backupEpgTvgKey]) {
-          epgId = epgByTvg[backupEpgTvgKey];
-          matchStrategy = 'backup-epg-tvg-id';
-          backupTvgMatches++;
-        } else if (backupEpgNameKey && epgByName[backupEpgNameKey]) {
-          epgId = epgByName[backupEpgNameKey];
-          matchStrategy = 'backup-epg-name';
-          backupNameMatches++;
-        } else if (hasBackupEpgMetadata && bc?.epg_data_id != null && epgIds.has(bc.epg_data_id)) {
-          // Only use direct ID as fallback if:
-          // 1. We have backup EPG metadata (otherwise IDs are meaningless)
-          // 2. EPG metadata matching failed
-          // This is less reliable as IDs may differ between systems
-          epgId = bc.epg_data_id;
-          matchStrategy = 'direct-id-fallback';
-          backupEpgIdReused++;
-        } else {
-          // Final fallback: try channel metadata
-          if (tvgKey && epgByTvg[tvgKey]) {
-            epgId = epgByTvg[tvgKey];
-            matchStrategy = 'channel-tvg-id';
+          // Try to match by EPG metadata first (most reliable)
+          if (backupEpgTvgKey && epgByTvg[backupEpgTvgKey]) {
+            epgId = epgByTvg[backupEpgTvgKey];
+            matchStrategy = 'backup-epg-tvg-id';
             backupTvgMatches++;
-          }
-          else if (stationKey && epgByName[stationKey]) {
-            epgId = epgByName[stationKey];
-            matchStrategy = 'channel-station-id';
-            backupStationMatches++;
-          }
-          else if (nameKey && epgByName[nameKey]) {
-            epgId = epgByName[nameKey];
-            matchStrategy = 'channel-name';
+          } else if (backupEpgNameKey && epgByName[backupEpgNameKey]) {
+            epgId = epgByName[backupEpgNameKey];
+            matchStrategy = 'backup-epg-name';
             backupNameMatches++;
+          } else if (
+            hasBackupEpgMetadata &&
+            bc?.epg_data_id != null &&
+            epgIds.has(bc.epg_data_id)
+          ) {
+            // Only use direct ID as fallback if:
+            // 1. We have backup EPG metadata (otherwise IDs are meaningless)
+            // 2. EPG metadata matching failed
+            // This is less reliable as IDs may differ between systems
+            epgId = bc.epg_data_id;
+            matchStrategy = 'direct-id-fallback';
+            backupEpgIdReused++;
+          } else {
+            // Final fallback: try channel metadata
+            if (tvgKey && epgByTvg[tvgKey]) {
+              epgId = epgByTvg[tvgKey];
+              matchStrategy = 'channel-tvg-id';
+              backupTvgMatches++;
+            } else if (stationKey && epgByName[stationKey]) {
+              epgId = epgByName[stationKey];
+              matchStrategy = 'channel-station-id';
+              backupStationMatches++;
+            } else if (nameKey && epgByName[nameKey]) {
+              epgId = epgByName[nameKey];
+              matchStrategy = 'channel-name';
+              backupNameMatches++;
+            }
           }
-        }
 
-        if (epgId && matchStrategy !== 'direct-id-fallback') {
-          backupFallbackMatches++;
-        }
+          if (epgId && matchStrategy !== 'direct-id-fallback') {
+            backupFallbackMatches++;
+          }
 
           if (epgId) {
             associations.push({ channel_id: target.id, epg_data_id: epgId });
@@ -2793,13 +3085,22 @@ export class ImportService {
         }
       }
       if (targetMetadataMatches > 0) {
-        jobManager.addLog(jobId, `EPG from target metadata: ${targetMetadataMatches} additional matches`);
+        jobManager.addLog(
+          jobId,
+          `EPG from target metadata: ${targetMetadataMatches} additional matches`
+        );
       }
 
-      jobManager.addLog(jobId, `EPG assignment: Total ${associations.length} EPG associations to apply`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment: Total ${associations.length} EPG associations to apply`
+      );
 
       if (associations.length === 0) {
-        jobManager.addLog(jobId, 'No EPG associations found - channels may need manual EPG assignment');
+        jobManager.addLog(
+          jobId,
+          'No EPG associations found - channels may need manual EPG assignment'
+        );
         return;
       }
 
@@ -2807,7 +3108,10 @@ export class ImportService {
       let successCount = 0;
       let failCount = 0;
 
-      jobManager.addLog(jobId, `Assigning EPG to channels individually (${associations.length} total)...`);
+      jobManager.addLog(
+        jobId,
+        `Assigning EPG to channels individually (${associations.length} total)...`
+      );
 
       for (let i = 0; i < associations.length; i++) {
         const assoc = associations[i];
@@ -2829,7 +3133,10 @@ export class ImportService {
 
           // Log progress every 50 channels
           if ((i + 1) % 50 === 0) {
-            jobManager.addLog(jobId, `EPG assignment progress: ${i + 1}/${associations.length} channels processed`);
+            jobManager.addLog(
+              jobId,
+              `EPG assignment progress: ${i + 1}/${associations.length} channels processed`
+            );
           }
         } catch (error: any) {
           failCount++;
@@ -2845,21 +3152,23 @@ export class ImportService {
         }
       }
 
-      jobManager.addLog(jobId, `EPG assignment completed: ${successCount} successful, ${failCount} failed out of ${associations.length} total`);
+      jobManager.addLog(
+        jobId,
+        `EPG assignment completed: ${successCount} successful, ${failCount} failed out of ${associations.length} total`
+      );
     } catch (error) {
       this.logJobError(jobId, 'EPG assignment failed', '', error);
     }
   }
 
-  private async triggerEpgRefresh(
-    client: DispatcharrClient,
-    jobId: string
-  ): Promise<void> {
+  private async triggerEpgRefresh(client: DispatcharrClient, jobId: string): Promise<void> {
     try {
       jobManager.addLog(jobId, 'Triggering EPG refresh by toggling EPG sources...');
 
       // Get all EPG sources
-      const epgSources = await client.get('/api/epg/sources/').catch(this.warnOnFail('/api/epg/sources/', [], jobId));
+      const epgSources = await client
+        .get('/api/epg/sources/')
+        .catch(this.warnOnFail('/api/epg/sources/', [], jobId));
 
       if (!Array.isArray(epgSources) || epgSources.length === 0) {
         jobManager.addLog(jobId, 'No EPG sources found to refresh');
@@ -2876,7 +3185,10 @@ export class ImportService {
           const wasActive = source.is_active !== false; // Default to true if undefined
 
           if (wasActive) {
-            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Toggling to trigger refresh...`);
+            jobManager.addLog(
+              jobId,
+              `EPG source "${source.name || source.id}": Toggling to trigger refresh...`
+            );
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
@@ -2887,7 +3199,10 @@ export class ImportService {
 
             jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Refresh triggered`);
           } else {
-            jobManager.addLog(jobId, `EPG source "${source.name || source.id}": Skipped (inactive)`);
+            jobManager.addLog(
+              jobId,
+              `EPG source "${source.name || source.id}": Skipped (inactive)`
+            );
           }
         } catch (error: any) {
           this.logJobError(jobId, 'EPG source refresh failed', source.name || source.id, error);
@@ -2900,10 +3215,7 @@ export class ImportService {
     }
   }
 
-  private async matchEpgForChannels(
-    client: DispatcharrClient,
-    jobId: string
-  ): Promise<void> {
+  private async matchEpgForChannels(client: DispatcharrClient, jobId: string): Promise<void> {
     try {
       const channels = await this.getAllPaginated(client, '/api/channels/channels/', 1000, jobId);
       const missing = Array.isArray(channels)
@@ -2952,12 +3264,18 @@ export class ImportService {
       }
       jobManager.addLog(jobId, `Initial EPG data count: ${previousCount}`);
     } catch (error) {
-      jobManager.addLog(jobId, 'Could not get initial EPG data count, will wait for data to appear');
+      jobManager.addLog(
+        jobId,
+        'Could not get initial EPG data count, will wait for data to appear'
+      );
     }
 
     // Phase 1: Wait for EPG data to appear (count > 0)
     if (previousCount === 0) {
-      jobManager.addLog(jobId, 'Waiting for EPG sources to download and parse data (this may take several minutes)...');
+      jobManager.addLog(
+        jobId,
+        'Waiting for EPG sources to download and parse data (this may take several minutes)...'
+      );
       const phaseStart = Date.now();
       let checkCount = 0;
       while (Date.now() - phaseStart < dataAppearanceTimeout && Date.now() - start < timeoutMs) {
@@ -2976,7 +3294,10 @@ export class ImportService {
 
           // Log every 3rd check (every 30 seconds with 10s interval)
           if (checkCount % 3 === 0) {
-            jobManager.addLog(jobId, `Still waiting for EPG data... (count: ${currentCount}, elapsed: ${Math.floor((Date.now() - phaseStart) / 1000)}s)`);
+            jobManager.addLog(
+              jobId,
+              `Still waiting for EPG data... (count: ${currentCount}, elapsed: ${Math.floor((Date.now() - phaseStart) / 1000)}s)`
+            );
           }
 
           if (currentCount > 0) {
@@ -2992,13 +3313,19 @@ export class ImportService {
 
       // If still 0 after waiting, warn and proceed
       if (previousCount === 0) {
-        jobManager.addLog(jobId, 'Warning: No EPG data appeared after 6 minutes. EPG sources may not be configured or have no data. Proceeding anyway...');
+        jobManager.addLog(
+          jobId,
+          'Warning: No EPG data appeared after 6 minutes. EPG sources may not be configured or have no data. Proceeding anyway...'
+        );
         return;
       }
     }
 
     // Phase 2: Wait for EPG data to stabilize (stop growing)
-    jobManager.addLog(jobId, `EPG data found (${previousCount} entries), waiting for parsing to complete...`);
+    jobManager.addLog(
+      jobId,
+      `EPG data found (${previousCount} entries), waiting for parsing to complete...`
+    );
     const observationStart = Date.now();
     while (Date.now() - start < timeoutMs) {
       this.throwIfCancelled(jobId);
@@ -3019,11 +3346,17 @@ export class ImportService {
           stableCount++;
           // Require both stability AND minimum observation time
           if (stableCount >= stabilityChecks && observationTime >= minObservationTime) {
-            jobManager.addLog(jobId, `EPG data stable at ${currentCount} entries after ${Math.floor(observationTime / 1000)}s, proceeding with channel matching`);
+            jobManager.addLog(
+              jobId,
+              `EPG data stable at ${currentCount} entries after ${Math.floor(observationTime / 1000)}s, proceeding with channel matching`
+            );
             return;
           } else if (stableCount >= stabilityChecks && observationTime < minObservationTime) {
             const remaining = Math.floor((minObservationTime - observationTime) / 1000);
-            jobManager.addLog(jobId, `EPG appears stable at ${currentCount} entries, but waiting ${remaining}s more to ensure all sources are parsed...`);
+            jobManager.addLog(
+              jobId,
+              `EPG appears stable at ${currentCount} entries, but waiting ${remaining}s more to ensure all sources are parsed...`
+            );
           }
         } else {
           // Count changed, reset stability counter
@@ -3037,7 +3370,10 @@ export class ImportService {
       await new Promise((res) => setTimeout(res, intervalMs));
     }
 
-    jobManager.addLog(jobId, `Timed out waiting for EPG data to stabilize (current count: ${previousCount}), proceeding anyway`);
+    jobManager.addLog(
+      jobId,
+      `Timed out waiting for EPG data to stabilize (current count: ${previousCount}), proceeding anyway`
+    );
   }
 
   private async waitForStreams(
@@ -3051,7 +3387,11 @@ export class ImportService {
       this.throwIfCancelled(jobId);
       try {
         const resp = await client.get('/api/channels/streams/?page=1&page_size=1');
-        const count = Array.isArray(resp?.results) ? resp.results.length : Array.isArray(resp) ? resp.length : resp?.count || 0;
+        const count = Array.isArray(resp?.results)
+          ? resp.results.length
+          : Array.isArray(resp)
+            ? resp.length
+            : resp?.count || 0;
         if (count > 0) {
           jobManager.addLog(jobId, 'Streams detected; proceeding with channel-stream mapping');
           return;
@@ -3061,7 +3401,10 @@ export class ImportService {
       }
       await new Promise((res) => setTimeout(res, intervalMs));
     }
-    jobManager.addLog(jobId, 'Timed out waiting for streams; channel-stream mapping may be incomplete');
+    jobManager.addLog(
+      jobId,
+      'Timed out waiting for streams; channel-stream mapping may be incomplete'
+    );
   }
 
   /**
@@ -3071,10 +3414,7 @@ export class ImportService {
     try {
       const cacheFile = path.join(this.cacheDir, uploadId);
       const metaFile = `${cacheFile}.meta`;
-      await Promise.all([
-        unlink(cacheFile).catch(() => {}),
-        unlink(metaFile).catch(() => {}),
-      ]);
+      await Promise.all([unlink(cacheFile).catch(() => {}), unlink(metaFile).catch(() => {})]);
       log.debug({ uploadId }, 'Deleted cached upload');
     } catch (error) {
       log.debug({ uploadId, err: error }, 'Failed to delete cached upload');
@@ -3084,7 +3424,9 @@ export class ImportService {
   /**
    * Cleanup stale temp files older than maxAgeMs (default: 1 hour)
    */
-  async cleanupStaleTempFiles(maxAgeMs: number = TEMP_FILE_MAX_AGE_MS): Promise<{ deleted: string[]; errors: string[] }> {
+  async cleanupStaleTempFiles(
+    maxAgeMs: number = TEMP_FILE_MAX_AGE_MS
+  ): Promise<{ deleted: string[]; errors: string[] }> {
     const deleted: string[] = [];
     const errors: string[] = [];
     const now = Date.now();

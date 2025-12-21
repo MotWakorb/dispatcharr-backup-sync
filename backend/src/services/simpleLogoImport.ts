@@ -34,7 +34,13 @@ function safeBase64Decode(base64String: string, maxSize: number, context: string
  */
 export async function simpleImportLogos(
   client: DispatcharrClient,
-  logos: Array<{ original_name?: string; name?: string; source_id?: number; data: string; ext?: string }>,
+  logos: Array<{
+    original_name?: string;
+    name?: string;
+    source_id?: number;
+    data: string;
+    ext?: string;
+  }>,
   jobId?: string
 ): Promise<SimpleLogoImportResult> {
   let imported = 0;
@@ -45,7 +51,16 @@ export async function simpleImportLogos(
   log.debug('First 10 logos to import:');
   for (let i = 0; i < Math.min(10, logos.length); i++) {
     const l = logos[i];
-    log.debug({ index: i, name: l.name, originalName: l.original_name, sourceId: l.source_id, dataLength: l.data?.length || 0 }, 'Logo preview');
+    log.debug(
+      {
+        index: i,
+        name: l.name,
+        originalName: l.original_name,
+        sourceId: l.source_id,
+        dataLength: l.data?.length || 0,
+      },
+      'Logo preview'
+    );
   }
 
   // Process each logo ONE AT A TIME
@@ -64,8 +79,11 @@ export async function simpleImportLogos(
       const imageData = safeBase64Decode(logo.data, MAX_LOGO_FILE_SIZE, `Logo "${logoName}"`);
 
       // Log what we're about to upload
-      const checksum = imageData.slice(0, 50).reduce((sum, byte) => (sum + byte) & 0xFFFF, 0);
-      log.debug({ index: i, logoName, size: imageData.length, checksum: checksum.toString(16) }, 'Uploading logo');
+      const checksum = imageData.slice(0, 50).reduce((sum, byte) => (sum + byte) & 0xffff, 0);
+      log.debug(
+        { index: i, logoName, size: imageData.length, checksum: checksum.toString(16) },
+        'Uploading logo'
+      );
 
       // Determine content type
       const ext = logo.ext || 'png';
@@ -83,7 +101,10 @@ export async function simpleImportLogos(
         contentType,
       });
 
-      log.debug({ index: i, logoName, checksum: checksum.toString(16), size: imageData.length }, 'Sending upload');
+      log.debug(
+        { index: i, logoName, checksum: checksum.toString(16), size: imageData.length },
+        'Sending upload'
+      );
 
       // Upload THIS logo and wait for completion
       const result = await client.post('/api/channels/logos/upload/', form, {
@@ -102,7 +123,6 @@ export async function simpleImportLogos(
       }
 
       imported++;
-
     } catch (error: any) {
       log.error({ index: i, logoName, err: error }, 'Logo upload failed');
       errors++;

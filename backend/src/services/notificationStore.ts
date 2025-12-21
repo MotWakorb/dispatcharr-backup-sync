@@ -82,7 +82,10 @@ class NotificationStore {
     return provider;
   }
 
-  async updateProvider(id: string, input: Partial<NotificationProviderInput>): Promise<NotificationProvider> {
+  async updateProvider(
+    id: string,
+    input: Partial<NotificationProviderInput>
+  ): Promise<NotificationProvider> {
     const data = await loadFile();
     const idx = data.providers.findIndex((p) => p.id === id);
     if (idx === -1) {
@@ -112,7 +115,9 @@ class NotificationStore {
     return data.globalSettings;
   }
 
-  async updateGlobalSettings(settings: Partial<NotificationGlobalSettings>): Promise<NotificationGlobalSettings> {
+  async updateGlobalSettings(
+    settings: Partial<NotificationGlobalSettings>
+  ): Promise<NotificationGlobalSettings> {
     const data = await loadFile();
     data.globalSettings = {
       ...data.globalSettings,

@@ -61,10 +61,7 @@ export function getErrorMessage(error: unknown, fallback = 'An unexpected error 
 /**
  * Type guard to check if an error has a specific property.
  */
-export function hasProperty<K extends string>(
-  error: unknown,
-  key: K
-): error is Record<K, unknown> {
+export function hasProperty<K extends string>(error: unknown, key: K): error is Record<K, unknown> {
   return error != null && typeof error === 'object' && key in error;
 }
 

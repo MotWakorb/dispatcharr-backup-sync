@@ -114,11 +114,9 @@ syncRouter.post('/', async (req, res) => {
     const jobId = jobManager.createJob('sync');
 
     // Start sync in background
-    syncService
-      .sync(request, jobId)
-      .catch((error) => {
-        log.error({ jobId, err: error }, 'Sync job failed');
-      });
+    syncService.sync(request, jobId).catch((error) => {
+      log.error({ jobId, err: error }, 'Sync job failed');
+    });
 
     // Return job ID immediately
     res.json({

@@ -37,11 +37,9 @@ exportRouter.post('/', async (req, res) => {
     const jobId = jobManager.createJob('backup');
 
     // Start export in background
-    exportService
-      .export(request, jobId)
-      .catch((error) => {
-        log.error({ jobId, err: error }, 'Export job failed');
-      });
+    exportService.export(request, jobId).catch((error) => {
+      log.error({ jobId, err: error }, 'Export job failed');
+    });
 
     // Return job ID immediately
     res.json({

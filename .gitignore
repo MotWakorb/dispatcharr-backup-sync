@@ -45,3 +45,7 @@ swagger.json
 
 # Local saved credentials
 backend/data/savedConnections.json
+
+# Encryption keys
+backend/data/.encryption_key
+**/.encryption_key
