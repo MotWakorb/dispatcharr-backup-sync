@@ -60,6 +60,12 @@
       </button>
     {/each}
   </div>
+
+  {#if options.syncLogos}
+    <div class="alert alert-warning logos-warning">
+      <strong>Note:</strong> Including logos will significantly increase operation time. Each logo must be downloaded and re-uploaded individually.
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -67,5 +73,10 @@
     padding: 1rem;
     background: var(--gray-50);
     border-radius: 0.5rem;
+  }
+
+  .logos-warning {
+    margin-top: 1rem;
+    margin-bottom: 0;
   }
 </style>
