@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY backend/package.json ./
 
-# Install all dependencies (including dev for build)
-RUN npm install
+# Install all dependencies (including dev for build, skip husky prepare script)
+RUN npm install --ignore-scripts
 
 # Copy source code
 COPY backend/ ./
@@ -22,8 +22,8 @@ WORKDIR /app
 # Copy package files
 COPY backend/package.json ./
 
-# Install production dependencies only
-RUN npm install --omit=dev
+# Install production dependencies only (skip prepare script which requires husky)
+RUN npm install --omit=dev --ignore-scripts
 
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
