@@ -1,6 +1,5 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import type { SavedConnection, SavedConnectionInput } from '../types/index.js';
 
@@ -8,9 +7,7 @@ interface SavedConnectionFile {
   connections: SavedConnection[];
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+const DATA_DIR = process.env.DATA_DIR || '/data';
 const DATA_FILE = path.join(DATA_DIR, 'savedConnections.json');
 
 async function ensureStorage(): Promise<void> {
