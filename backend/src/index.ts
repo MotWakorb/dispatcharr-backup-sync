@@ -17,9 +17,15 @@ import { createLogger } from './services/logger.js';
 import { CLEANUP_INTERVAL_MS } from './constants.js';
 import { validateAndLogEnvironment } from './utils/envValidation.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
+import { migrateDataIfNeeded } from './utils/dataMigration.js';
 
 // Validate environment variables at startup
 validateAndLogEnvironment();
+
+// Migrate data from old location if needed (for upgrades from older versions)
+migrateDataIfNeeded().catch((error) => {
+  console.error('Data migration failed:', error);
+});
 
 const log = createLogger('server');
 
