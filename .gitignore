@@ -37,6 +37,9 @@ logoexport/
 
 # Testing
 coverage/
+playwright-report/
+test-results/
+tests/node_modules/
 
 # Temporary files
 temp/

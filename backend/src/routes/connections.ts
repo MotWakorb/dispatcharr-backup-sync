@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { createLogger } from '../services/logger.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { DispatcharrConnection, ApiResponse, TestConnectionResponse } from '../types/index.js';
+
+const log = createLogger('connections-route');
 
 export const connectionsRouter = Router();
 
@@ -11,14 +14,22 @@ connectionsRouter.post('/test', async (req, res) => {
     const connection: DispatcharrConnection = req.body;
 
     if (!connection.url || !connection.username || !connection.password) {
+      log.warn({ url: connection.url }, 'Connection test failed: missing required fields');
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: url, username, password',
       } as ApiResponse);
     }
 
+    log.debug({ url: connection.url }, 'Testing connection');
     const client = new DispatcharrClient(connection);
     const result = await client.testConnection();
+
+    if (result.success) {
+      log.info({ url: connection.url, version: result.version }, 'Connection test successful');
+    } else {
+      log.warn({ url: connection.url, message: result.message }, 'Connection test failed');
+    }
 
     res.json({
       success: result.success,
@@ -26,6 +37,7 @@ connectionsRouter.post('/test', async (req, res) => {
       message: result.message,
     } as ApiResponse<TestConnectionResponse>);
   } catch (error) {
+    log.error({ err: error }, 'Connection test error');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error),
@@ -38,6 +50,7 @@ connectionsRouter.post('/info', async (req, res) => {
   try {
     const connection: DispatcharrConnection = req.body;
 
+    log.debug({ url: connection.url }, 'Fetching instance info');
     const client = new DispatcharrClient(connection);
     await client.authenticate();
 
@@ -56,11 +69,14 @@ connectionsRouter.post('/info', async (req, res) => {
       users: users.status === 'fulfilled' ? users.value : 0,
     };
 
+    log.debug({ url: connection.url, ...info }, 'Instance info retrieved');
+
     res.json({
       success: true,
       data: info,
     } as ApiResponse);
   } catch (error) {
+    log.error({ err: error }, 'Failed to get instance info');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error),

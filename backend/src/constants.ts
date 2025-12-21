@@ -34,3 +34,9 @@ export const POST_REFRESH_DELAY_MS = 1000; // 1 second delay after refresh
 
 // Notifications
 export const NOTIFICATION_DURATION_MS = 125000; // 2m 5s for notification summaries
+
+// Job cleanup/archiving
+export const JOB_HISTORY_MAX_COUNT = 100; // Maximum number of jobs to keep in history
+export const JOB_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+export const JOB_LOG_MAX_ENTRIES = 1000; // Maximum log entries per job
+export const JOB_ARCHIVE_BATCH_SIZE = 50; // Number of jobs to archive at once

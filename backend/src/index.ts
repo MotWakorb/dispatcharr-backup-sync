@@ -15,6 +15,11 @@ import { jobManager } from './services/jobManager.js';
 import { importService } from './services/importService.js';
 import { createLogger } from './services/logger.js';
 import { CLEANUP_INTERVAL_MS } from './constants.js';
+import { validateAndLogEnvironment } from './utils/envValidation.js';
+import { correlationIdMiddleware } from './middleware/correlationId.js';
+
+// Validate environment variables at startup
+validateAndLogEnvironment();
 
 const log = createLogger('server');
 
@@ -27,9 +32,12 @@ app.use(cors());
 app.use(express.json({ limit: '10gb' }));
 app.use(express.urlencoded({ extended: true, limit: '10gb' }));
 
-// Log all requests
+// Add correlation IDs for distributed tracing
+app.use(correlationIdMiddleware);
+
+// Log all requests with correlation ID
 app.use((req, res, next) => {
-  log.debug({ method: req.method, url: req.url }, 'Request');
+  log.debug({ method: req.method, url: req.url, correlationId: req.correlationId }, 'Request');
   next();
 });
 
@@ -51,13 +59,18 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/info', infoRouter);
 
 // Error handling
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  log.error({ err, path: req.path }, 'Unhandled error');
-  res.status(err.status || 500).json({
-    success: false,
-    error: err.message || 'Internal server error',
-  });
-});
+app.use(
+  (err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    const status = (err as { status?: number })?.status || 500;
+    const message = (err as Error)?.message || 'Internal server error';
+    log.error({ err, path: req.path, correlationId: req.correlationId }, 'Unhandled error');
+    res.status(status).json({
+      success: false,
+      error: message,
+      correlationId: req.correlationId,
+    });
+  }
+);
 
 // 404 handler
 app.use((req, res) => {

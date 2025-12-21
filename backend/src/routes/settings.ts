@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { settingsStore, type AppSettings } from '../services/settingsStore.js';
 import { schedulerService } from '../services/schedulerService.js';
+import { createLogger } from '../services/logger.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse } from '../types/index.js';
+
+const log = createLogger('settings-route');
 
 export const settingsRouter = Router();
 
@@ -32,11 +35,13 @@ const COMMON_TIMEZONES = [
 settingsRouter.get('/', async (_req, res) => {
   try {
     const settings = await settingsStore.get();
+    log.debug({ timezone: settings.timezone }, 'Retrieved settings');
     res.json({
       success: true,
       data: settings,
     } as ApiResponse<AppSettings>);
   } catch (error) {
+    log.error({ err: error }, 'Failed to get settings');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to get settings'),
@@ -55,6 +60,7 @@ settingsRouter.put('/', async (req, res) => {
         // Validate timezone by trying to use it
         Intl.DateTimeFormat(undefined, { timeZone: updates.timezone });
       } catch {
+        log.warn({ timezone: updates.timezone }, 'Invalid timezone provided');
         return res.status(400).json({
           success: false,
           error: 'Invalid timezone',
@@ -63,9 +69,11 @@ settingsRouter.put('/', async (req, res) => {
     }
 
     const settings = await settingsStore.update(updates);
+    log.info({ updates }, 'Settings updated');
 
     // If timezone changed, reschedule all jobs with new timezone
     if (updates.timezone) {
+      log.info({ timezone: updates.timezone }, 'Reinitializing scheduler with new timezone');
       await schedulerService.reinitializeWithTimezone(updates.timezone);
     }
 
@@ -75,6 +83,7 @@ settingsRouter.put('/', async (req, res) => {
       message: 'Settings updated',
     } as ApiResponse<AppSettings>);
   } catch (error) {
+    log.error({ err: error }, 'Failed to update settings');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to update settings'),

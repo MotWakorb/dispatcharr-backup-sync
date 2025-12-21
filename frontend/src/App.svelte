@@ -8,6 +8,7 @@
   import Schedules from './components/Schedules.svelte';
   import Notifications from './components/Notifications.svelte';
   import ToastContainer from './components/ToastContainer.svelte';
+  import ErrorBoundary from './components/ErrorBoundary.svelte';
   import { getVersionInfo } from './api';
   import type { VersionInfo } from './types';
 
@@ -113,21 +114,23 @@
       </button>
     </div>
 
-    {#if activeTab === 'sync'}
-      <Sync />
-    {:else if activeTab === 'export'}
-      <Export />
-    {:else if activeTab === 'import'}
-      <Import />
-    {:else if activeTab === 'connections'}
-      <Connections />
-    {:else if activeTab === 'schedules'}
-      <Schedules />
-    {:else if activeTab === 'notifications'}
-      <Notifications />
-    {:else if activeTab === 'jobs'}
-      <Jobs />
-    {/if}
+    <ErrorBoundary fallbackMessage="This section encountered an error">
+      {#if activeTab === 'sync'}
+        <Sync />
+      {:else if activeTab === 'export'}
+        <Export />
+      {:else if activeTab === 'import'}
+        <Import />
+      {:else if activeTab === 'connections'}
+        <Connections />
+      {:else if activeTab === 'schedules'}
+        <Schedules />
+      {:else if activeTab === 'notifications'}
+        <Notifications />
+      {:else if activeTab === 'jobs'}
+        <Jobs />
+      {/if}
+    </ErrorBoundary>
   </div>
 </main>
 

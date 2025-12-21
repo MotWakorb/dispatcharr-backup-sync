@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { notificationStore } from '../services/notificationStore.js';
 import { notificationService } from '../services/notificationService.js';
+import { createLogger } from '../services/logger.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { ApiResponse } from '../types/index.js';
 import type {
@@ -12,6 +13,8 @@ import type {
   DiscordConfig,
   SlackConfig,
 } from '../types/notifications.js';
+
+const log = createLogger('notifications-route');
 
 export const notificationsRouter = Router();
 
@@ -123,6 +126,10 @@ notificationsRouter.post('/providers', async (req, res) => {
     const input: NotificationProviderInput = req.body;
     const validationError = validateProviderInput(input);
     if (validationError) {
+      log.warn(
+        { name: input.name, type: input.type, error: validationError },
+        'Invalid provider input'
+      );
       return res.status(400).json({
         success: false,
         error: validationError,
@@ -130,12 +137,17 @@ notificationsRouter.post('/providers', async (req, res) => {
     }
 
     const provider = await notificationStore.createProvider(input);
+    log.info(
+      { id: provider.id, name: provider.name, type: provider.type },
+      'Notification provider created'
+    );
     res.status(201).json({
       success: true,
       data: provider,
       message: 'Notification provider created',
     } as ApiResponse<NotificationProvider>);
   } catch (error) {
+    log.error({ err: error }, 'Failed to create notification provider');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to create notification provider'),
@@ -184,6 +196,7 @@ notificationsRouter.delete('/providers/:id', async (req, res) => {
     const { id } = req.params;
     const existing = await notificationStore.getProviderById(id);
     if (!existing) {
+      log.warn({ id }, 'Attempted to delete non-existent notification provider');
       return res.status(404).json({
         success: false,
         error: 'Notification provider not found',
@@ -191,11 +204,13 @@ notificationsRouter.delete('/providers/:id', async (req, res) => {
     }
 
     await notificationStore.deleteProvider(id);
+    log.info({ id, name: existing.name, type: existing.type }, 'Notification provider deleted');
     res.json({
       success: true,
       message: 'Notification provider deleted',
     } as ApiResponse);
   } catch (error) {
+    log.error({ err: error, id: req.params.id }, 'Failed to delete notification provider');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to delete notification provider'),
@@ -207,12 +222,19 @@ notificationsRouter.delete('/providers/:id', async (req, res) => {
 notificationsRouter.post('/providers/:id/test', async (req, res) => {
   try {
     const { id } = req.params;
+    log.debug({ id }, 'Testing notification provider');
     const result = await notificationService.testProvider(id);
+    if (result.success) {
+      log.info({ id }, 'Notification provider test successful');
+    } else {
+      log.warn({ id, message: result.message }, 'Notification provider test failed');
+    }
     res.json({
       success: result.success,
       message: result.message,
     } as ApiResponse);
   } catch (error) {
+    log.error({ err: error, id: req.params.id }, 'Failed to test notification provider');
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to test notification provider'),

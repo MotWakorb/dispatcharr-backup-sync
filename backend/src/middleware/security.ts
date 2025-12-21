@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('security');
 
 // ============ CORS Configuration ============
 
@@ -42,6 +45,7 @@ export const corsMiddleware = cors({
       return callback(null, true);
     }
 
+    log.warn({ origin }, 'CORS request blocked from unauthorized origin');
     callback(new Error(`Origin ${origin} not allowed by CORS policy`));
   },
   credentials: true,
@@ -66,6 +70,10 @@ export const generalRateLimiter = rateLimit({
     // Skip rate limiting for health checks
     return req.path === '/health';
   },
+  handler: (req, res, _next, options) => {
+    log.warn({ ip: req.ip, path: req.path, method: req.method }, 'General rate limit exceeded');
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // Stricter rate limit for authentication/connection testing
@@ -78,6 +86,13 @@ export const authRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res, _next, options) => {
+    log.warn(
+      { ip: req.ip, path: req.path },
+      'Auth rate limit exceeded - possible brute force attempt'
+    );
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // Rate limit for job creation (export, import, sync)
@@ -90,6 +105,10 @@ export const jobCreationRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res, _next, options) => {
+    log.warn({ ip: req.ip, path: req.path }, 'Job creation rate limit exceeded');
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // Rate limit for file uploads
@@ -102,6 +121,10 @@ export const uploadRateLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res, _next, options) => {
+    log.warn({ ip: req.ip, path: req.path }, 'Upload rate limit exceeded');
+    res.status(options.statusCode).json(options.message);
+  },
 });
 
 // ============ Payload Size Configuration ============

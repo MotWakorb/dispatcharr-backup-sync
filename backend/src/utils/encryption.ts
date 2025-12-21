@@ -2,6 +2,9 @@ import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createLogger } from '../services/logger.js';
+
+const log = createLogger('encryption');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -35,7 +38,7 @@ async function getOrCreateEncryptionKey(): Promise<Buffer> {
     // Generate new key if none exists
     encryptionKey = crypto.randomBytes(32);
     await fs.writeFile(KEY_FILE, encryptionKey, { mode: 0o600 });
-    console.log('Generated new encryption key for credential storage');
+    log.info('Generated new encryption key for credential storage');
     return encryptionKey;
   }
 }
@@ -139,7 +142,10 @@ export async function decryptSensitiveFields<T extends Record<string, unknown>>(
       try {
         (result as Record<string, unknown>)[field] = await decrypt(value);
       } catch (error) {
-        console.error(`Failed to decrypt field ${field}:`, error);
+        log.warn(
+          { field, err: error },
+          'Failed to decrypt field, may be plaintext from old format'
+        );
         // Leave the value as-is if decryption fails (might be plaintext from old format)
       }
     }

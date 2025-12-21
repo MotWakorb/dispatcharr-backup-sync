@@ -1,12 +1,12 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
-import archiver from 'archiver';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 import type { ExportRequest, ExportOptions, CleanupResult } from '../types/index.js';
 import { DEFAULT_PAGE_SIZE, LOGO_TIMEOUT_MS } from '../constants.js';
+import { compressDirectory } from '../utils/compression.js';
 
 const log = createLogger('export');
 
@@ -645,7 +645,7 @@ export class ExportService {
       await writeFile(jsonPath, this.formatExportContent(configData), 'utf-8');
 
       jobManager.setProgress(jobId, 98, 'Compressing...');
-      const finalFilePath = await this.compressDirectory(workDir);
+      const finalFilePath = await this.compressDirectoryToZip(workDir, jobId);
 
       jobManager.completeJob(jobId, {
         filePath: finalFilePath,
@@ -666,20 +666,35 @@ export class ExportService {
     }
   }
 
-  private async compressDirectory(workDir: string): Promise<string> {
+  private async compressDirectoryToZip(workDir: string, jobId?: string): Promise<string> {
     const baseName = path.basename(workDir);
     const zipPath = path.join(this.backupDir, `${baseName}.zip`);
-    const output = fs.createWriteStream(zipPath);
-    const archive = archiver('zip', { zlib: { level: 9 } });
 
-    return new Promise((resolve, reject) => {
-      output.on('close', () => resolve(zipPath));
-      archive.on('error', reject);
+    log.debug({ workDir, zipPath }, 'Starting directory compression');
 
-      archive.pipe(output);
-      archive.directory(workDir, false);
-      archive.finalize();
+    const result = await compressDirectory(workDir, zipPath, {
+      level: 6, // Balanced compression (faster than 9, still good compression)
+      useWorker: true, // Use worker thread for large backups
+      workerThreshold: 10 * 1024 * 1024, // 10MB threshold
+      onProgress: (progress) => {
+        if (jobId && progress.percentage !== undefined) {
+          // Update job progress during compression phase
+          log.debug({ percentage: progress.percentage }, 'Compression progress');
+        }
+      },
     });
+
+    log.info(
+      {
+        zipPath: result.zipPath,
+        size: result.size,
+        duration: result.duration,
+        fileCount: result.fileCount,
+      },
+      'Compression complete'
+    );
+
+    return result.zipPath;
   }
 
   private generateSummary(exportData: any): any {

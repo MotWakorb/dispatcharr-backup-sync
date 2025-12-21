@@ -256,7 +256,30 @@ If no comskip configuration exists on the source instance, it will be reported a
 
 ## Running Tests
 
-Run the Playwright smoke test against a running stack:
+### Backend Unit Tests
+
+```bash
+cd backend && npm test
+```
+
+### E2E Tests (Playwright)
+
+The E2E test suite covers key workflows including navigation, backup/restore, sync, jobs, and schedules.
+
+```bash
+# Install dependencies
+cd tests && npm install
+
+# Run tests (requires frontend and backend running)
+npm test
+
+# Run with UI for debugging
+npm run test:ui
+```
+
+### Smoke Test (Docker)
+
+Run a quick smoke test against a running Docker stack:
 
 ```bash
 docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
@@ -267,6 +290,18 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
 ```
 
 ## Changelog
+
+### v1.4.0
+- **Frontend Error Handling**: Added error boundaries and loading state components for better UX
+- **Performance**: Large backup compression now uses worker threads to avoid blocking the event loop
+- **Job Management**: Improved job data cleanup with archiving strategy for jobs older than 30 days
+- **E2E Testing**: Added Playwright test suite for key workflows (navigation, backup/restore, sync, jobs, schedules)
+- **Dependency Management**: Added Dependabot for automated security and dependency updates
+- **Backend Improvements**:
+  - Environment variable validation at startup
+  - Request correlation IDs for distributed tracing
+  - Exponential backoff retry for network operations
+  - Centralized constants for maintainability
 
 ### v1.3.1
 - **UI Improvements**: Added Logs button to active jobs table, auto-refresh logs modal for running jobs

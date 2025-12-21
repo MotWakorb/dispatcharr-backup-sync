@@ -1,0 +1,15 @@
+{
+  "name": "dispatcharr-manager-e2e",
+  "version": "1.0.0",
+  "description": "E2E tests for Dispatcharr Manager",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:smoke": "node smoke.playwright.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
+  }
+}

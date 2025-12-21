@@ -2,12 +2,18 @@ import fs from 'fs';
 import path from 'path';
 import type { JobStatus, JobLogEntry } from '../types/index.js';
 import { createLogger } from './logger.js';
-import { CLEANUP_INTERVAL_MS } from '../constants.js';
+import {
+  CLEANUP_INTERVAL_MS,
+  JOB_HISTORY_MAX_COUNT,
+  JOB_HISTORY_MAX_AGE_MS,
+  JOB_LOG_MAX_ENTRIES,
+} from '../constants.js';
 
 const logger = createLogger('jobs');
 const DATA_DIR = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
 const JOBS_FILE = path.join(DATA_DIR, 'jobs.json');
 const LOGS_FILE = path.join(DATA_DIR, 'logs.json');
+const ARCHIVE_FILE = path.join(DATA_DIR, 'jobs-archive.json');
 
 class JobManager {
   private jobs: Map<string, JobStatus> = new Map();
@@ -229,19 +235,122 @@ class JobManager {
     }
   }
 
-  // Clean up old jobs (completed > 1 hour ago)
+  /**
+   * Clean up old jobs and archive history
+   * - Removes completed jobs from active list after 1 hour
+   * - Archives jobs older than 30 days
+   * - Trims history to max count
+   * - Cleans up orphaned logs
+   */
   cleanup(): void {
     const oneHourAgo = new Date(Date.now() - CLEANUP_INTERVAL_MS);
+    const archiveThreshold = new Date(Date.now() - JOB_HISTORY_MAX_AGE_MS);
     let cleaned = false;
+
+    // Remove completed jobs from active jobs map after 1 hour
     for (const [jobId, job] of this.jobs.entries()) {
       if (job.completedAt && job.completedAt < oneHourAgo) {
         this.jobs.delete(jobId);
+        cleaned = true;
+      }
+    }
+
+    // Archive jobs older than 30 days from history
+    const jobsToArchive = this.history.filter(
+      (job) => job.completedAt && job.completedAt < archiveThreshold
+    );
+
+    if (jobsToArchive.length > 0) {
+      this.archiveJobs(jobsToArchive);
+      this.history = this.history.filter(
+        (job) => !job.completedAt || job.completedAt >= archiveThreshold
+      );
+      cleaned = true;
+      logger.info({ count: jobsToArchive.length }, 'Archived old jobs');
+    }
+
+    // Trim history to max count (keeping most recent)
+    if (this.history.length > JOB_HISTORY_MAX_COUNT) {
+      const removed = this.history.length - JOB_HISTORY_MAX_COUNT;
+      this.history = this.history.slice(-JOB_HISTORY_MAX_COUNT);
+      cleaned = true;
+      logger.debug({ removed }, 'Trimmed history to max count');
+    }
+
+    // Clean up orphaned logs (logs for jobs no longer in active or history)
+    const activeJobIds = new Set([...this.jobs.keys(), ...this.history.map((j) => j.jobId)]);
+    for (const jobId of this.logs.keys()) {
+      if (!activeJobIds.has(jobId)) {
         this.logs.delete(jobId);
         cleaned = true;
       }
     }
+
     if (cleaned) {
       this.saveToDisk();
+    }
+  }
+
+  /**
+   * Archive jobs to a separate file for long-term storage
+   */
+  private archiveJobs(jobs: JobStatus[]): void {
+    try {
+      let archive: JobStatus[] = [];
+
+      // Load existing archive
+      if (fs.existsSync(ARCHIVE_FILE)) {
+        const data = fs.readFileSync(ARCHIVE_FILE, 'utf-8');
+        archive = JSON.parse(data);
+      }
+
+      // Add new jobs to archive
+      archive.push(...jobs);
+
+      // Keep archive file manageable (last 1000 jobs)
+      if (archive.length > 1000) {
+        archive = archive.slice(-1000);
+      }
+
+      fs.writeFileSync(ARCHIVE_FILE, JSON.stringify(archive, null, 2));
+      logger.debug({ count: jobs.length, total: archive.length }, 'Jobs archived');
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to archive jobs');
+    }
+  }
+
+  /**
+   * Get archived jobs (for admin/debugging purposes)
+   */
+  getArchivedJobs(): JobStatus[] {
+    try {
+      if (fs.existsSync(ARCHIVE_FILE)) {
+        const data = fs.readFileSync(ARCHIVE_FILE, 'utf-8');
+        const archive = JSON.parse(data);
+        // Convert dates
+        for (const job of archive) {
+          if (job.startedAt) job.startedAt = new Date(job.startedAt);
+          if (job.completedAt) job.completedAt = new Date(job.completedAt);
+        }
+        return archive;
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to load archived jobs');
+    }
+    return [];
+  }
+
+  /**
+   * Clear archived jobs
+   */
+  clearArchive(): void {
+    try {
+      if (fs.existsSync(ARCHIVE_FILE)) {
+        fs.unlinkSync(ARCHIVE_FILE);
+        logger.info('Archive cleared');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to clear archive');
     }
   }
 
@@ -253,6 +362,16 @@ class JobManager {
       timestamp,
       message,
     });
+
+    // Enforce max log entries per job to prevent memory bloat
+    if (log.length > JOB_LOG_MAX_ENTRIES) {
+      // Keep first 10 entries (job start context) and last (max - 10) entries
+      const keepStart = 10;
+      const keepEnd = JOB_LOG_MAX_ENTRIES - keepStart;
+      const trimmedLog = [...log.slice(0, keepStart), ...log.slice(-keepEnd)];
+      this.logs.set(jobId, trimmedLog);
+    }
+
     // Mirror to structured logs for docker logs visibility
     const shortId = jobId.slice(0, 8);
     logger.debug({ jobId: shortId, message }, 'Job log entry');
@@ -271,9 +390,9 @@ class JobManager {
     const snapshot: JobStatus = { ...job };
     this.history = this.history.filter((j) => j.jobId !== job.jobId);
     this.history.push(snapshot);
-    // keep latest 100
-    if (this.history.length > 100) {
-      this.history = this.history.slice(this.history.length - 100);
+    // keep latest JOB_HISTORY_MAX_COUNT
+    if (this.history.length > JOB_HISTORY_MAX_COUNT) {
+      this.history = this.history.slice(-JOB_HISTORY_MAX_COUNT);
     }
   }
 

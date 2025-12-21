@@ -4,8 +4,26 @@ import { CookieJar } from 'tough-cookie';
 import type { DispatcharrConnection, TestConnectionResponse } from '../types/index.js';
 import { createLogger } from './logger.js';
 import { HTTP_TIMEOUT_MS } from '../constants.js';
+import { withRetry, isNetworkError } from '../utils/retry.js';
 
 const log = createLogger('http-client');
+
+/**
+ * Check if an error is retryable for API calls.
+ * Retries network errors and 5xx server errors, but not auth errors.
+ */
+function isApiRetryable(error: unknown): boolean {
+  // Don't retry auth errors - they need re-authentication, not retry
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  if (status === 401 || status === 403) {
+    return false;
+  }
+  // Don't retry client errors (except rate limiting)
+  if (status && status >= 400 && status < 500 && status !== 429) {
+    return false;
+  }
+  return isNetworkError(error);
+}
 
 // Redaction utility to prevent logging sensitive data
 const SENSITIVE_KEYS =
@@ -246,37 +264,40 @@ export class DispatcharrClient {
       await this.authenticate();
     }
 
-    try {
+    const axiosConfig = config
+      ? config.params || config.responseType || config.headers
+        ? config
+        : { params: config }
+      : undefined;
+
+    const makeRequest = async (): Promise<T> => {
       log.debug({ endpoint }, 'Making GET request');
-      const axiosConfig = config
-        ? config.params || config.responseType || config.headers
-          ? config
-          : { params: config }
-        : undefined;
       const response = await this.client.get(endpoint, axiosConfig);
       log.debug({ endpoint, status: response.status }, 'GET response');
       return response.data ?? response;
-    } catch (error: any) {
+    };
+
+    try {
+      return await withRetry(makeRequest, {
+        maxRetries: 3,
+        operationName: `GET ${endpoint}`,
+        isRetryable: isApiRetryable,
+      });
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
       log.error(
         {
           endpoint,
-          status: error.response?.status,
-          data: safeStringify(error.response?.data, 500),
+          status,
+          data: safeStringify((error as { response?: { data?: unknown } })?.response?.data, 500),
         },
         'GET failed'
       );
-      if (error.response?.status === 401) {
-        // Token expired, re-authenticate
+      if (status === 401) {
+        // Token expired, re-authenticate and retry once
         this.authenticated = false;
         await this.authenticate();
-        // Retry with new token
-        const axiosConfig = config
-          ? config.params || config.responseType || config.headers
-            ? config
-            : { params: config }
-          : undefined;
-        const response = await this.client.get(endpoint, axiosConfig);
-        return response.data ?? response;
+        return makeRequest();
       }
       throw error;
     }
@@ -287,7 +308,7 @@ export class DispatcharrClient {
       await this.authenticate();
     }
 
-    try {
+    const makeRequest = async (): Promise<T> => {
       log.debug({ endpoint }, 'Making POST request');
       if (data !== undefined) {
         log.debug({ endpoint, payload: safeStringify(data) }, 'POST payload');
@@ -295,20 +316,28 @@ export class DispatcharrClient {
       const response = await this.client.post(endpoint, data, config);
       log.debug({ endpoint, status: response.status }, 'POST response');
       return response.data;
-    } catch (error: any) {
+    };
+
+    try {
+      return await withRetry(makeRequest, {
+        maxRetries: 3,
+        operationName: `POST ${endpoint}`,
+        isRetryable: isApiRetryable,
+      });
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
       log.error(
         {
           endpoint,
-          status: error.response?.status,
-          data: safeStringify(error.response?.data, 500),
+          status,
+          data: safeStringify((error as { response?: { data?: unknown } })?.response?.data, 500),
         },
         'POST failed'
       );
-      if (error.response?.status === 401) {
+      if (status === 401) {
         this.authenticated = false;
         await this.authenticate();
-        const response = await this.client.post(endpoint, data, config);
-        return response.data;
+        return makeRequest();
       }
       throw error;
     }
@@ -319,15 +348,25 @@ export class DispatcharrClient {
       await this.authenticate();
     }
 
-    try {
+    const makeRequest = async (): Promise<T> => {
+      log.debug({ endpoint }, 'Making PUT request');
       const response = await this.client.put(endpoint, data);
+      log.debug({ endpoint, status: response.status }, 'PUT response');
       return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+    };
+
+    try {
+      return await withRetry(makeRequest, {
+        maxRetries: 3,
+        operationName: `PUT ${endpoint}`,
+        isRetryable: isApiRetryable,
+      });
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 401) {
         this.authenticated = false;
         await this.authenticate();
-        const response = await this.client.put(endpoint, data);
-        return response.data;
+        return makeRequest();
       }
       throw error;
     }
@@ -338,17 +377,27 @@ export class DispatcharrClient {
       await this.authenticate();
     }
 
-    try {
-      const config = data ? { data } : undefined;
-      const response = await this.client.delete(endpoint, config);
+    const axiosConfig = data ? { data } : undefined;
+
+    const makeRequest = async (): Promise<T> => {
+      log.debug({ endpoint }, 'Making DELETE request');
+      const response = await this.client.delete(endpoint, axiosConfig);
+      log.debug({ endpoint, status: response.status }, 'DELETE response');
       return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 401) {
+    };
+
+    try {
+      return await withRetry(makeRequest, {
+        maxRetries: 3,
+        operationName: `DELETE ${endpoint}`,
+        isRetryable: isApiRetryable,
+      });
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 401) {
         this.authenticated = false;
         await this.authenticate();
-        const config = data ? { data } : undefined;
-        const response = await this.client.delete(endpoint, config);
-        return response.data;
+        return makeRequest();
       }
       throw error;
     }
@@ -359,28 +408,35 @@ export class DispatcharrClient {
       await this.authenticate();
     }
 
-    try {
+    const makeRequest = async (): Promise<T> => {
       log.debug({ endpoint }, 'Making PATCH request');
       log.debug({ endpoint, payload: safeStringify(data, 500) }, 'PATCH payload');
       const response = await this.client.patch(endpoint, data, config);
       log.debug({ endpoint, status: response.status }, 'PATCH response');
       return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        this.authenticated = false;
-        await this.authenticate();
-        const response = await this.client.patch(endpoint, data, config);
-        log.debug({ endpoint, status: response.status }, 'PATCH response after re-auth');
-        return response.data;
-      }
+    };
+
+    try {
+      return await withRetry(makeRequest, {
+        maxRetries: 3,
+        operationName: `PATCH ${endpoint}`,
+        isRetryable: isApiRetryable,
+      });
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
       log.error(
         {
           endpoint,
-          status: error.response?.status,
-          data: safeStringify(error.response?.data, 500),
+          status,
+          data: safeStringify((error as { response?: { data?: unknown } })?.response?.data, 500),
         },
         'PATCH failed'
       );
+      if (status === 401) {
+        this.authenticated = false;
+        await this.authenticate();
+        return makeRequest();
+      }
       throw error;
     }
   }
