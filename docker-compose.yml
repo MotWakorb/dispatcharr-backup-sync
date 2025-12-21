@@ -12,6 +12,7 @@ services:
       - PORT=6002
       - DATA_DIR=/data
       - TZ=${TZ:-UTC}
+      - ALLOW_PRIVATE_URLS=true
     volumes:
       - backend-data:/data
       - type: bind

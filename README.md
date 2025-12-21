@@ -192,6 +192,8 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `NODE_ENV` | Node environment | `production` |
 | `PORT` | Backend API port | `6002` |
 | `DATA_DIR` | Persistent data directory | `/data` |
+| `ALLOW_PRIVATE_URLS` | Allow connections to private IP addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x) | `true` |
+| `TZ` | Timezone for scheduled jobs | `UTC` |
 
 ## API Reference
 
