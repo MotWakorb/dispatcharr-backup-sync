@@ -21,6 +21,8 @@
   let logs: JobLogEntry[] = [];
   let logsLoading = false;
   let logsError: string | null = null;
+  let logsAutoRefreshInterval: number | null = null;
+  const LOGS_REFRESH_INTERVAL_MS = 2000; // Auto-refresh logs every 2 seconds for running jobs
 
   // Job completion tracking
   let previousJobStatuses: Map<string, string> = new Map();
@@ -34,6 +36,9 @@
   onDestroy(() => {
     if (pollInterval) {
       clearInterval(pollInterval);
+    }
+    if (logsAutoRefreshInterval) {
+      clearInterval(logsAutoRefreshInterval);
     }
   });
 
@@ -136,12 +141,44 @@
     logsLoading = true;
     logsError = null;
     logs = [];
+
+    // Clear any existing auto-refresh
+    if (logsAutoRefreshInterval) {
+      clearInterval(logsAutoRefreshInterval);
+      logsAutoRefreshInterval = null;
+    }
+
     try {
       logs = await getJobLogs(job.jobId);
     } catch (err: unknown) {
       logsError = getErrorMessage(err, ERRORS.LOAD_LOGS);
     } finally {
       logsLoading = false;
+    }
+
+    // Start auto-refresh if job is still running
+    if (job.status === 'running' || job.status === 'pending') {
+      logsAutoRefreshInterval = window.setInterval(async () => {
+        // Check if job is still active by finding it in the jobs list
+        const currentJob = jobs.find(j => j.jobId === job.jobId);
+        if (!currentJob || (currentJob.status !== 'running' && currentJob.status !== 'pending')) {
+          // Job completed or no longer active, stop auto-refresh and do one final refresh
+          if (logsAutoRefreshInterval) {
+            clearInterval(logsAutoRefreshInterval);
+            logsAutoRefreshInterval = null;
+          }
+          // Update the modal job status
+          if (currentJob) {
+            logsModalJob = currentJob;
+          }
+        }
+        // Silently refresh logs (don't show loading spinner for auto-refresh)
+        try {
+          logs = await getJobLogs(job.jobId);
+        } catch {
+          // Silently ignore errors during auto-refresh
+        }
+      }, LOGS_REFRESH_INTERVAL_MS);
     }
   }
 
@@ -159,6 +196,11 @@
   }
 
   function closeLogsModal() {
+    // Stop auto-refresh when closing modal
+    if (logsAutoRefreshInterval) {
+      clearInterval(logsAutoRefreshInterval);
+      logsAutoRefreshInterval = null;
+    }
     showLogsModal = false;
     logsModalJob = null;
     logs = [];
@@ -242,9 +284,14 @@
                     >
                       Cancel
                     </button>
-                  {:else}
-                    -
                   {/if}
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    on:click={(e) => { e.stopPropagation(); viewLogs(job); }}
+                    title="View logs"
+                  >
+                    Logs
+                  </button>
                 </td>
               </tr>
             {/each}
@@ -310,9 +357,6 @@
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
-                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
-                    Logs
-                  </button>
                   {#if job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
@@ -323,6 +367,9 @@
                       </button>
                     {/if}
                   {/if}
+                  <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
+                    Logs
+                  </button>
                 </td>
               </tr>
             {/each}
@@ -344,12 +391,10 @@
         </div>
         <div class="modal-actions">
           {#if logsModalJob?.status === 'running' || logsModalJob?.status === 'pending'}
-            <button class="btn btn-secondary btn-sm" type="button" on:click={refreshLogs} disabled={logsLoading}>
-              {#if logsLoading}
-                <span class="spinner"></span>
-              {/if}
-              {LABELS.REFRESH}
-            </button>
+            <span class="auto-refresh-indicator">
+              <span class="pulse-dot"></span>
+              Auto-refreshing
+            </span>
           {/if}
           <button class="close-btn" type="button" on:click={closeLogsModal} aria-label="Close">
             &times;
@@ -573,6 +618,33 @@
 
   .text-right {
     text-align: right;
+  }
+
+  .auto-refresh-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--success);
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(0.8);
+    }
   }
 
   .job-row {
