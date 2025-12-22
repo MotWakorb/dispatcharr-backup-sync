@@ -223,28 +223,7 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 | `/api/notifications/settings` | GET/PUT | Manage notification settings |
 | `/api/info` | GET | Get version info and update availability |
 
-## Known Issues
-
-### Logo Backup/Restore/Sync
-
-Logo backup, restore, and sync are fully supported as of v1.4.1. The tool handles two types of logos:
-- **URL-based logos** (e.g., `https://logo.m3uassets.com/...`): Stored as name→URL mappings and synced via API (no redundant downloads)
-- **Local file logos** (stored in `/data/logos`): Downloaded during backup/sync and uploaded during restore/sync
-
-All logos are properly assigned to their channels during sync operations.
-
-### M3U Auto Channel Sync Limitation
-
-When syncing M3U sources, the **auto channel sync** feature cannot be properly preserved due to a Dispatcharr API limitation. The API does not expose or accept the auto channel sync configuration during M3U account creation/update.
-
-**Workaround**: After syncing M3U sources, manually enable auto channel sync on the destination instance if needed:
-1. Go to your destination Dispatcharr instance
-2. Navigate to M3U Sources
-3. Edit each M3U source and configure the auto channel sync settings as desired
-
-### Custom Streams for Non-M3U Channels
-
-Channels with direct URL streams (not from M3U sources) are handled specially during sync. The tool will attempt to create custom streams for these channels on the destination. This works for channels like weather feeds or other hand-configured streams with direct URLs.
+## Known Limitations
 
 ### Comskip Config
 
