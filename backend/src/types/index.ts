@@ -61,12 +61,13 @@ export interface ImportRequest {
 
 export interface JobStatus {
   jobId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled';
   jobType?: 'backup' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
   result?: ExportJobResult | ImportJobResult | SyncJobResult;
   error?: string;
+  warnings?: string[];
   startedAt: Date;
   completedAt?: Date;
 }
@@ -307,3 +308,167 @@ export interface SyncJobResult {
  * Union type for all job results
  */
 export type JobResult = ExportJobResult | ImportJobResult | SyncJobResult;
+
+// ============================================
+// Dispatcharr API Entity Types
+// ============================================
+
+/**
+ * Base interface for Dispatcharr entities with an ID
+ */
+export interface DispatcharrEntity {
+  id: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Paginated response from Dispatcharr API
+ */
+export interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+/**
+ * Channel Group from Dispatcharr API
+ */
+export interface ChannelGroup extends DispatcharrEntity {
+  name: string;
+  enabled?: boolean;
+  sort_order?: number;
+}
+
+/**
+ * Channel Profile from Dispatcharr API
+ */
+export interface ChannelProfile extends DispatcharrEntity {
+  name: string;
+  stream_profile?: number;
+}
+
+/**
+ * Channel from Dispatcharr API
+ */
+export interface Channel extends DispatcharrEntity {
+  name: string;
+  channel_number?: string | number;
+  channel_group?: number;
+  logo?: number;
+  logo_id?: number;
+  profile?: number;
+  epg_channel?: number;
+  enabled?: boolean;
+  auto_created?: boolean;
+}
+
+/**
+ * Logo from Dispatcharr API
+ */
+export interface Logo extends DispatcharrEntity {
+  name: string;
+  url?: string;
+  file?: string;
+}
+
+/**
+ * M3U Account from Dispatcharr API
+ */
+export interface M3UAccount extends DispatcharrEntity {
+  name: string;
+  url?: string;
+  username?: string;
+  password?: string;
+  type?: string;
+  enabled?: boolean;
+}
+
+/**
+ * Stream Profile from Dispatcharr API
+ */
+export interface StreamProfile extends DispatcharrEntity {
+  name: string;
+}
+
+/**
+ * User Agent from Dispatcharr API
+ */
+export interface UserAgent extends DispatcharrEntity {
+  name: string;
+  user_agent?: string;
+}
+
+/**
+ * EPG Source from Dispatcharr API
+ */
+export interface EPGSource extends DispatcharrEntity {
+  name: string;
+  url?: string;
+  type?: string;
+}
+
+/**
+ * EPG Data entry
+ */
+export interface EPGData extends DispatcharrEntity {
+  name?: string;
+  channel_id?: string;
+}
+
+/**
+ * DVR Rule from Dispatcharr API
+ */
+export interface DVRRule extends DispatcharrEntity {
+  name: string;
+  enabled?: boolean;
+}
+
+/**
+ * User from Dispatcharr API
+ */
+export interface User extends DispatcharrEntity {
+  username: string;
+  email?: string;
+  is_active?: boolean;
+  is_staff?: boolean;
+}
+
+/**
+ * Core Settings from Dispatcharr API
+ */
+export interface CoreSettings {
+  [key: string]: unknown;
+}
+
+/**
+ * Export data structure for backup files
+ */
+export interface ExportData {
+  exported_at: string;
+  source_url: string;
+  summary?: ExportSummary;
+  data: {
+    channelGroups?: ChannelGroup[];
+    channelProfiles?: ChannelProfile[];
+    channels?: Channel[];
+    m3uSources?: M3UAccount[];
+    streamProfiles?: StreamProfile[];
+    userAgents?: UserAgent[];
+    coreSettings?: CoreSettings;
+    epgSources?: EPGSource[];
+    epgData?: EPGData[];
+    dvrRules?: DVRRule[];
+    users?: User[];
+    logos?: Logo[];
+    plugins?: PluginInfo[];
+    comskipConfig?: unknown;
+  };
+}
+
+/**
+ * Summary of exported data
+ */
+export interface ExportSummary {
+  [section: string]: number | string;
+}

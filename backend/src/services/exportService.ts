@@ -4,9 +4,19 @@ import { createLogger } from './logger.js';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
-import type { ExportRequest, ExportOptions, CleanupResult } from '../types/index.js';
-import { DEFAULT_PAGE_SIZE, LOGO_TIMEOUT_MS } from '../constants.js';
+import type {
+  ExportRequest,
+  ExportOptions,
+  CleanupResult,
+  ExportData,
+  PaginatedResponse,
+  DispatcharrEntity,
+  Logo,
+  Channel,
+} from '../types/index.js';
+import { DEFAULT_PAGE_SIZE, LOGO_TIMEOUT_MS, MAX_PAGINATION_PAGES } from '../constants.js';
 import { compressDirectory } from '../utils/compression.js';
+import { isExternalUrl, getLogoExtension, calculateLogoChecksum } from '../utils/logoUtils.js';
 
 const log = createLogger('export');
 
@@ -28,8 +38,12 @@ export class ExportService {
     }
   }
 
-  private async getAllPaginated(client: any, endpoint: string, jobId?: string): Promise<any[]> {
-    let allResults: any[] = [];
+  private async getAllPaginated<T extends DispatcharrEntity>(
+    client: DispatcharrClient,
+    endpoint: string,
+    jobId?: string
+  ): Promise<T[]> {
+    let allResults: T[] = [];
     let page = 1;
     const pageSize = DEFAULT_PAGE_SIZE;
 
@@ -37,9 +51,27 @@ export class ExportService {
       if (jobId) {
         this.throwIfCancelled(jobId);
       }
-      const response = await client.get(`${endpoint}?page=${page}&page_size=${pageSize}`);
 
-      if (response.results && Array.isArray(response.results)) {
+      // Prevent infinite loops with max page limit
+      if (page > MAX_PAGINATION_PAGES) {
+        const warning = `Pagination limit reached for ${endpoint}: stopped at page ${page} with ${allResults.length} items`;
+        log.warn({ endpoint, page, itemCount: allResults.length }, warning);
+        if (jobId) {
+          jobManager.addWarning(jobId, warning);
+        }
+        break;
+      }
+
+      const response = await client.get<PaginatedResponse<T> | T[] | T>(
+        `${endpoint}?page=${page}&page_size=${pageSize}`
+      );
+
+      if (
+        response &&
+        typeof response === 'object' &&
+        'results' in response &&
+        Array.isArray(response.results)
+      ) {
         allResults = allResults.concat(response.results);
         if (!response.next) {
           break;
@@ -50,7 +82,7 @@ export class ExportService {
         return response;
       } else {
         // Single object response
-        return [response];
+        return [response as T];
       }
     }
 
@@ -176,7 +208,7 @@ export class ExportService {
         });
 
         // Fetch logos to build ID -> name mapping for channel logo_name export
-        const allLogos = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
+        const allLogos = await this.getAllPaginated<Logo>(client, '/api/channels/logos/', jobId);
         const logoIdToName: Record<number, string> = {};
         for (const logo of allLogos) {
           if (logo?.id && logo?.name) {
@@ -431,20 +463,26 @@ export class ExportService {
         jobManager.setProgress(jobId, Math.round(currentProgress), 'Fetching logo metadata...');
 
         // First, get all channels to find which logos are actually used by MANUAL channels
-        const channels = await this.getAllPaginated(client, '/api/channels/channels/', jobId);
+        const channels = await this.getAllPaginated<Channel>(
+          client,
+          '/api/channels/channels/',
+          jobId
+        );
 
         // Filter to only manual channels (exclude auto_created from M3U auto-sync)
-        const manualChannels = channels.filter((ch: any) => !ch.auto_created);
+        const manualChannels = channels.filter((ch) => !ch.auto_created);
 
         const channelLogoIds = new Set<number>();
         for (const ch of manualChannels) {
-          if (ch.logo_id != null) channelLogoIds.add(ch.logo_id);
-          if (ch.logo != null && typeof ch.logo === 'number') channelLogoIds.add(ch.logo);
+          const logoId = ch.logo_id as number | undefined;
+          const logo = ch.logo;
+          if (logoId != null) channelLogoIds.add(logoId);
+          if (logo != null && typeof logo === 'number') channelLogoIds.add(logo);
         }
 
         // Now fetch all logos and filter to only manual channel logos
-        const allLogos = await this.getAllPaginated(client, '/api/channels/logos/', jobId);
-        logosToExport = allLogos.filter((l: any) => channelLogoIds.has(l.id));
+        const allLogos = await this.getAllPaginated<Logo>(client, '/api/channels/logos/', jobId);
+        logosToExport = allLogos.filter((l) => channelLogoIds.has(l.id));
 
         currentProgress += progressPerStep;
         const autoCreatedCount = channels.length - manualChannels.length;
@@ -507,17 +545,6 @@ export class ExportService {
           [];
         // URL mappings for URL-based logos (no download needed)
         const logoUrlMappings: Array<{ name: string; url: string; source_id: number }> = [];
-
-        // Helper to check if a URL is external (not a local file reference)
-        const isExternalUrl = (url: string | undefined): boolean => {
-          if (!url) return false;
-          // Check for http/https URLs that aren't local Dispatcharr references
-          return (
-            (url.startsWith('http://') || url.startsWith('https://')) &&
-            !url.includes('/api/channels/logos/') &&
-            !url.includes('/data/logos/')
-          );
-        };
 
         // Log first 10 logos to verify order
         if (logosToExport.length > 0) {

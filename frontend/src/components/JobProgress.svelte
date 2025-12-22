@@ -24,10 +24,11 @@
         class:status-pending={job.status === 'pending'}
         class:status-running={job.status === 'running'}
         class:status-completed={job.status === 'completed'}
+        class:status-completed-warnings={job.status === 'completed_with_warnings'}
         class:status-failed={job.status === 'failed'}
         class:status-cancelled={job.status === 'cancelled'}
       >
-        {job.status}
+        {job.status === 'completed_with_warnings' ? 'completed with warnings' : job.status}
       </span>
     </div>
     {#if progressDisplay !== undefined}
@@ -45,13 +46,27 @@
     <p class="text-sm text-gray mb-1">{job.message}</p>
   {/if}
 
+  {#if job.warnings && job.warnings.length > 0}
+    <div class="alert alert-warning">
+      <strong>{job.warnings.length} Warning(s):</strong>
+      <ul class="warnings-list">
+        {#each job.warnings.slice(0, 5) as warning}
+          <li>{warning}</li>
+        {/each}
+        {#if job.warnings.length > 5}
+          <li class="text-sm text-muted">...and {job.warnings.length - 5} more</li>
+        {/if}
+      </ul>
+    </div>
+  {/if}
+
   {#if job.error}
     <div class="alert alert-error">
       {job.error}
     </div>
   {/if}
 
-  {#if job.status === 'completed' && job.result}
+  {#if (job.status === 'completed' || job.status === 'completed_with_warnings') && job.result}
     <div class="result-summary">
       <h4 class="mb-1">Results</h4>
       {#if job.result.summary}
@@ -141,6 +156,11 @@
     color: var(--success);
   }
 
+  .status-completed-warnings {
+    background: var(--bg-warning, #fef3c7);
+    color: var(--warning, #d97706);
+  }
+
   .status-failed {
     background: var(--bg-error);
     color: var(--danger);
@@ -182,5 +202,29 @@
 
   .text-danger {
     color: var(--danger);
+  }
+
+  .alert-warning {
+    background: var(--bg-warning, #fef3c7);
+    color: var(--warning, #d97706);
+    padding: 0.75rem 1rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--warning, #d97706);
+    margin-bottom: 0.5rem;
+  }
+
+  .warnings-list {
+    margin: 0.5rem 0 0 0;
+    padding-left: 1.25rem;
+    font-size: 0.875rem;
+  }
+
+  .warnings-list li {
+    margin-bottom: 0.25rem;
+  }
+
+  .text-muted {
+    color: var(--text-muted, #6b7280);
+    font-style: italic;
   }
 </style>

@@ -23,6 +23,7 @@
   import { formatScheduleDescription } from '../lib/scheduleUtils';
   import ScheduleFormModal from './schedule/ScheduleFormModal.svelte';
   import ScheduleHistoryModal from './schedule/ScheduleHistoryModal.svelte';
+  import Skeleton from './Skeleton.svelte';
 
   // State
   let schedules: Schedule[] = [];
@@ -230,7 +231,26 @@
     {/if}
 
     {#if loading}
-      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading schedules...</span></div>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Schedule</th>
+              <th>Source</th>
+              <th class="next-run-col">Next Run</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <Skeleton variant="table-row" columns={7} />
+            <Skeleton variant="table-row" columns={7} />
+            <Skeleton variant="table-row" columns={7} />
+          </tbody>
+        </table>
+      </div>
     {:else if schedules.length === 0}
       <div class="empty-state">
         <p class="text-gray">No schedules yet.</p>

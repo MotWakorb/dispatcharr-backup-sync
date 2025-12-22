@@ -11,6 +11,7 @@ export const LOGO_TIMEOUT_MS = 15000; // 15 seconds per logo download
 // Pagination
 export const DEFAULT_PAGE_SIZE = 1000;
 export const EPG_PAGE_SIZE = 10000;
+export const MAX_PAGINATION_PAGES = 100; // Prevent infinite loops - 100 pages * 1000 items = 100,000 max items
 export const ERROR_TRUNCATE_LENGTH = 1000;
 
 // Cache/cleanup intervals

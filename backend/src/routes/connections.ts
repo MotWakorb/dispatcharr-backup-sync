@@ -3,6 +3,7 @@ import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import { createLogger } from '../services/logger.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { DispatcharrConnection, ApiResponse, TestConnectionResponse } from '../types/index.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('connections-route');
 
@@ -13,11 +14,12 @@ connectionsRouter.post('/test', async (req, res) => {
   try {
     const connection: DispatcharrConnection = req.body;
 
-    if (!connection.url || !connection.username || !connection.password) {
-      log.warn({ url: connection.url }, 'Connection test failed: missing required fields');
+    const validation = validateConnection(connection, 'connection');
+    if (!validation.success) {
+      log.warn({ url: connection?.url }, 'Connection test failed: missing required fields');
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: url, username, password',
+        error: validation.error,
       } as ApiResponse);
     }
 

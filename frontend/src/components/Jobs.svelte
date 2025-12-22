@@ -4,6 +4,7 @@
   import type { JobStatus, JobLogEntry } from '../types';
   import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS } from '../constants';
   import { toastStore } from '../stores/toastStore';
+  import Skeleton from './Skeleton.svelte';
 
   let jobs: JobStatus[] = [];
   let history: JobStatus[] = [];
@@ -48,6 +49,10 @@
       if (prevStatus && prevStatus !== job.status) {
         if (job.status === 'completed') {
           toastStore.success(`${job.jobType} job completed successfully`);
+          loadHistory();
+        } else if (job.status === 'completed_with_warnings') {
+          const warningCount = job.warnings?.length || 0;
+          toastStore.warning(`${job.jobType} job completed with ${warningCount} warning(s)`);
           loadHistory();
         } else if (job.status === 'failed') {
           toastStore.error(`${job.jobType} job failed: ${job.error || 'Unknown error'}`);
@@ -102,14 +107,16 @@
   }
 
   function download(job: JobStatus) {
-    if (job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName) {
+    const isSuccess = job.status === 'completed' || job.status === 'completed_with_warnings';
+    if (job.jobType === 'backup' && isSuccess && job.result?.fileName) {
       const url = getExportDownloadUrl(job.jobId);
       window.location.href = url;
     }
   }
 
   function downloadLogos(job: JobStatus) {
-    if (job.jobType === 'backup' && job.status === 'completed' && job.result?.logosFileName) {
+    const isSuccess = job.status === 'completed' || job.status === 'completed_with_warnings';
+    if (job.jobType === 'backup' && isSuccess && job.result?.logosFileName) {
       const url = getExportLogosDownloadUrl(job.jobId);
       window.location.href = url;
     }
@@ -232,7 +239,25 @@
     {/if}
 
     {#if loading && jobs.length === 0}
-      <p>{STATUS.LOADING}</p>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Message</th>
+              <th>Progress</th>
+              <th>Started</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <Skeleton variant="table-row" columns={7} />
+            <Skeleton variant="table-row" columns={7} />
+          </tbody>
+        </table>
+      </div>
     {:else if jobs.length === 0}
       <p class="text-gray">{LABELS.NO_JOBS_RUNNING}</p>
     {:else}
@@ -332,7 +357,24 @@
     {#if historyError}
       <div class="alert alert-error">{historyError}</div>
     {:else if loadingHistory && history.length === 0}
-      <p>{STATUS.LOADING}</p>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Finished</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <Skeleton variant="table-row" columns={5} />
+            <Skeleton variant="table-row" columns={5} />
+            <Skeleton variant="table-row" columns={5} />
+          </tbody>
+        </table>
+      </div>
     {:else if history.length === 0}
       <p class="text-gray">{LABELS.NO_HISTORY}</p>
     {:else}
@@ -352,12 +394,12 @@
               <tr>
                 <td class="mono">{job.jobId}</td>
                 <td>{job.jobType || 'unknown'}</td>
-                <td><span class="badge badge-{job.status}">{job.status}</span></td>
+                <td><span class="badge badge-{job.status}">{job.status === 'completed_with_warnings' ? 'warnings' : job.status}</span></td>
                 <td class="text-sm">
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
-                  {#if job.jobType === 'backup' && job.status === 'completed' && job.result?.fileName}
+                  {#if job.jobType === 'backup' && (job.status === 'completed' || job.status === 'completed_with_warnings') && job.result?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
                     </button>
@@ -411,7 +453,7 @@
           <p class="text-sm text-gray">{LABELS.NO_LOGS}</p>
         {:else}
           {#each logs as log}
-            <div class="log-line {/error|failed/i.test(log.message) ? 'log-error' : ''}">
+            <div class="log-line {/error|failed/i.test(log.message) ? 'log-error' : ''} {/^WARNING:/i.test(log.message) ? 'log-warning' : ''}">
               <span class="log-time">{new Date(log.timestamp).toLocaleTimeString()}</span>
               <span class="log-msg">{log.message}</span>
             </div>
@@ -457,6 +499,7 @@
   .badge-running { background: var(--bg-info); color: var(--primary); }
   .badge-pending { background: var(--border-color); color: var(--text-secondary); }
   .badge-completed { background: var(--bg-success); color: var(--success); }
+  .badge-completed_with_warnings { background: var(--bg-warning, #fef3c7); color: var(--warning, #d97706); }
   .badge-failed { background: var(--bg-error); color: var(--danger); }
   .badge-cancelled { background: var(--border-color); color: var(--text-secondary); }
   .mono { font-family: Menlo, Monaco, Consolas, monospace; font-size: 0.8rem; }
@@ -614,6 +657,11 @@
   .log-error .log-msg {
     color: var(--danger);
     font-weight: 600;
+  }
+
+  .log-warning .log-msg {
+    color: var(--warning, #d97706);
+    font-weight: 500;
   }
 
   .text-right {

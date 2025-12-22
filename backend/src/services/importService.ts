@@ -20,6 +20,8 @@ import type {
   LogoFileData,
   DeferredAutoSyncSettings,
   M3UImportResult,
+  PaginatedResponse,
+  DispatcharrEntity,
 } from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
 import { createLogger } from './logger.js';
@@ -36,6 +38,7 @@ import {
   STREAM_POLL_INTERVAL_MS,
   M3U_REFRESH_WAIT_MS,
   POST_REFRESH_DELAY_MS,
+  MAX_PAGINATION_PAGES,
 } from '../constants.js';
 
 const log = createLogger('import');
@@ -112,6 +115,7 @@ export class ImportService {
   /**
    * Creates an error handler for API calls that logs the error and returns a default value.
    * Use with .catch() to prevent silent failures while still allowing graceful degradation.
+   * Warnings are tracked and will cause the job to complete with 'completed_with_warnings' status.
    */
   private warnOnFail<T>(endpoint: string, defaultValue: T, jobId?: string): (error: any) => T {
     return (error: any): T => {
@@ -119,40 +123,56 @@ export class ImportService {
       const message = error?.response?.data?.detail || error?.message || 'Unknown error';
       const warning = `API call to ${endpoint} failed${status ? ` (${status})` : ''}: ${message}`;
       if (jobId) {
-        jobManager.addLog(jobId, `WARNING: ${warning}`);
+        // Use addWarning to track warnings - this will cause completed_with_warnings status
+        jobManager.addWarning(jobId, warning);
       }
       log.warn({ endpoint, status, message }, 'API call failed');
       return defaultValue;
     };
   }
 
-  private normalizeKey(value: any): string | undefined {
+  private normalizeKey(value: unknown): string | undefined {
     return typeof value === 'string' ? value.trim().toLowerCase() : undefined;
   }
 
-  private async getAllPaginated(
+  private async getAllPaginated<T extends DispatcharrEntity>(
     client: DispatcharrClient,
     endpoint: string,
     pageSize = DEFAULT_PAGE_SIZE,
     jobId?: string
-  ): Promise<any[]> {
+  ): Promise<T[]> {
     let page = 1;
-    let all: any[] = [];
+    let all: T[] = [];
 
     while (true) {
       if (jobId) {
         this.throwIfCancelled(jobId);
       }
+
+      // Prevent infinite loops with max page limit
+      if (page > MAX_PAGINATION_PAGES) {
+        const warning = `Pagination limit reached for ${endpoint}: stopped at page ${page} with ${all.length} items`;
+        log.warn({ endpoint, page, itemCount: all.length }, warning);
+        if (jobId) {
+          jobManager.addWarning(jobId, warning);
+        }
+        break;
+      }
+
       // Use & if endpoint already has query params, otherwise use ?
       const separator = endpoint.includes('?') ? '&' : '?';
       const fullEndpoint = `${endpoint}${separator}page=${page}&page_size=${pageSize}`;
       const response = await client
-        .get(fullEndpoint)
-        .catch(this.warnOnFail(fullEndpoint, null, jobId));
+        .get<PaginatedResponse<T> | T[] | T | null>(fullEndpoint)
+        .catch(this.warnOnFail<PaginatedResponse<T> | T[] | T | null>(fullEndpoint, null, jobId));
       if (!response) {
         break;
       }
-      if (Array.isArray(response?.results)) {
+      if (
+        typeof response === 'object' &&
+        'results' in response &&
+        Array.isArray(response.results)
+      ) {
         all = all.concat(response.results);
         if (!response.next) break;
         page++;
@@ -162,19 +182,19 @@ export class ImportService {
         all = response;
         break;
       }
-      all.push(response);
+      all.push(response as T);
       break;
     }
 
     return all;
   }
 
-  private logJobError(jobId: string, section: string, label: any, error: any) {
+  private logJobError(jobId: string, section: string, label: unknown, error: unknown) {
     const details = this.formatErrorDetails(error);
     const labelText = label ? ` (${label})` : '';
     try {
       jobManager.addLog(jobId, `${section} failed${labelText}: ${JSON.stringify(details)}`);
-    } catch (e) {
+    } catch {
       // no-op if logging fails
     }
     log.error({ section, label, details }, 'Import section failed');
@@ -928,7 +948,7 @@ export class ImportService {
         if (!meta) {
           missingMetadata++;
           if (jobId && missingMetadata <= 10) {
-            jobManager.addLog(jobId, `WARNING: No metadata found for file "${img.name}"`);
+            jobManager.addWarning(jobId, `No metadata found for file "${img.name}"`);
           }
         }
 
@@ -953,8 +973,9 @@ export class ImportService {
         });
       }
 
-      if (jobId && missingMetadata > 0) {
-        jobManager.addLog(jobId, `WARNING: ${missingMetadata} logo files had no metadata mapping`);
+      if (jobId && missingMetadata > 10) {
+        // Only add the summary warning if there were more than 10 (individual warnings were suppressed)
+        jobManager.addWarning(jobId, `${missingMetadata} total logo files had no metadata mapping`);
       }
 
       // Add URL-based logos from url-mappings.json
@@ -3640,10 +3661,16 @@ export class ImportService {
     const errors: string[] = [];
     const now = Date.now();
 
+    // Upload directory for multer disk storage
+    const uploadDir = process.env.DATA_DIR
+      ? path.join(process.env.DATA_DIR, 'uploads')
+      : path.join(process.cwd(), 'temp', 'uploads');
+
     try {
       // Ensure directories exist
       await mkdir(this.tempDir, { recursive: true });
       await mkdir(this.cacheDir, { recursive: true });
+      await mkdir(uploadDir, { recursive: true });
 
       // Cleanup upload cache
       const cacheFiles = await fsp.readdir(this.cacheDir);
@@ -3660,10 +3687,29 @@ export class ImportService {
         }
       }
 
+      // Cleanup multer upload directory (stale uploaded files)
+      try {
+        const uploadFiles = await fsp.readdir(uploadDir);
+        for (const file of uploadFiles) {
+          const filePath = path.join(uploadDir, file);
+          try {
+            const stat = await fsp.stat(filePath);
+            if (now - stat.mtimeMs > maxAgeMs) {
+              await unlink(filePath);
+              deleted.push(filePath);
+            }
+          } catch (err) {
+            errors.push(`${filePath}: ${err}`);
+          }
+        }
+      } catch {
+        // Upload dir may not exist yet, that's fine
+      }
+
       // Cleanup extraction directories (zip-*, extract-*)
       const tempFiles = await fsp.readdir(this.tempDir);
       for (const file of tempFiles) {
-        if (file === 'upload-cache') continue; // Skip cache dir itself
+        if (file === 'upload-cache' || file === 'uploads') continue; // Skip subdirs
         const filePath = path.join(this.tempDir, file);
         try {
           const stat = await fsp.stat(filePath);

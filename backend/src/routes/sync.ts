@@ -5,6 +5,7 @@ import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('sync-route');
 
@@ -91,22 +92,20 @@ syncRouter.post('/', async (req, res) => {
       });
     }
 
-    // Validate connections
-    if (!request.source.url || !request.source.username || !request.source.password) {
+    // Validate connections using shared validation
+    const sourceValidation = validateConnection(request.source, 'source connection');
+    if (!sourceValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid source connection: url, username, and password are required',
+        error: sourceValidation.error,
       });
     }
 
-    if (
-      !request.destination.url ||
-      !request.destination.username ||
-      !request.destination.password
-    ) {
+    const destValidation = validateConnection(request.destination, 'destination connection');
+    if (!destValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid destination connection: url, username, and password are required',
+        error: destValidation.error,
       });
     }
 

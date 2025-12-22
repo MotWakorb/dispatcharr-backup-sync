@@ -7,6 +7,7 @@ import fs from 'fs';
 import type { ExportRequest, ExportJobResult } from '../types/index.js';
 import type { ApiResponse } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('export-route');
 
@@ -25,11 +26,12 @@ exportRouter.post('/', async (req, res) => {
       });
     }
 
-    // Validate connection
-    if (!request.source.url || !request.source.username || !request.source.password) {
+    // Validate connection using shared validation
+    const sourceValidation = validateConnection(request.source, 'source connection');
+    if (!sourceValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid source connection: url, username, and password are required',
+        error: sourceValidation.error,
       });
     }
 

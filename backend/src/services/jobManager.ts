@@ -18,12 +18,36 @@ const ARCHIVE_FILE = path.join(DATA_DIR, 'jobs-archive.json');
 class JobManager {
   private jobs: Map<string, JobStatus> = new Map();
   private logs: Map<string, JobLogEntry[]> = new Map();
+  private warnings: Map<string, string[]> = new Map();
   private history: JobStatus[] = [];
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private initialized: Promise<void>;
+
+  // Write queue to serialize async writes and prevent race conditions
+  private saveQueue: Promise<void> = Promise.resolve();
+  private pendingSave = false;
+  private saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly SAVE_DEBOUNCE_MS = 100; // Debounce rapid saves
 
   constructor() {
-    this.loadFromDisk();
+    // Start async initialization
+    this.initialized = this.initializeAsync();
+  }
+
+  /**
+   * Async initialization - loads data from disk and starts cleanup interval
+   */
+  private async initializeAsync(): Promise<void> {
+    await this.loadFromDiskAsync();
     this.startCleanupInterval();
+  }
+
+  /**
+   * Ensure initialization is complete before accessing data
+   * Call this at the start of any public method that needs data
+   */
+  async ensureInitialized(): Promise<void> {
+    await this.initialized;
   }
 
   /**
@@ -50,22 +74,32 @@ class JobManager {
       this.cleanupInterval = null;
       logger.debug('JobManager cleanup interval stopped');
     }
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
+      this.saveDebounceTimer = null;
+    }
+    // Force a final save on shutdown
+    this.saveToDiskAsync().catch((err) => {
+      logger.error({ err }, 'Failed to save jobs on shutdown');
+    });
   }
 
-  private loadFromDisk(): void {
+  /**
+   * Load jobs and logs from disk asynchronously
+   */
+  private async loadFromDiskAsync(): Promise<void> {
     try {
       // Ensure data directory exists
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
+      await fs.promises.mkdir(DATA_DIR, { recursive: true });
 
       // Load jobs
-      if (fs.existsSync(JOBS_FILE)) {
-        const data = JSON.parse(fs.readFileSync(JOBS_FILE, 'utf-8'));
+      try {
+        const data = await fs.promises.readFile(JOBS_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
 
         // Restore jobs map
-        if (data.jobs && Array.isArray(data.jobs)) {
-          for (const job of data.jobs) {
+        if (parsed.jobs && Array.isArray(parsed.jobs)) {
+          for (const job of parsed.jobs) {
             // Convert date strings back to Date objects
             if (job.startedAt) job.startedAt = new Date(job.startedAt);
             if (job.completedAt) job.completedAt = new Date(job.completedAt);
@@ -83,8 +117,8 @@ class JobManager {
         }
 
         // Restore history
-        if (data.history && Array.isArray(data.history)) {
-          for (const job of data.history) {
+        if (parsed.history && Array.isArray(parsed.history)) {
+          for (const job of parsed.history) {
             if (job.startedAt) job.startedAt = new Date(job.startedAt);
             if (job.completedAt) job.completedAt = new Date(job.completedAt);
             // Avoid duplicates
@@ -98,46 +132,86 @@ class JobManager {
           { jobCount: this.jobs.size, historyCount: this.history.length },
           'Loaded jobs from disk'
         );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.error({ err: error }, 'Failed to load jobs file');
+        }
       }
 
       // Load logs
-      if (fs.existsSync(LOGS_FILE)) {
-        const logsData = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
-        if (logsData && typeof logsData === 'object') {
-          for (const [jobId, entries] of Object.entries(logsData)) {
+      try {
+        const logsData = await fs.promises.readFile(LOGS_FILE, 'utf-8');
+        const parsed = JSON.parse(logsData);
+        if (parsed && typeof parsed === 'object') {
+          for (const [jobId, entries] of Object.entries(parsed)) {
             this.logs.set(jobId, entries as JobLogEntry[]);
           }
         }
         logger.debug({ logCount: this.logs.size }, 'Loaded job logs from disk');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.error({ err: error }, 'Failed to load logs file');
+        }
       }
     } catch (error) {
-      logger.error({ err: error }, 'Failed to load jobs from disk');
+      logger.error({ err: error }, 'Failed to initialize jobs from disk');
     }
   }
 
-  private saveToDisk(): void {
-    try {
-      // Ensure data directory exists
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
+  /**
+   * Save jobs and logs to disk asynchronously with write queue serialization
+   * Uses atomic write pattern (write to temp, then rename) to prevent corruption
+   */
+  private async saveToDiskAsync(): Promise<void> {
+    // Add to queue to serialize writes
+    this.saveQueue = this.saveQueue.then(async () => {
+      try {
+        // Ensure data directory exists
+        await fs.promises.mkdir(DATA_DIR, { recursive: true });
 
-      // Save jobs and history
-      const jobsData = {
-        jobs: Array.from(this.jobs.values()),
-        history: this.history,
-      };
-      fs.writeFileSync(JOBS_FILE, JSON.stringify(jobsData, null, 2));
+        // Save jobs and history using atomic write
+        const jobsData = {
+          jobs: Array.from(this.jobs.values()),
+          history: this.history,
+        };
+        const jobsTempPath = `${JOBS_FILE}.tmp`;
+        await fs.promises.writeFile(jobsTempPath, JSON.stringify(jobsData, null, 2));
+        await fs.promises.rename(jobsTempPath, JOBS_FILE);
 
-      // Save logs
-      const logsData: Record<string, JobLogEntry[]> = {};
-      for (const [jobId, entries] of this.logs.entries()) {
-        logsData[jobId] = entries;
+        // Save logs using atomic write
+        const logsData: Record<string, JobLogEntry[]> = {};
+        for (const [jobId, entries] of this.logs.entries()) {
+          logsData[jobId] = entries;
+        }
+        const logsTempPath = `${LOGS_FILE}.tmp`;
+        await fs.promises.writeFile(logsTempPath, JSON.stringify(logsData, null, 2));
+        await fs.promises.rename(logsTempPath, LOGS_FILE);
+      } catch (error) {
+        logger.error({ err: error }, 'Failed to save jobs to disk');
       }
-      fs.writeFileSync(LOGS_FILE, JSON.stringify(logsData, null, 2));
-    } catch (error) {
-      logger.error({ err: error }, 'Failed to save jobs to disk');
+    });
+    return this.saveQueue;
+  }
+
+  /**
+   * Debounced save - schedules a save after a short delay
+   * Multiple rapid calls will only trigger one save
+   */
+  private scheduleSave(): void {
+    if (this.pendingSave) return;
+    this.pendingSave = true;
+
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
     }
+
+    this.saveDebounceTimer = setTimeout(() => {
+      this.pendingSave = false;
+      this.saveDebounceTimer = null;
+      this.saveToDiskAsync().catch((err) => {
+        logger.error({ err }, 'Debounced save failed');
+      });
+    }, this.SAVE_DEBOUNCE_MS);
   }
 
   createJob(jobType?: JobStatus['jobType']): string {
@@ -155,11 +229,13 @@ class JobManager {
       status: 'pending',
       progress: 0,
       startedAt: new Date(),
+      warnings: [],
       ...(jobType ? { jobType } : {}),
     };
     this.jobs.set(jobId, job);
     this.logs.set(jobId, []);
-    this.saveToDisk();
+    this.warnings.set(jobId, []);
+    this.scheduleSave();
     return jobId;
   }
 
@@ -169,13 +245,14 @@ class JobManager {
       Object.assign(job, updates);
       if (
         updates.status === 'completed' ||
+        updates.status === 'completed_with_warnings' ||
         updates.status === 'failed' ||
         updates.status === 'cancelled'
       ) {
         job.completedAt = new Date();
         this.recordHistory(job);
       }
-      this.saveToDisk();
+      this.scheduleSave();
     }
   }
 
@@ -208,13 +285,52 @@ class JobManager {
   }
 
   completeJob(jobId: string, result?: any): void {
+    const jobWarnings = this.warnings.get(jobId) || [];
+    const hasWarnings = jobWarnings.length > 0;
+    const job = this.jobs.get(jobId);
+
     this.updateJob(jobId, {
-      status: 'completed',
+      status: hasWarnings ? 'completed_with_warnings' : 'completed',
       progress: 100,
-      message: 'Completed',
+      message: hasWarnings ? `Completed with ${jobWarnings.length} warning(s)` : 'Completed',
+      warnings: hasWarnings ? jobWarnings : undefined,
       result,
     });
-    this.addLog(jobId, 'Job completed');
+
+    if (hasWarnings) {
+      this.addLog(jobId, `Job completed with ${jobWarnings.length} warning(s)`);
+    } else {
+      this.addLog(jobId, 'Job completed');
+    }
+  }
+
+  /**
+   * Add a warning to a job. Warnings are tracked separately and will cause
+   * the job to complete with 'completed_with_warnings' status instead of 'completed'.
+   */
+  addWarning(jobId: string, warning: string): void {
+    const warnings = this.warnings.get(jobId);
+    if (warnings) {
+      warnings.push(warning);
+      // Also log the warning
+      this.addLog(jobId, `WARNING: ${warning}`);
+      logger.warn({ jobId: jobId.slice(0, 8), warning }, 'Job warning');
+    }
+  }
+
+  /**
+   * Get all warnings for a job
+   */
+  getWarnings(jobId: string): string[] {
+    return this.warnings.get(jobId) || [];
+  }
+
+  /**
+   * Check if a job has any warnings
+   */
+  hasWarnings(jobId: string): boolean {
+    const warnings = this.warnings.get(jobId);
+    return warnings !== undefined && warnings.length > 0;
   }
 
   failJob(jobId: string, error: string): void {
@@ -261,7 +377,9 @@ class JobManager {
     );
 
     if (jobsToArchive.length > 0) {
-      this.archiveJobs(jobsToArchive);
+      this.archiveJobsAsync(jobsToArchive).catch((err) => {
+        logger.error({ err }, 'Failed to archive jobs during cleanup');
+      });
       this.history = this.history.filter(
         (job) => !job.completedAt || job.completedAt >= archiveThreshold
       );
@@ -287,21 +405,25 @@ class JobManager {
     }
 
     if (cleaned) {
-      this.saveToDisk();
+      this.scheduleSave();
     }
   }
 
   /**
    * Archive jobs to a separate file for long-term storage
    */
-  private archiveJobs(jobs: JobStatus[]): void {
+  private async archiveJobsAsync(jobs: JobStatus[]): Promise<void> {
     try {
       let archive: JobStatus[] = [];
 
       // Load existing archive
-      if (fs.existsSync(ARCHIVE_FILE)) {
-        const data = fs.readFileSync(ARCHIVE_FILE, 'utf-8');
+      try {
+        const data = await fs.promises.readFile(ARCHIVE_FILE, 'utf-8');
         archive = JSON.parse(data);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.warn({ err: error }, 'Failed to load existing archive');
+        }
       }
 
       // Add new jobs to archive
@@ -312,7 +434,10 @@ class JobManager {
         archive = archive.slice(-1000);
       }
 
-      fs.writeFileSync(ARCHIVE_FILE, JSON.stringify(archive, null, 2));
+      // Atomic write
+      const tempPath = `${ARCHIVE_FILE}.tmp`;
+      await fs.promises.writeFile(tempPath, JSON.stringify(archive, null, 2));
+      await fs.promises.rename(tempPath, ARCHIVE_FILE);
       logger.debug({ count: jobs.length, total: archive.length }, 'Jobs archived');
     } catch (error) {
       logger.error({ err: error }, 'Failed to archive jobs');
@@ -322,12 +447,32 @@ class JobManager {
   /**
    * Get archived jobs (for admin/debugging purposes)
    */
+  async getArchivedJobsAsync(): Promise<JobStatus[]> {
+    try {
+      const data = await fs.promises.readFile(ARCHIVE_FILE, 'utf-8');
+      const archive = JSON.parse(data);
+      // Convert dates
+      for (const job of archive) {
+        if (job.startedAt) job.startedAt = new Date(job.startedAt);
+        if (job.completedAt) job.completedAt = new Date(job.completedAt);
+      }
+      return archive;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.error({ err: error }, 'Failed to load archived jobs');
+      }
+    }
+    return [];
+  }
+
+  // Sync version for backwards compatibility (uses cached data)
   getArchivedJobs(): JobStatus[] {
+    // For backwards compatibility, try sync read
+    // This is only used rarely for admin purposes
     try {
       if (fs.existsSync(ARCHIVE_FILE)) {
         const data = fs.readFileSync(ARCHIVE_FILE, 'utf-8');
         const archive = JSON.parse(data);
-        // Convert dates
         for (const job of archive) {
           if (job.startedAt) job.startedAt = new Date(job.startedAt);
           if (job.completedAt) job.completedAt = new Date(job.completedAt);
@@ -343,6 +488,18 @@ class JobManager {
   /**
    * Clear archived jobs
    */
+  async clearArchiveAsync(): Promise<void> {
+    try {
+      await fs.promises.unlink(ARCHIVE_FILE);
+      logger.info('Archive cleared');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.error({ err: error }, 'Failed to clear archive');
+      }
+    }
+  }
+
+  // Sync version for backwards compatibility
   clearArchive(): void {
     try {
       if (fs.existsSync(ARCHIVE_FILE)) {
@@ -377,7 +534,7 @@ class JobManager {
     logger.debug({ jobId: shortId, message }, 'Job log entry');
     // Save logs periodically (every 10 entries to reduce I/O)
     if (log.length % 10 === 0) {
-      this.saveToDisk();
+      this.scheduleSave();
     }
   }
 
@@ -410,7 +567,7 @@ class JobManager {
         this.logs.delete(jobId);
       }
     }
-    this.saveToDisk();
+    this.scheduleSave();
   }
 }
 

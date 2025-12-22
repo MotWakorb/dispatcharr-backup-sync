@@ -67,12 +67,13 @@ export interface SyncJobResult {
 
 export interface JobStatus {
   jobId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled';
   jobType?: 'backup' | 'import' | 'sync' | string;
   progress?: number;
   message?: string;
   result?: ExportJobResult | ImportJobResult | SyncJobResult;
   error?: string;
+  warnings?: string[];
   startedAt: Date;
   completedAt?: Date;
 }

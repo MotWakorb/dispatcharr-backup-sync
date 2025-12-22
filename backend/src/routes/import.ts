@@ -5,33 +5,87 @@ import { DispatcharrClient } from '../services/dispatcharrClient.js';
 import { getErrorMessage, getErrorStatus } from '../utils/errorUtils.js';
 import multer from 'multer';
 import FormData from 'form-data';
+import fs from 'fs/promises';
+import path from 'path';
 import type { ImportRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('import-route');
 
 export const importRouter = Router();
 
-// Configure multer for file uploads
+// Configure multer for disk storage to avoid OOM with large files
+const UPLOAD_DIR = process.env.DATA_DIR
+  ? path.join(process.env.DATA_DIR, 'uploads')
+  : path.join(process.cwd(), 'temp', 'uploads');
+
+// Ensure upload directory exists
+fs.mkdir(UPLOAD_DIR, { recursive: true }).catch((err) => {
+  log.error({ err }, 'Failed to create upload directory');
+});
+
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      cb(null, UPLOAD_DIR);
+    },
+    filename: (_req, file, cb) => {
+      // Use timestamp + original name to avoid collisions
+      cb(null, `${Date.now()}-${file.originalname}`);
+    },
+  }),
   limits: {
     fileSize: 10 * 1024 * 1024 * 1024, // 10GB
   },
 });
 
-// Start a new import job
-importRouter.post('/inspect', upload.single('file'), async (req, res) => {
+/**
+ * Helper to read uploaded file from disk and clean up after.
+ * Used for small operations like inspect where we need the buffer.
+ */
+async function readUploadedFile(filePath: string): Promise<Buffer> {
   try {
-    log.debug({ filename: req.file?.originalname }, 'Inspect route received file');
-    if (!req.file) {
+    return await fs.readFile(filePath);
+  } finally {
+    // Clean up immediately after reading
+    fs.unlink(filePath).catch((err) => {
+      log.debug({ filePath, err }, 'Failed to cleanup uploaded file');
+    });
+  }
+}
+
+/**
+ * Helper to clean up uploaded file (used when we're done with it)
+ */
+async function cleanupUploadedFile(filePath: string | undefined): Promise<void> {
+  if (!filePath) return;
+  try {
+    await fs.unlink(filePath);
+  } catch (err) {
+    log.debug({ filePath, err }, 'Failed to cleanup uploaded file');
+  }
+}
+
+// Inspect an uploaded backup file
+importRouter.post('/inspect', upload.single('file'), async (req, res) => {
+  const uploadedFilePath = req.file?.path;
+  try {
+    log.debug(
+      { filename: req.file?.originalname, path: uploadedFilePath },
+      'Inspect route received file'
+    );
+    if (!req.file || !uploadedFilePath) {
       return res.status(400).json({ success: false, error: 'File is required' });
     }
+
+    // Read file from disk (will be cleaned up by readUploadedFile)
+    const fileBuffer = await readUploadedFile(uploadedFilePath);
 
     const format = req.body.format as 'yaml' | 'json' | undefined;
     const request: ImportRequest = {
       destination: { url: '', username: '', password: '' },
-      fileData: req.file.buffer,
+      fileData: fileBuffer,
       fileName: req.file.originalname,
       format,
     };
@@ -41,6 +95,8 @@ importRouter.post('/inspect', upload.single('file'), async (req, res) => {
     log.debug({ sections: Object.keys(result.sections || {}) }, 'Inspect result');
     res.json({ success: true, data: result });
   } catch (error) {
+    // Ensure cleanup on error (readUploadedFile may not have been called)
+    await cleanupUploadedFile(uploadedFilePath);
     log.error({ err: error }, 'Error inspecting import file');
     res.status(400).json({
       success: false,
@@ -51,6 +107,7 @@ importRouter.post('/inspect', upload.single('file'), async (req, res) => {
 
 // Start a new import job
 importRouter.post('/', upload.single('file'), async (req, res) => {
+  const uploadedFilePath = req.file?.path;
   try {
     // Handle both multipart/form-data and JSON requests
     let request: ImportRequest;
@@ -62,6 +119,7 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
         options =
           typeof req.body.options === 'string' ? JSON.parse(req.body.options) : req.body.options;
       } catch (err) {
+        await cleanupUploadedFile(uploadedFilePath);
         return res.status(400).json({
           success: false,
           error: 'Invalid options payload',
@@ -69,18 +127,23 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
       }
     }
 
-    if (req.file) {
-      // Multipart upload
+    if (req.file && uploadedFilePath) {
+      // Multipart upload - read from disk
       const destination = JSON.parse(req.body.destination || '{}');
       const format = req.body.format as 'yaml' | 'json' | undefined;
+      const fileBuffer = await fs.readFile(uploadedFilePath);
 
       request = {
         destination,
-        fileData: req.file.buffer,
+        fileData: fileBuffer,
         fileName: req.file.originalname,
         format,
         options,
       };
+
+      // Clean up the uploaded file now that we have the buffer
+      // The import service will handle the buffer from here
+      await cleanupUploadedFile(uploadedFilePath);
     } else if (req.body?.uploadId) {
       // Use cached upload from previous inspect
       const destination = JSON.parse(req.body.destination || '{}');
@@ -106,15 +169,12 @@ importRouter.post('/', upload.single('file'), async (req, res) => {
       });
     }
 
-    // Validate destination connection
-    if (
-      !request.destination.url ||
-      !request.destination.username ||
-      !request.destination.password
-    ) {
+    // Validate destination connection using shared validation
+    const destValidation = validateConnection(request.destination, 'destination connection');
+    if (!destValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid destination connection: url, username, and password are required',
+        error: destValidation.error,
       });
     }
 
@@ -171,8 +231,17 @@ importRouter.get('/status/:jobId', (req, res) => {
 
 // Upload plugin files to destination instance
 importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
+  const files = req.files as Express.Multer.File[];
+  const uploadedFilePaths = files?.map((f) => f.path).filter(Boolean) || [];
+
+  // Helper to clean up all uploaded plugin files
+  const cleanupAllFiles = async () => {
+    for (const filePath of uploadedFilePaths) {
+      await cleanupUploadedFile(filePath);
+    }
+  };
+
   try {
-    const files = req.files as Express.Multer.File[];
     if (!files || files.length === 0) {
       return res.status(400).json({
         success: false,
@@ -184,16 +253,19 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
     try {
       connection = JSON.parse(req.body.connection || '{}');
     } catch {
+      await cleanupAllFiles();
       return res.status(400).json({
         success: false,
         error: 'Invalid connection data',
       });
     }
 
-    if (!connection.url || !connection.username || !connection.password) {
+    const connValidation = validateConnection(connection, 'connection');
+    if (!connValidation.success) {
+      await cleanupAllFiles();
       return res.status(400).json({
         success: false,
-        error: 'Connection URL, username, and password are required',
+        error: connValidation.error,
       });
     }
 
@@ -208,9 +280,12 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
 
     for (const file of files) {
       try {
+        // Read file from disk
+        const fileBuffer = await fs.readFile(file.path);
+
         // Create form data for plugin import
         const formData = new FormData();
-        formData.append('file', file.buffer, {
+        formData.append('file', fileBuffer, {
           filename: file.originalname,
           contentType: file.mimetype || 'application/zip',
         });
@@ -246,6 +321,9 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
           results.errors.push(`${file.originalname}: ${errorMsg}`);
           log.error({ plugin: file.originalname, errorMsg }, 'Failed to upload plugin');
         }
+      } finally {
+        // Clean up this plugin file after processing
+        await cleanupUploadedFile(file.path);
       }
     }
 
@@ -254,6 +332,7 @@ importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
       data: results,
     });
   } catch (error) {
+    await cleanupAllFiles();
     log.error({ err: error }, 'Error uploading plugins');
     res.status(500).json({
       success: false,
