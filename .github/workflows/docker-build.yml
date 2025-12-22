@@ -12,8 +12,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME_BACKEND: ${{ github.repository }}-backend
-  IMAGE_NAME_FRONTEND: ${{ github.repository }}-frontend
+  # Docker image names must be lowercase
+  IMAGE_NAME_BACKEND: motwakorb/dispatcharr-backup-sync-backend
+  IMAGE_NAME_FRONTEND: motwakorb/dispatcharr-backup-sync-frontend
 
 jobs:
   test-backend:
