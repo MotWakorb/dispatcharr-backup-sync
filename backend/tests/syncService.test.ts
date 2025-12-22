@@ -1,26 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  createMockClient,
-  createPaginatedResponse,
-  MockDispatcharrClient,
-} from './mocks/index.js';
-import { createMockJobManager, expectLogContains } from './helpers.js';
-import {
-  sampleChannels,
-  sampleChannelGroups,
-  sampleStreams,
-  sampleStreamProfiles,
-  sampleEpgSources,
-  sampleEpgData,
-  sampleM3UAccounts,
-  samplePlugins,
-  sampleUsers,
-  sampleUserAgents,
-} from './fixtures/index.js';
+import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest';
+import { createMockJobManager } from './helpers.js';
 
-// Mock dependencies
-vi.mock('../src/services/jobManager.js', () => ({
-  jobManager: createMockJobManager('sync-job-123'),
+// Mock dependencies before any imports
+const mockFsPromises = {
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  readFile: vi.fn().mockResolvedValue(Buffer.from('test backup content')),
+  unlink: vi.fn().mockResolvedValue(undefined),
+};
+
+vi.mock('fs', () => ({
+  default: {
+    promises: mockFsPromises,
+  },
+  promises: mockFsPromises,
 }));
 
 vi.mock('../src/services/logger.js', () => ({
@@ -32,78 +24,57 @@ vi.mock('../src/services/logger.js', () => ({
   }),
 }));
 
-vi.mock('../src/services/dispatcharrClient.js', () => ({
-  DispatcharrClient: vi.fn(),
+const mockExport = vi.fn();
+const mockImport = vi.fn();
+
+vi.mock('../src/services/exportService.js', () => ({
+  exportService: {
+    export: mockExport,
+  },
+}));
+
+vi.mock('../src/services/importService.js', () => ({
+  importService: {
+    import: mockImport,
+  },
+}));
+
+const mockJobManager = createMockJobManager('sync-job-123');
+
+vi.mock('../src/services/jobManager.js', () => ({
+  jobManager: mockJobManager,
 }));
 
 describe('SyncService', () => {
-  let mockJobManager: ReturnType<typeof createMockJobManager>;
   let SyncService: any;
   let syncService: any;
-  let mockSourceClient: MockDispatcharrClient;
-  let mockDestClient: MockDispatcharrClient;
 
   beforeEach(async () => {
     vi.clearAllMocks();
 
-    // Create fresh mock job manager
-    mockJobManager = createMockJobManager('sync-job-123');
+    // Reset mock implementations
+    mockFsPromises.mkdir.mockResolvedValue(undefined);
+    mockFsPromises.readFile.mockResolvedValue(Buffer.from('test backup content'));
+    mockFsPromises.unlink.mockResolvedValue(undefined);
 
-    // Update the mocked jobManager
-    const jobManagerModule = await import('../src/services/jobManager.js');
-    Object.assign(jobManagerModule.jobManager, mockJobManager);
+    // Setup default successful export/import
+    mockExport.mockResolvedValue('/tmp/backup-test.zip');
+    mockImport.mockResolvedValue(undefined);
 
-    // Create mock clients
-    mockSourceClient = createMockClient({
-      responses: {
-        '/api/channels/channels/*': createPaginatedResponse(sampleChannels),
-        '/api/channels/groups/*': sampleChannelGroups,
-        '/api/channels/streams/*': createPaginatedResponse(sampleStreams),
-        '/api/channels/profiles/*': [],
-        '/api/core/streamprofiles/*': sampleStreamProfiles,
-        '/api/core/useragents/*': sampleUserAgents,
-        '/api/core/settings/*': [],
-        '/api/epg/sources/*': sampleEpgSources,
-        '/api/epg/epgdata/*': createPaginatedResponse(sampleEpgData),
-        '/api/m3u/accounts/*': sampleM3UAccounts,
-        '/api/plugins/plugins/*': { plugins: samplePlugins },
-        '/api/accounts/users/*': sampleUsers,
-        '/api/channels/logos/*': [],
-        '/api/channels/recurring-rules/*': [],
-        '/api/channels/dvr/comskip-config/*': { exists: false },
-      },
+    // Mock job manager to track sub-jobs and return completed status
+    let jobCounter = 0;
+    (mockJobManager.createJob as Mock).mockImplementation((type: string) => {
+      jobCounter++;
+      return `${type}-sub-${jobCounter}`;
+    });
+    (mockJobManager.getJob as Mock).mockImplementation((jobId: string) => {
+      if (jobId.includes('sub')) {
+        return { status: 'completed', result: { imported: { channels: { imported: 5 } } } };
+      }
+      return { status: 'running' };
     });
 
-    mockDestClient = createMockClient({
-      responses: {
-        '/api/channels/channels/*': createPaginatedResponse([]),
-        '/api/channels/groups/*': [],
-        '/api/channels/streams/*': createPaginatedResponse([{ count: 5 }]),
-        '/api/channels/profiles/*': [],
-        '/api/core/streamprofiles/*': [],
-        '/api/core/useragents/*': [],
-        '/api/core/settings/*': [],
-        '/api/epg/sources/*': [],
-        '/api/epg/epgdata/*': createPaginatedResponse(sampleEpgData),
-        '/api/m3u/accounts/*': [],
-        '/api/plugins/plugins/*': { plugins: [] },
-        '/api/accounts/users/*': [],
-        '/api/channels/logos/*': [],
-      },
-      defaultResponse: { id: 1 },
-    });
-
-    // Mock DispatcharrClient constructor - must use regular function (not arrow) for constructors
-    const dispatcharrModule = await import('../src/services/dispatcharrClient.js');
-    let clientCallCount = 0;
-    (dispatcharrModule.DispatcharrClient as any).mockImplementation(function() {
-      clientCallCount++;
-      // First call is source, second is destination
-      return clientCallCount === 1 ? mockSourceClient : mockDestClient;
-    });
-
-    // Import fresh SyncService instance
-    vi.resetModules();
+    // Import SyncService
     const module = await import('../src/services/syncService.js');
     SyncService = module.SyncService;
     syncService = new SyncService();
@@ -114,34 +85,37 @@ describe('SyncService', () => {
   });
 
   describe('sync', () => {
-    it('should start job and authenticate to both instances', async () => {
+    it('should start job and complete sync via export/import', async () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: {},
+        options: { syncChannels: true },
       };
 
       await syncService.sync(request, 'sync-job-123');
 
       expect(mockJobManager.startJob).toHaveBeenCalledWith('sync-job-123', 'Initializing sync...');
+      expect(mockExport).toHaveBeenCalled();
+      expect(mockImport).toHaveBeenCalled();
       expect(mockJobManager.completeJob).toHaveBeenCalled();
     });
 
-    it('should sync channel groups when option enabled', async () => {
+    it('should call export with correct options', async () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncChannelGroups: true },
+        options: { syncChannelGroups: true, syncLogos: true },
       };
 
       await syncService.sync(request, 'sync-job-123');
 
-      // Check that groups endpoint was called
-      const groupCalls = mockSourceClient.getCalls.filter(c => c.endpoint.includes('/api/channels/groups'));
-      expect(groupCalls.length).toBeGreaterThan(0);
+      // Verify export was called with source connection and options
+      const exportCall = mockExport.mock.calls[0];
+      expect(exportCall[0].source).toEqual(request.source);
+      expect(exportCall[0].options).toEqual(request.options);
     });
 
-    it('should sync M3U sources when option enabled', async () => {
+    it('should call import with destination connection and file data', async () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
@@ -150,32 +124,17 @@ describe('SyncService', () => {
 
       await syncService.sync(request, 'sync-job-123');
 
-      const m3uCalls = mockSourceClient.getCalls.filter(c => c.endpoint.includes('/api/m3u/accounts'));
-      expect(m3uCalls.length).toBeGreaterThan(0);
+      // Verify import was called with destination connection
+      const importCall = mockImport.mock.calls[0];
+      expect(importCall[0].destination).toEqual(request.destination);
+      expect(importCall[0].options).toEqual(request.options);
+      expect(importCall[0].fileData).toBeDefined();
     });
 
-    it('should sync EPG sources and wait for data when option enabled', async () => {
-      // Skip the wait by returning stable data immediately
-      mockDestClient = createMockClient({
-        responses: {
-          '/api/epg/sources/*': sampleEpgSources,
-          '/api/epg/epgdata/*': createPaginatedResponse(sampleEpgData),
-        },
-        defaultResponse: { id: 1 },
-      });
+    it('should handle dry run mode without importing', async () => {
+      // In dry run, export returns empty string
+      mockExport.mockResolvedValue('');
 
-      const request = {
-        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
-        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncEPGSources: true },
-      };
-
-      // This test would normally timeout waiting for EPG, but we verify the call is made
-      const sourceEpgCalls = mockSourceClient.getCalls.filter(c => c.endpoint.includes('/api/epg/sources'));
-      // Note: In real test, we'd need to mock the wait functions
-    });
-
-    it('should handle dry run mode', async () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
@@ -185,129 +144,58 @@ describe('SyncService', () => {
 
       await syncService.sync(request, 'sync-job-123');
 
-      // In dry run, no POST calls should be made to destination
-      expect(mockDestClient.postCalls.length).toBe(0);
+      // In dry run, import should not be called
+      expect(mockImport).not.toHaveBeenCalled();
+      expect(mockJobManager.completeJob).toHaveBeenCalled();
     });
 
-    it('should handle authentication failure', async () => {
-      mockSourceClient = createMockClient({ authFailure: true });
+    it('should handle export failure', async () => {
+      mockExport.mockRejectedValue(new Error('Export failed'));
 
-      // Reset client mock to use failing client
-      const dispatcharrModule = await import('../src/services/dispatcharrClient.js');
-      (dispatcharrModule.DispatcharrClient as any).mockImplementation(function() {
-        return mockSourceClient;
-      });
-
-      const request = {
-        source: { url: 'http://source.local', username: 'admin', password: 'wrong' },
-        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: {},
-      };
-
-      await expect(syncService.sync(request, 'sync-job-123')).rejects.toThrow('Authentication failed');
-    });
-
-    it('should sync stream profiles when option enabled', async () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncStreamProfiles: true },
+        options: { syncChannels: true },
+      };
+
+      await expect(syncService.sync(request, 'sync-job-123')).rejects.toThrow('Export failed');
+      expect(mockJobManager.failJob).toHaveBeenCalled();
+    });
+
+    it('should handle import failure', async () => {
+      mockImport.mockRejectedValue(new Error('Import failed'));
+
+      const request = {
+        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
+        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
+        options: { syncChannels: true },
+      };
+
+      await expect(syncService.sync(request, 'sync-job-123')).rejects.toThrow('Import failed');
+      expect(mockJobManager.failJob).toHaveBeenCalled();
+    });
+
+    it('should cleanup temp file after sync', async () => {
+      const request = {
+        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
+        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
+        options: { syncChannels: true },
       };
 
       await syncService.sync(request, 'sync-job-123');
 
-      const profileCalls = mockSourceClient.getCalls.filter(c =>
-        c.endpoint.includes('/api/core/streamprofiles')
-      );
-      expect(profileCalls.length).toBeGreaterThan(0);
+      // Verify file cleanup was attempted
+      expect(mockFsPromises.unlink).toHaveBeenCalledWith('/tmp/backup-test.zip');
     });
 
-    it('should sync user agents when option enabled', async () => {
-      const request = {
-        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
-        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncUserAgents: true },
-      };
-
-      await syncService.sync(request, 'sync-job-123');
-
-      const agentCalls = mockSourceClient.getCalls.filter(c =>
-        c.endpoint.includes('/api/core/useragents')
-      );
-      expect(agentCalls.length).toBeGreaterThan(0);
-    });
-
-    it('should sync plugins when option enabled', async () => {
-      const request = {
-        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
-        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncPlugins: true },
-      };
-
-      await syncService.sync(request, 'sync-job-123');
-
-      const pluginCalls = mockSourceClient.getCalls.filter(c =>
-        c.endpoint.includes('/api/plugins/plugins')
-      );
-      expect(pluginCalls.length).toBeGreaterThan(0);
-    });
-
-    it('should sync users when option enabled (excluding admins)', async () => {
-      const request = {
-        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
-        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: { syncUsers: true },
-      };
-
-      await syncService.sync(request, 'sync-job-123');
-
-      const userCalls = mockSourceClient.getCalls.filter(c =>
-        c.endpoint.includes('/api/accounts/users')
-      );
-      expect(userCalls.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('countEnabledOptions', () => {
-    it('should count enabled sync options', async () => {
-      // Access private method through instance
-      const service = new SyncService();
-      const count = (service as any).countEnabledOptions({
-        syncChannelGroups: true,
-        syncChannels: true,
-        syncM3USources: false,
-        syncEPGSources: true,
-      });
-
-      expect(count).toBe(3);
-    });
-
-    it('should return 0 for no options enabled', async () => {
-      const service = new SyncService();
-      const count = (service as any).countEnabledOptions({});
-
-      expect(count).toBe(0);
-    });
-  });
-
-  describe('normalizeKey', () => {
-    it('should normalize string keys to lowercase', () => {
-      const service = new SyncService();
-      expect((service as any).normalizeKey('ESPN.US')).toBe('espn.us');
-      expect((service as any).normalizeKey('  Padded  ')).toBe('padded');
-    });
-
-    it('should return empty string for null/undefined', () => {
-      const service = new SyncService();
-      expect((service as any).normalizeKey(null)).toBe('');
-      expect((service as any).normalizeKey(undefined)).toBe('');
-    });
-  });
-
-  describe('error handling', () => {
     it('should handle job cancellation', async () => {
       // Set job to cancelled state
-      mockJobManager.cancelJob('sync-job-123');
+      (mockJobManager.getJob as Mock).mockImplementation((jobId: string) => {
+        if (jobId === 'sync-job-123') {
+          return { status: 'cancelled' };
+        }
+        return { status: 'completed', result: {} };
+      });
 
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
@@ -315,7 +203,6 @@ describe('SyncService', () => {
         options: { syncChannelGroups: true },
       };
 
-      // The job check happens during sync operations
       try {
         await syncService.sync(request, 'sync-job-123');
       } catch (error: any) {
@@ -329,20 +216,45 @@ describe('SyncService', () => {
       const request = {
         source: { url: 'http://source.local', username: 'admin', password: 'pass' },
         destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
-        options: {
-          syncChannelGroups: true,
-          syncStreamProfiles: true,
-        },
+        options: { syncChannelGroups: true },
       };
 
       await syncService.sync(request, 'sync-job-123');
 
       // Should have multiple progress updates
-      expect(mockJobManager.setProgress.mock.calls.length).toBeGreaterThan(0);
+      expect((mockJobManager.setProgress as Mock).mock.calls.length).toBeGreaterThan(0);
+    });
 
-      // Progress should include authentication steps
-      const progressMessages = mockJobManager.setProgress.mock.calls.map(c => c[2]);
-      expect(progressMessages.some(m => m?.includes('Authenticating'))).toBe(true);
+    it('should log sync via export/import approach', async () => {
+      const request = {
+        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
+        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
+        options: { syncChannels: true },
+      };
+
+      await syncService.sync(request, 'sync-job-123');
+
+      // Verify log messages mention export/import approach
+      const logMessages = (mockJobManager.addLog as Mock).mock.calls.map((c: any) => c[1]);
+      expect(logMessages.some((m: string) => m.includes('export'))).toBe(true);
+      expect(logMessages.some((m: string) => m.includes('import'))).toBe(true);
+    });
+  });
+
+  describe('sub-job creation', () => {
+    it('should create export and import sub-jobs', async () => {
+      const request = {
+        source: { url: 'http://source.local', username: 'admin', password: 'pass' },
+        destination: { url: 'http://dest.local', username: 'admin', password: 'pass' },
+        options: { syncChannels: true },
+      };
+
+      await syncService.sync(request, 'sync-job-123');
+
+      // Should create both backup and import sub-jobs
+      const createJobCalls = (mockJobManager.createJob as Mock).mock.calls.map((c: any) => c[0]);
+      expect(createJobCalls).toContain('backup');
+      expect(createJobCalls).toContain('import');
     });
   });
 });

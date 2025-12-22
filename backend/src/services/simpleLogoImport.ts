@@ -31,6 +31,7 @@ function safeBase64Decode(base64String: string, maxSize: number, context: string
 
 /**
  * SIMPLE logo import - no complex logic, just upload one at a time
+ * Supports both file-based logos (with data) and URL-based logos (with url)
  */
 export async function simpleImportLogos(
   client: DispatcharrClient,
@@ -40,6 +41,7 @@ export async function simpleImportLogos(
     source_id?: number;
     data: string;
     ext?: string;
+    url?: string;
   }>,
   jobId?: string
 ): Promise<SimpleLogoImportResult> {
@@ -69,14 +71,57 @@ export async function simpleImportLogos(
     const logoName = logo.original_name || logo.name || `logo-${i}`;
     const sourceId = logo.source_id;
 
-    if (!logo.data) {
-      log.debug({ index: i, logoName }, 'SKIP: No data');
+    // Check if this is a URL-based logo or file-based logo
+    const isUrlBased = !logo.data && logo.url;
+
+    if (!logo.data && !logo.url) {
+      log.debug({ index: i, logoName }, 'SKIP: No data and no URL');
       continue;
     }
 
     try {
-      // Convert base64 to buffer (with size validation)
-      const imageData = safeBase64Decode(logo.data, MAX_LOGO_FILE_SIZE, `Logo "${logoName}"`);
+      if (isUrlBased) {
+        // URL-based logo: just create a logo entry with the URL reference
+        // Don't download and re-upload - just pass the URL to destination
+        log.debug({ index: i, logoName, url: logo.url }, 'Creating logo with URL reference');
+
+        try {
+          const result = await client.post('/api/channels/logos/', {
+            name: logoName,
+            url: logo.url,
+          });
+
+          const newId = result?.id || result?.data?.id;
+          log.debug({ index: i, id: newId, name: logoName, url: logo.url }, 'URL logo created');
+
+          // Store mapping
+          if (newId && sourceId) {
+            logoMap[`src:${sourceId}`] = newId;
+          }
+
+          imported++;
+        } catch (createError: any) {
+          log.error(
+            { index: i, logoName, url: logo.url, err: createError },
+            'Failed to create URL logo reference'
+          );
+          errors++;
+        }
+        continue;
+      }
+
+      // File-based logo: decode base64 data and upload
+      let imageData: Buffer;
+      let ext: string;
+      let contentType: string;
+
+      imageData = safeBase64Decode(logo.data, MAX_LOGO_FILE_SIZE, `Logo "${logoName}"`);
+      ext = logo.ext || 'png';
+      contentType = 'image/png';
+      if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
+      else if (ext === 'webp') contentType = 'image/webp';
+      else if (ext === 'gif') contentType = 'image/gif';
+      else if (ext === 'svg') contentType = 'image/svg+xml';
 
       // Log what we're about to upload
       const checksum = imageData.slice(0, 50).reduce((sum, byte) => (sum + byte) & 0xffff, 0);
@@ -84,14 +129,6 @@ export async function simpleImportLogos(
         { index: i, logoName, size: imageData.length, checksum: checksum.toString(16) },
         'Uploading logo'
       );
-
-      // Determine content type
-      const ext = logo.ext || 'png';
-      let contentType = 'image/png';
-      if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
-      else if (ext === 'webp') contentType = 'image/webp';
-      else if (ext === 'gif') contentType = 'image/gif';
-      else if (ext === 'svg') contentType = 'image/svg+xml';
 
       // Create form with THIS logo's data
       const form = new FormData();

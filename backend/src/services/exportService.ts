@@ -482,35 +482,51 @@ export class ExportService {
       const workDir = path.join(this.backupDir, `backup-${jobId}`);
       await mkdir(workDir, { recursive: true });
 
-      // Download logos to logos/ directory
+      // Process logos - URL-based logos are stored as mappings, local logos are downloaded
       if (logosToExport.length > 0) {
-        // Logo download gets 35% of progress (from 60% to 95%)
+        // Logo processing gets 35% of progress (from 60% to 95%)
         const logoStartProgress = 60;
         const logoEndProgress = 95;
         jobManager.setProgress(
           jobId,
           logoStartProgress,
-          `Downloading ${logosToExport.length} logos...`
+          `Processing ${logosToExport.length} logos...`
         );
         const logosDir = path.join(workDir, 'logos');
         await mkdir(logosDir, { recursive: true });
 
         let downloaded = 0;
+        let urlMapped = 0;
         let failed = 0;
         let tooSmall = 0;
 
         // Track used filenames to avoid collisions, and store metadata
         const usedFilenames = new Set<string>();
+        // Metadata for locally downloaded logos
         const logoMetadata: Array<{ original_name: string; filename: string; source_id: number }> =
           [];
+        // URL mappings for URL-based logos (no download needed)
+        const logoUrlMappings: Array<{ name: string; url: string; source_id: number }> = [];
+
+        // Helper to check if a URL is external (not a local file reference)
+        const isExternalUrl = (url: string | undefined): boolean => {
+          if (!url) return false;
+          // Check for http/https URLs that aren't local Dispatcharr references
+          return (
+            (url.startsWith('http://') || url.startsWith('https://')) &&
+            !url.includes('/api/channels/logos/') &&
+            !url.includes('/data/logos/')
+          );
+        };
 
         // Log first 10 logos to verify order
         if (logosToExport.length > 0) {
           jobManager.addLog(jobId, `First 10 logos to export (in API order):`);
           for (let i = 0; i < Math.min(10, logosToExport.length); i++) {
+            const hasUrl = isExternalUrl(logosToExport[i].url);
             jobManager.addLog(
               jobId,
-              `  [${i}] id=${logosToExport[i].id}, name="${logosToExport[i].name}"`
+              `  [${i}] id=${logosToExport[i].id}, name="${logosToExport[i].name}"${hasUrl ? ' (URL)' : ' (local)'}`
             );
           }
         }
@@ -527,20 +543,38 @@ export class ExportService {
             jobManager.setProgress(
               jobId,
               Math.round(logoProgress),
-              `Downloading logos: ${i + 1}/${logosToExport.length}...`
+              `Processing logos: ${i + 1}/${logosToExport.length}...`
             );
           }
 
           // Log every 500 logos
           if ((i + 1) % 500 === 0) {
-            jobManager.addLog(jobId, `Downloading logos: ${i + 1}/${logosToExport.length}...`);
+            jobManager.addLog(jobId, `Processing logos: ${i + 1}/${logosToExport.length}...`);
           }
 
           const logoName = logo.name || `logo-${logo.id}`;
 
+          // Check if this is a URL-based logo - if so, just store the mapping
+          if (isExternalUrl(logo.url)) {
+            logoUrlMappings.push({
+              name: logoName,
+              url: logo.url,
+              source_id: logo.id,
+            });
+            urlMapped++;
+            if (urlMapped <= 10) {
+              jobManager.addLog(jobId, `[URL] Logo "${logoName}" (id=${logo.id}) -> ${logo.url}`);
+            }
+            continue;
+          }
+
+          // Local logo - download it
           // Debug: log first 10 downloads
-          if (i < 10) {
-            jobManager.addLog(jobId, `Downloading logo [${i}]: "${logoName}" (id=${logo.id})...`);
+          if (downloaded < 10) {
+            jobManager.addLog(
+              jobId,
+              `Downloading logo [${downloaded}]: "${logoName}" (id=${logo.id})...`
+            );
           }
           try {
             // Download logo using the cache endpoint with timeout
@@ -617,7 +651,7 @@ export class ExportService {
           }
         }
 
-        // Save logo metadata for import to use
+        // Save logo metadata for locally downloaded logos
         if (logoMetadata.length > 0) {
           // Sort metadata alphabetically by filename to match import sort order
           logoMetadata.sort((a, b) => a.filename.localeCompare(b.filename));
@@ -625,15 +659,26 @@ export class ExportService {
           await writeFile(metadataPath, JSON.stringify(logoMetadata, null, 2));
           jobManager.addLog(
             jobId,
-            `Saved logo metadata for ${logoMetadata.length} logos (sorted alphabetically)`
+            `Saved logo metadata for ${logoMetadata.length} local logos (sorted alphabetically)`
+          );
+        }
+
+        // Save URL mappings for URL-based logos
+        if (logoUrlMappings.length > 0) {
+          logoUrlMappings.sort((a, b) => a.name.localeCompare(b.name));
+          const urlMappingsPath = path.join(logosDir, 'url-mappings.json');
+          await writeFile(urlMappingsPath, JSON.stringify(logoUrlMappings, null, 2));
+          jobManager.addLog(
+            jobId,
+            `Saved URL mappings for ${logoUrlMappings.length} URL-based logos`
           );
         }
 
         jobManager.addLog(
           jobId,
-          `Logos: ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`
+          `Logos: ${urlMapped} URL-mapped, ${downloaded} downloaded, ${failed} failed, ${tooSmall} too small`
         );
-        exportData.data.logos = { count: downloaded, failed, tooSmall };
+        exportData.data.logos = { urlMapped, downloaded, failed, tooSmall };
       }
 
       const jsonPath = path.join(workDir, 'config.json');
@@ -736,9 +781,14 @@ export class ExportService {
     }
     if (exportData.data.logos) {
       // Handle both array format (dry run) and object format (actual export)
-      summary.counts.logos = Array.isArray(exportData.data.logos)
-        ? exportData.data.logos.length
-        : exportData.data.logos.count || 0;
+      if (Array.isArray(exportData.data.logos)) {
+        summary.counts.logos = exportData.data.logos.length;
+      } else {
+        // New format includes urlMapped + downloaded
+        const logoData = exportData.data.logos;
+        summary.counts.logos =
+          (logoData.urlMapped || 0) + (logoData.downloaded || logoData.count || 0);
+      }
     }
 
     return summary;

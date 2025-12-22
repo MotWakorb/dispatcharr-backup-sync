@@ -221,6 +221,9 @@ export interface LogoFileData {
   data: string;
   ext: string;
   original_name?: string;
+  source_id?: number;
+  /** For URL-based logos, the external URL (no data/ext needed) */
+  url?: string;
 }
 
 /**
@@ -230,6 +233,35 @@ export interface SimpleLogoImportResult {
   imported: number;
   errors: number;
   logoMap: Record<string, number>;
+}
+
+/**
+ * Deferred auto channel sync settings to be applied after channels/logos are imported
+ */
+export interface DeferredAutoSyncSettings {
+  accountId: number;
+  accountName: string;
+  groupSettingsPayload: Array<{
+    channel_group: number;
+    enabled: boolean;
+    auto_channel_sync: boolean;
+    auto_sync_channel_start?: number;
+    custom_properties?: Record<string, unknown>;
+  }>;
+}
+
+/**
+ * Result from M3U import with deferred auto sync settings
+ */
+export interface M3UImportResult extends ImportResult {
+  deferredAutoSyncSettings: DeferredAutoSyncSettings[];
+}
+
+/**
+ * Result from M3U sync with deferred auto sync settings
+ */
+export interface M3USyncResult extends SyncResult {
+  deferredAutoSyncSettings: DeferredAutoSyncSettings[];
 }
 
 /**

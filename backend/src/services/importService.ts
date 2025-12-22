@@ -18,6 +18,8 @@ import type {
   ExtractResult,
   CachedUpload,
   LogoFileData,
+  DeferredAutoSyncSettings,
+  M3UImportResult,
 } from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
 import { createLogger } from './logger.js';
@@ -397,6 +399,7 @@ export class ImportService {
       let userAgentMap: Record<string | number, number> | undefined;
       let epgSourceMap: Record<string | number, number> | undefined;
       let channelGroupMap: Record<string | number, number> | undefined;
+      let deferredAutoSyncSettings: DeferredAutoSyncSettings[] = [];
 
       let currentProgress = 20;
       const totalSteps = Math.max(this.countDataSections(data, request.options), 1);
@@ -406,7 +409,14 @@ export class ImportService {
       if (data.m3uSources && this.isEnabled('m3uSources', request.options)) {
         this.throwIfCancelled(jobId);
         jobManager.setProgress(jobId, currentProgress, 'Importing M3U sources...');
-        results.imported.m3uSources = await this.importM3USources(client, data.m3uSources, jobId);
+        const m3uResult = await this.importM3USources(client, data.m3uSources, jobId);
+        results.imported.m3uSources = {
+          imported: m3uResult.imported,
+          skipped: m3uResult.skipped,
+          errors: m3uResult.errors,
+        };
+        // Collect deferred auto sync settings to apply after channels/logos
+        deferredAutoSyncSettings = m3uResult.deferredAutoSyncSettings;
         currentProgress += progressPerStep;
       }
 
@@ -594,6 +604,36 @@ export class ImportService {
         jobManager.addLog(jobId, `Skipping channel profile associations due to unmet conditions`);
       }
 
+      // Apply deferred auto_channel_sync settings AFTER channels and logos are fully imported
+      // This is done here to prevent auto_channel_sync from interfering with logo import
+      if (deferredAutoSyncSettings.length > 0) {
+        this.throwIfCancelled(jobId);
+        jobManager.setProgress(jobId, currentProgress, 'Applying auto channel sync settings...');
+        await this.applyDeferredAutoSyncSettings(client, deferredAutoSyncSettings, jobId);
+
+        // Trigger M3U refresh after applying auto channel sync settings
+        // This ensures channels are created/synced according to the new settings
+        jobManager.setProgress(
+          jobId,
+          currentProgress,
+          'Triggering M3U refresh after auto sync settings...'
+        );
+        try {
+          await client.post('/api/m3u/refresh/').catch(() => {
+            jobManager.addLog(jobId, 'M3U refresh after auto sync settings failed (non-critical)');
+          });
+          // Wait for M3U refresh to complete
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+          jobManager.addLog(
+            jobId,
+            'M3U refresh triggered after auto channel sync settings applied'
+          );
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          jobManager.addLog(jobId, `Warning: M3U refresh failed: ${message}`);
+        }
+      }
+
       // Import User Agents
       if (data.userAgents && this.isEnabled('userAgents', request.options)) {
         this.throwIfCancelled(jobId);
@@ -656,13 +696,30 @@ export class ImportService {
 
       // Note: Logos are now imported before channels (see above)
 
+      // Final M3U and EPG refresh at the end of import process
+      // This ensures all auto channel sync settings take effect and EPG data is properly assigned
+      jobManager.setProgress(jobId, 93, 'Final M3U refresh...');
+      if (data.m3uSources && this.isEnabled('m3uSources', request.options)) {
+        try {
+          await client.post('/api/m3u/refresh/');
+          jobManager.addLog(jobId, 'Final M3U refresh triggered');
+          // Wait for M3U refresh to complete before EPG refresh
+          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          jobManager.addLog(jobId, `Warning: Final M3U refresh failed: ${message}`);
+        }
+      }
+
       // Trigger EPG refresh after import to ensure EPG data is assigned to channels
+      jobManager.setProgress(jobId, 96, 'Final EPG refresh to assign data to channels...');
       if (data.epgSources && this.isEnabled('epgSources', request.options)) {
-        jobManager.setProgress(jobId, 95, 'Triggering EPG refresh to assign data to channels...');
         try {
           await this.triggerEpgRefresh(client, jobId);
-        } catch (error: any) {
-          jobManager.addLog(jobId, `Warning: EPG refresh trigger failed: ${error.message}`);
+          jobManager.addLog(jobId, 'Final EPG refresh triggered');
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          jobManager.addLog(jobId, `Warning: Final EPG refresh failed: ${message}`);
         }
       }
 
@@ -781,7 +838,7 @@ export class ImportService {
         );
       }
 
-      // Try to read metadata.json for original name mapping
+      // Try to read metadata.json for original name mapping (locally downloaded logos)
       let metadata: Array<{ original_name: string; filename: string; source_id: number }> = [];
       const metadataPath = path.join(logosDir, 'metadata.json');
       try {
@@ -795,6 +852,22 @@ export class ImportService {
         if (jobId) {
           jobManager.addLog(jobId, `No logo metadata.json found, using filenames as logo names`);
         }
+      }
+
+      // Try to read url-mappings.json for URL-based logos (new in v1.5.0+)
+      let urlMappings: Array<{ name: string; url: string; source_id: number }> = [];
+      const urlMappingsPath = path.join(logosDir, 'url-mappings.json');
+      try {
+        const urlMappingsContent = await readFile(urlMappingsPath, 'utf-8');
+        urlMappings = JSON.parse(urlMappingsContent);
+        if (jobId) {
+          jobManager.addLog(
+            jobId,
+            `Loaded ${urlMappings.length} URL-based logo mappings from url-mappings.json`
+          );
+        }
+      } catch {
+        // No URL mappings file - this is normal for older backups
       }
 
       // Build filename -> metadata lookup (original_name and source_id)
@@ -824,6 +897,7 @@ export class ImportService {
         ext: string;
         original_name?: string;
         source_id?: number;
+        url?: string;
       }[] = [];
 
       // CRITICAL: Sort images by filename to ensure consistent order
@@ -881,6 +955,26 @@ export class ImportService {
 
       if (jobId && missingMetadata > 0) {
         jobManager.addLog(jobId, `WARNING: ${missingMetadata} logo files had no metadata mapping`);
+      }
+
+      // Add URL-based logos from url-mappings.json
+      // These have url set and no data - they'll be fetched and uploaded during import
+      for (const urlMapping of urlMappings) {
+        logos.push({
+          name: urlMapping.name,
+          data: '', // No data - will be fetched from URL during import
+          ext: '', // Will be determined from URL during import
+          original_name: urlMapping.name,
+          source_id: urlMapping.source_id,
+          url: urlMapping.url,
+        });
+      }
+
+      if (jobId && urlMappings.length > 0) {
+        jobManager.addLog(
+          jobId,
+          `Total logos: ${images.length} file-based + ${urlMappings.length} URL-based = ${logos.length}`
+        );
       }
 
       return logos;
@@ -1691,7 +1785,9 @@ export class ImportService {
     client: DispatcharrClient,
     sources: any[],
     jobId: string
-  ): Promise<ImportResult> {
+  ): Promise<M3UImportResult> {
+    // Collect deferred auto sync settings to apply after channels/logos are imported
+    const deferredAutoSyncSettings: DeferredAutoSyncSettings[] = [];
     const existing = await client
       .get('/api/m3u/accounts/')
       .catch(this.warnOnFail('/api/m3u/accounts/', [], jobId));
@@ -2062,17 +2158,29 @@ export class ImportService {
               channel_groups: completePayload,
             });
 
-            // Also try dedicated group-settings endpoint for auto_channel_sync settings
-            // Note: Dispatcharr API may not persist these values (known limitation)
+            // DEFER auto_channel_sync settings - will be applied after channels/logos are imported
+            // This prevents auto_channel_sync from interfering with logo import process
             if (autoSyncCount > 0) {
-              const autoSyncGroups = completePayload.filter((cg) => cg.auto_channel_sync);
-              await client
-                .patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
-                  channel_groups: autoSyncGroups,
-                })
-                .catch(
-                  this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId)
-                );
+              const groupSettingsPayload = completePayload
+                .filter((cg) => cg.auto_channel_sync)
+                .map((cg) => ({
+                  channel_group: cg.channel_group,
+                  enabled: cg.enabled !== false,
+                  auto_channel_sync: cg.auto_channel_sync,
+                  auto_sync_channel_start: cg.auto_sync_channel_start,
+                  custom_properties: cg.custom_properties,
+                }));
+
+              deferredAutoSyncSettings.push({
+                accountId,
+                accountName: source?.name || `Account ${accountId}`,
+                groupSettingsPayload,
+              });
+
+              jobManager.addLog(
+                jobId,
+                `M3U ${source?.name}: Deferring auto_channel_sync for ${groupSettingsPayload.length} groups (will apply after channels/logos imported)`
+              );
             }
 
             // Wait for Dispatcharr to process the group changes before triggering refresh
@@ -2098,22 +2206,12 @@ export class ImportService {
             );
             jobManager.addLog(jobId, `M3U ${source?.name}: ${streamCount} streams loaded`);
 
-            // Re-apply settings after refresh in case it reset them
+            // Re-apply channel group enabled/disabled settings after refresh in case it reset them
+            // NOTE: auto_channel_sync is NOT applied here - it's deferred until after channels/logos are imported
             if (streamCount > 0) {
               await client.patch(`/api/m3u/accounts/${accountId}/`, {
                 channel_groups: completePayload,
               });
-
-              if (autoSyncCount > 0) {
-                const autoSyncGroups = completePayload.filter((cg) => cg.auto_channel_sync);
-                await client
-                  .patch(`/api/m3u/accounts/${accountId}/group-settings/`, {
-                    channel_groups: autoSyncGroups,
-                  })
-                  .catch(
-                    this.warnOnFail(`/api/m3u/accounts/${accountId}/group-settings/`, null, jobId)
-                  );
-              }
             }
           }
         }
@@ -2124,7 +2222,50 @@ export class ImportService {
       }
     }
 
-    return { imported, skipped, errors };
+    return { imported, skipped, errors, deferredAutoSyncSettings };
+  }
+
+  /**
+   * Apply deferred auto channel sync settings after channels and logos are fully imported.
+   * This prevents auto_channel_sync from interfering with logo import.
+   */
+  private async applyDeferredAutoSyncSettings(
+    client: DispatcharrClient,
+    deferredSettings: DeferredAutoSyncSettings[],
+    jobId: string
+  ): Promise<void> {
+    if (deferredSettings.length === 0) {
+      return;
+    }
+
+    jobManager.addLog(
+      jobId,
+      `Applying deferred auto_channel_sync settings for ${deferredSettings.length} M3U account(s)...`
+    );
+
+    for (const setting of deferredSettings) {
+      try {
+        jobManager.addLog(
+          jobId,
+          `Applying auto_channel_sync to ${setting.groupSettingsPayload.length} groups for M3U ${setting.accountName}`
+        );
+
+        await client
+          .patch(`/api/m3u/accounts/${setting.accountId}/group-settings/`, {
+            group_settings: setting.groupSettingsPayload,
+          })
+          .catch((err) => {
+            jobManager.addLog(
+              jobId,
+              `M3U ${setting.accountName}: group-settings API failed: ${err?.message || err}`
+            );
+          });
+      } catch (error) {
+        this.logJobError(jobId, 'Failed to apply auto_channel_sync', setting.accountName, error);
+      }
+    }
+
+    jobManager.addLog(jobId, `Deferred auto_channel_sync settings applied`);
   }
 
   private async importStreamProfiles(
@@ -2702,10 +2843,15 @@ export class ImportService {
       const uploadName = originalName || filenameName;
 
       const base64 = logo?.data;
-      if (!base64) {
+      const logoUrl = logo?.url;
+
+      // Check if this is a URL-based logo (no data, but has URL)
+      const isUrlBased = !base64 && logoUrl;
+
+      if (!base64 && !logoUrl) {
         skipped++;
         if (jobId) {
-          jobManager.addLog(jobId, `[SKIP] Logo "${uploadName}" - no data`);
+          jobManager.addLog(jobId, `[SKIP] Logo "${uploadName}" - no data and no URL`);
         }
         continue;
       }
@@ -2734,21 +2880,84 @@ export class ImportService {
       }
 
       try {
-        // Convert base64 to Buffer for file upload (with size validation)
-        const buffer = safeBase64Decode(base64, MAX_LOGO_FILE_SIZE, `Logo "${uploadName}"`);
+        let bufferCopy: Buffer;
+        let ext: string;
+        let contentType: string;
 
-        // Determine content type from extension (if provided) or default to png
-        const ext = logo.ext || 'png';
-        let contentType = 'image/png';
-        if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
-        else if (ext === 'webp') contentType = 'image/webp';
-        else if (ext === 'gif') contentType = 'image/gif';
-        else if (ext === 'svg') contentType = 'image/svg+xml';
+        if (isUrlBased) {
+          // URL-based logo: fetch from URL
+          if (jobId) {
+            jobManager.addLog(jobId, `[URL] Fetching logo "${uploadName}" from ${logoUrl}...`);
+          }
 
-        // Create isolated buffer copy to prevent FormData reference issues
-        // CRITICAL: Buffer.from() creates a NEW buffer (copies the data)
-        // Without this, FormData holds a reference that can point to wrong data
-        const bufferCopy = Buffer.from(buffer);
+          try {
+            const axios = (await import('axios')).default;
+            const response = await axios.get(logoUrl, {
+              responseType: 'arraybuffer',
+              timeout: 30000, // 30 second timeout
+              headers: { Accept: 'image/*' },
+            });
+
+            bufferCopy = Buffer.from(response.data);
+
+            // Determine extension from URL or content-type
+            const urlLower = logoUrl.toLowerCase();
+            if (urlLower.includes('.jpg') || urlLower.includes('.jpeg')) {
+              ext = 'jpg';
+              contentType = 'image/jpeg';
+            } else if (urlLower.includes('.webp')) {
+              ext = 'webp';
+              contentType = 'image/webp';
+            } else if (urlLower.includes('.gif')) {
+              ext = 'gif';
+              contentType = 'image/gif';
+            } else if (urlLower.includes('.svg')) {
+              ext = 'svg';
+              contentType = 'image/svg+xml';
+            } else {
+              // Default to png
+              ext = 'png';
+              contentType = 'image/png';
+            }
+
+            if (bufferCopy.length < 100) {
+              if (jobId) {
+                jobManager.addLog(
+                  jobId,
+                  `[SKIP] Logo "${uploadName}" from URL - too small (${bufferCopy.length} bytes)`
+                );
+              }
+              skipped++;
+              continue;
+            }
+          } catch (fetchError: any) {
+            errors++;
+            if (jobId) {
+              jobManager.addLog(
+                jobId,
+                `[FAIL] Logo "${uploadName}" - failed to fetch from URL: ${fetchError.message}`
+              );
+            }
+            continue;
+          }
+        } else {
+          // File-based logo: decode base64 data
+          // Convert base64 to Buffer for file upload (with size validation)
+          const buffer = safeBase64Decode(base64, MAX_LOGO_FILE_SIZE, `Logo "${uploadName}"`);
+
+          // Determine content type from extension (if provided) or default to png
+          ext = logo.ext || 'png';
+          contentType = 'image/png';
+          if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
+          else if (ext === 'webp') contentType = 'image/webp';
+          else if (ext === 'gif') contentType = 'image/gif';
+          else if (ext === 'svg') contentType = 'image/svg+xml';
+
+          // Create isolated buffer copy to prevent FormData reference issues
+          // CRITICAL: Buffer.from() creates a NEW buffer (copies the data)
+          // Without this, FormData holds a reference that can point to wrong data
+          bufferCopy = Buffer.from(buffer);
+        }
 
         const fileSize = bufferCopy.length;
         if (jobId && imported < 20) {

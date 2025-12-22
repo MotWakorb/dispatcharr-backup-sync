@@ -31,7 +31,7 @@ A web-based tool for backing up, restoring, and synchronizing [Dispatcharr](http
 | DVR Rules | Yes | Yes | Yes |
 | Comskip Config | Yes | Yes | Yes |
 | Users | Yes | Yes | Yes |
-| Logos | Yes | Yes | No |
+| Logos | Yes | Yes | Yes |
 
 ## Quick Start with Docker Compose
 
@@ -225,13 +225,13 @@ docker run --rm -it -v ${PWD}/frontend:/app -w /app -p 6001:3000 node:20-alpine 
 
 ## Known Issues
 
-### Logo Backup/Restore
+### Logo Backup/Restore/Sync
 
-Logo backup and restore is supported as of v1.3.0. The tool handles two types of logos:
-- **URL-based logos** (e.g., `https://logo.m3uassets.com/...`): Stored as name→URL mappings and restored via API
-- **Local file logos** (stored in `/data/logos`): Downloaded during backup and uploaded during restore
+Logo backup, restore, and sync are fully supported as of v1.4.1. The tool handles two types of logos:
+- **URL-based logos** (e.g., `https://logo.m3uassets.com/...`): Stored as name→URL mappings and synced via API (no redundant downloads)
+- **Local file logos** (stored in `/data/logos`): Downloaded during backup/sync and uploaded during restore/sync
 
-**Note**: Logo sync between instances is not yet supported - only backup/restore operations.
+All logos are properly assigned to their channels during sync operations.
 
 ### M3U Auto Channel Sync Limitation
 
@@ -293,6 +293,18 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
 
 ## Changelog
 
+### v1.4.1
+- **Logo Sync**: Full logo sync support between instances
+  - URL-based logos synced via API reference (no redundant downloads)
+  - File-based logos properly transferred between instances
+  - Fixed pagination bug that limited logo sync to 50 items
+  - Logos correctly assigned to channels after sync
+- **Sync Refactor**: Complete rewrite of sync to use export/import internally
+  - Guarantees feature parity between backup/restore and sync operations
+  - Any fix to backup/restore automatically applies to sync
+  - Reduced codebase by ~1500 lines of duplicated logic
+  - More reliable and maintainable architecture
+
 ### v1.4.0
 - **Frontend Error Handling**: Added error boundaries and loading state components for better UX
 - **Performance**: Large backup compression now uses worker threads to avoid blocking the event loop
@@ -333,6 +345,7 @@ docker run --rm --network dispatcharr-backup-sync_dispatcharr-manager \
 - ~~**Dark Mode**: Light, dark, and auto theme support~~ (Added in v1.2.0)
 - ~~**Version Display & Update Notifications**: Show current version and notify when updates are available~~ (Added in v1.2.0)
 - ~~**Logo Backup/Restore**: Backup and restore channel logos~~ (Added in v1.3.0)
+- ~~**Logo Sync**: Sync logos between instances~~ (Added in v1.4.1)
 - **External Storage Export**: Export backups to common filesystems such as SMB shares, NAS shares, or object storage (S3, etc.)
 
 ## License
