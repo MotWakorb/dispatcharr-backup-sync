@@ -6,7 +6,6 @@ import path from 'path';
 import { promisify } from 'util';
 import FormData from 'form-data';
 import AdmZip from 'adm-zip';
-import tar from 'tar';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   ImportOptions,
@@ -24,6 +23,7 @@ import type {
   DispatcharrEntity,
 } from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
+import { CumulativeMemoryTracker } from '../utils/logoUtils.js';
 import { createLogger } from './logger.js';
 import {
   DEFAULT_PAGE_SIZE,
@@ -109,6 +109,26 @@ export class ImportService {
       const err: any = new Error('Import cancelled by user');
       err.cancelled = true;
       throw err;
+    }
+  }
+
+  /**
+   * Creates a cancellable delay that respects job cancellation.
+   * Polls for cancellation every 500ms during the delay.
+   * @param ms - The delay duration in milliseconds
+   * @param jobId - The job ID to check for cancellation
+   * @throws Error if the job is cancelled during the delay
+   */
+  private async cancellableDelay(ms: number, jobId: string): Promise<void> {
+    const pollInterval = 500;
+    let elapsed = 0;
+
+    while (elapsed < ms) {
+      this.throwIfCancelled(jobId);
+      const remaining = ms - elapsed;
+      const waitTime = Math.min(pollInterval, remaining);
+      await new Promise((resolve) => globalThis.setTimeout(resolve, waitTime));
+      elapsed += waitTime;
     }
   }
 
@@ -359,9 +379,7 @@ export class ImportService {
         configFilePath = result.configPath;
         extractedDir = result.baseDir;
       } else if (ext === '.gz' || ext === '.tgz') {
-        const result = await this.extractTarGz(tempFilePath);
-        configFilePath = result.configPath;
-        extractedDir = result.baseDir;
+        throw new Error('TAR/GZIP archives are not supported. Please use ZIP format.');
       }
 
       // Read and parse config file
@@ -642,8 +660,8 @@ export class ImportService {
           await client.post('/api/m3u/refresh/').catch(() => {
             jobManager.addLog(jobId, 'M3U refresh after auto sync settings failed (non-critical)');
           });
-          // Wait for M3U refresh to complete
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+          // Wait for M3U refresh to complete (cancellable)
+          await this.cancellableDelay(5000, jobId);
           jobManager.addLog(
             jobId,
             'M3U refresh triggered after auto channel sync settings applied'
@@ -723,8 +741,8 @@ export class ImportService {
         try {
           await client.post('/api/m3u/refresh/');
           jobManager.addLog(jobId, 'Final M3U refresh triggered');
-          // Wait for M3U refresh to complete before EPG refresh
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+          // Wait for M3U refresh to complete before EPG refresh (cancellable)
+          await this.cancellableDelay(5000, jobId);
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           jobManager.addLog(jobId, `Warning: Final M3U refresh failed: ${message}`);
@@ -818,23 +836,6 @@ export class ImportService {
         await writeFile(targetPath, entry.getData());
       }
     }
-
-    const configPath = await this.findConfigFile(extractDir);
-    if (!configPath) {
-      throw new Error('No configuration file found in archive');
-    }
-
-    return { configPath, baseDir: extractDir };
-  }
-
-  private async extractTarGz(tarPath: string): Promise<ExtractResult> {
-    const extractDir = path.join(this.tempDir, 'extract-' + Date.now());
-    await mkdir(extractDir, { recursive: true });
-
-    await tar.extract({
-      file: tarPath,
-      cwd: extractDir,
-    });
 
     const configPath = await this.findConfigFile(extractDir);
     if (!configPath) {
@@ -1029,9 +1030,7 @@ export class ImportService {
         configFilePath = result.configPath;
         extractedDir = result.baseDir;
       } else if (ext === '.gz' || ext === '.tgz') {
-        const result = await this.extractTarGz(tempFilePath);
-        configFilePath = result.configPath;
-        extractedDir = result.baseDir;
+        throw new Error('TAR/GZIP archives are not supported. Please use ZIP format.');
       } else {
         configFilePath = tempFilePath;
       }
@@ -1847,6 +1846,7 @@ export class ImportService {
     const waitForM3UReady = async (accountId: any) => {
       const maxAttempts = 40;
       for (let i = 0; i < maxAttempts; i++) {
+        this.throwIfCancelled(jobId);
         try {
           const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
           const status = acct?.status || acct?.data?.status;
@@ -1860,7 +1860,7 @@ export class ImportService {
         } catch {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, 2000));
+        await this.cancellableDelay(2000, jobId);
       }
       return undefined;
     };
@@ -1877,6 +1877,7 @@ export class ImportService {
       let pendingSetupCount = 0;
 
       for (let i = 0; i < maxAttempts; i++) {
+        this.throwIfCancelled(jobId);
         try {
           // Check account status
           const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
@@ -1932,7 +1933,7 @@ export class ImportService {
         } catch (err) {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, 2000));
+        await this.cancellableDelay(2000, jobId);
       }
 
       jobManager.addLog(
@@ -2083,10 +2084,7 @@ export class ImportService {
             await client
               .patch(`/api/m3u/accounts/${accountId}/`, { is_active: false })
               .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (deactivate)`, null, jobId));
-            await new Promise((res) => {
-              const t = globalThis.setTimeout(res, 500);
-              return t;
-            });
+            await this.cancellableDelay(500, jobId);
             await client
               .patch(`/api/m3u/accounts/${accountId}/`, { is_active: true })
               .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (activate)`, null, jobId));
@@ -2204,8 +2202,8 @@ export class ImportService {
               );
             }
 
-            // Wait for Dispatcharr to process the group changes before triggering refresh
-            await new Promise((resolve) => globalThis.setTimeout(resolve, M3U_REFRESH_WAIT_MS));
+            // Wait for Dispatcharr to process the group changes before triggering refresh (cancellable)
+            await this.cancellableDelay(M3U_REFRESH_WAIT_MS, jobId);
 
             // Trigger refresh to pull streams for enabled groups
             let refreshResult = await client
@@ -2759,6 +2757,7 @@ export class ImportService {
     // - "name:abc" (original name lowercase) - fallback for legacy
     // - "file:abc" (filename lowercase) - fallback for sanitized names
     const logoMap: Record<string, number> = {};
+    const memoryTracker = new CumulativeMemoryTracker();
 
     if (!Array.isArray(logos)) {
       if (jobId) {
@@ -2963,6 +2962,10 @@ export class ImportService {
           }
         } else {
           // File-based logo: decode base64 data
+          // Check cumulative memory before decoding to prevent memory exhaustion
+          const estimatedSize = estimateBase64DecodedSize(base64);
+          memoryTracker.checkAndAdd(estimatedSize, `Logo import batch at "${uploadName}"`);
+
           // Convert base64 to Buffer for file upload (with size validation)
           const buffer = safeBase64Decode(base64, MAX_LOGO_FILE_SIZE, `Logo "${uploadName}"`);
 
@@ -3422,7 +3425,7 @@ export class ImportService {
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
-            await new Promise((resolve) => globalThis.setTimeout(resolve, POST_REFRESH_DELAY_MS));
+            await this.cancellableDelay(POST_REFRESH_DELAY_MS, jobId);
 
             // Toggle back on
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: true });
@@ -3538,7 +3541,7 @@ export class ImportService {
         } catch (error) {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, intervalMs));
+        await this.cancellableDelay(intervalMs, jobId);
       }
 
       // If still 0 after waiting, warn and proceed
@@ -3597,7 +3600,7 @@ export class ImportService {
       } catch (error) {
         // ignore and retry
       }
-      await new Promise((res) => setTimeout(res, intervalMs));
+      await this.cancellableDelay(intervalMs, jobId);
     }
 
     jobManager.addLog(
@@ -3629,7 +3632,7 @@ export class ImportService {
       } catch {
         // ignore and retry
       }
-      await new Promise((res) => setTimeout(res, intervalMs));
+      await this.cancellableDelay(intervalMs, jobId);
     }
     jobManager.addLog(
       jobId,

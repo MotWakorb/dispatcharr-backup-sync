@@ -8,6 +8,57 @@
 export const MAX_LOGO_FILE_SIZE = 50 * 1024 * 1024;
 
 /**
+ * Maximum cumulative decoded size for batch operations (500MB)
+ * Prevents memory exhaustion when importing many logos
+ */
+export const MAX_CUMULATIVE_DECODE_SIZE = 500 * 1024 * 1024;
+
+/**
+ * Tracks cumulative memory usage during batch decoding operations.
+ * Use this to prevent memory exhaustion when decoding many base64 items.
+ */
+export class CumulativeMemoryTracker {
+  private totalBytes = 0;
+  private readonly maxBytes: number;
+
+  constructor(maxBytes: number = MAX_CUMULATIVE_DECODE_SIZE) {
+    this.maxBytes = maxBytes;
+  }
+
+  /**
+   * Checks if adding the specified size would exceed the limit.
+   * @param bytes - The size to add
+   * @param context - Context for error message
+   * @throws Error if adding would exceed limit
+   */
+  checkAndAdd(bytes: number, context: string): void {
+    if (this.totalBytes + bytes > this.maxBytes) {
+      const totalMB = ((this.totalBytes + bytes) / (1024 * 1024)).toFixed(2);
+      const limitMB = (this.maxBytes / (1024 * 1024)).toFixed(2);
+      throw new Error(
+        `${context}: Cumulative decoded size (${totalMB}MB) would exceed limit (${limitMB}MB). ` +
+          `Consider reducing the number of embedded logos or using URL references instead.`
+      );
+    }
+    this.totalBytes += bytes;
+  }
+
+  /**
+   * Gets the current total bytes tracked.
+   */
+  getTotal(): number {
+    return this.totalBytes;
+  }
+
+  /**
+   * Resets the tracker (e.g., after buffers are released).
+   */
+  reset(): void {
+    this.totalBytes = 0;
+  }
+}
+
+/**
  * Common image extensions for logo files
  */
 export const VALID_LOGO_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] as const;

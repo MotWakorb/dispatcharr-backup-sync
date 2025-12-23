@@ -7,6 +7,8 @@ import {
   safeBase64Decode,
   getLogoContentType,
   calculateLogoChecksum,
+  estimateBase64DecodedSize,
+  CumulativeMemoryTracker,
 } from '../utils/logoUtils.js';
 
 const log = createLogger('logo-import');
@@ -30,6 +32,7 @@ export async function simpleImportLogos(
   let imported = 0;
   let errors = 0;
   const logoMap: Record<string, number> = {};
+  const memoryTracker = new CumulativeMemoryTracker();
 
   log.debug({ count: logos.length }, 'Starting logo import');
   log.debug('First 10 logos to import:');
@@ -93,6 +96,10 @@ export async function simpleImportLogos(
       }
 
       // File-based logo: decode base64 data and upload
+      // Check cumulative memory before decoding to prevent memory exhaustion
+      const estimatedSize = estimateBase64DecodedSize(logo.data);
+      memoryTracker.checkAndAdd(estimatedSize, `Logo import batch at "${logoName}"`);
+
       const imageData = safeBase64Decode(logo.data, MAX_LOGO_FILE_SIZE, `Logo "${logoName}"`);
       const ext = logo.ext || 'png';
       const contentType = getLogoContentType(ext);

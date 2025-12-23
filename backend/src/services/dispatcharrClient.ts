@@ -175,6 +175,25 @@ function validateUrl(urlString: string): void {
         'IPv6 unique local addresses are not allowed (set ALLOW_PRIVATE_URLS=true to enable)'
       );
     }
+    // IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) - SSRF bypass prevention
+    // These can be used to bypass IPv4 checks by embedding IPv4 in IPv6 format
+    const ipv4MappedMatch = ipv6.match(/^::ffff:(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4MappedMatch) {
+      const [, a, b, c, d] = ipv4MappedMatch.map(Number);
+      // Check for private/local IPv4 ranges embedded in IPv6
+      if (
+        a === 10 || // 10.x.x.x
+        (a === 172 && b >= 16 && b <= 31) || // 172.16-31.x.x
+        (a === 192 && b === 168) || // 192.168.x.x
+        (a === 169 && b === 254) || // 169.254.x.x (link-local)
+        a === 127 || // 127.x.x.x (loopback)
+        (a === 0 && b === 0 && c === 0 && d === 0) // 0.0.0.0
+      ) {
+        throw new Error(
+          'IPv4-mapped IPv6 addresses with private ranges are not allowed (set ALLOW_PRIVATE_URLS=true to enable)'
+        );
+      }
+    }
   }
 
   // Block common internal hostnames (cloud metadata endpoints - always blocked)
