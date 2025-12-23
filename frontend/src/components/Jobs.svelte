@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, cancelSync, cancelImport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
-  import type { JobStatus, JobLogEntry } from '../types';
+  import type { JobStatus, JobLogEntry, ExportJobResult } from '../types';
   import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS } from '../constants';
   import { toastStore } from '../stores/toastStore';
   import Skeleton from './Skeleton.svelte';
@@ -108,7 +108,8 @@
 
   function download(job: JobStatus) {
     const isSuccess = job.status === 'completed' || job.status === 'completed_with_warnings';
-    if (job.jobType === 'backup' && isSuccess && job.result?.fileName) {
+    const result = job.result as ExportJobResult | undefined;
+    if (job.jobType === 'backup' && isSuccess && result?.fileName) {
       const url = getExportDownloadUrl(job.jobId);
       window.location.href = url;
     }
@@ -116,7 +117,8 @@
 
   function downloadLogos(job: JobStatus) {
     const isSuccess = job.status === 'completed' || job.status === 'completed_with_warnings';
-    if (job.jobType === 'backup' && isSuccess && job.result?.logosFileName) {
+    const result = job.result as ExportJobResult | undefined;
+    if (job.jobType === 'backup' && isSuccess && result?.logosFileName) {
       const url = getExportLogosDownloadUrl(job.jobId);
       window.location.href = url;
     }
@@ -141,6 +143,10 @@
   }
 
   const statusLabel = (status: JobStatus['status']) => status;
+
+  function getExportResult(job: JobStatus): ExportJobResult | undefined {
+    return job.jobType === 'backup' ? (job.result as ExportJobResult | undefined) : undefined;
+  }
 
   async function viewLogs(job: JobStatus) {
     logsModalJob = job;
@@ -399,11 +405,11 @@
                   {job.completedAt ? new Date(job.completedAt).toLocaleString() : '-'}
                 </td>
                 <td class="actions">
-                  {#if job.jobType === 'backup' && (job.status === 'completed' || job.status === 'completed_with_warnings') && job.result?.fileName}
+                  {#if job.jobType === 'backup' && (job.status === 'completed' || job.status === 'completed_with_warnings') && getExportResult(job)?.fileName}
                     <button class="btn btn-success btn-sm" on:click={() => download(job)}>
                       Download
                     </button>
-                    {#if job.result?.logosFileName}
+                    {#if getExportResult(job)?.logosFileName}
                       <button class="btn btn-secondary btn-sm" on:click={() => downloadLogos(job)}>
                         Logos
                       </button>
