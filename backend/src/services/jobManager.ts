@@ -542,6 +542,76 @@ class JobManager {
     return this.logs.get(jobId) || [];
   }
 
+  /**
+   * Get all logs from all jobs combined, sorted by timestamp (newest first).
+   * Supports filtering by job type and search term.
+   */
+  getAllLogs(options?: {
+    limit?: number;
+    jobType?: string;
+    search?: string;
+  }): Array<JobLogEntry & { jobId: string; jobType?: string; jobStatus?: string }> {
+    const limit = options?.limit ?? 500;
+    const jobType = options?.jobType?.toLowerCase();
+    const search = options?.search?.toLowerCase();
+
+    // Collect all logs with job metadata
+    const allLogs: Array<JobLogEntry & { jobId: string; jobType?: string; jobStatus?: string }> =
+      [];
+
+    // Get logs from active jobs
+    for (const [jobId, job] of this.jobs.entries()) {
+      // Filter by job type if specified
+      if (jobType && job.jobType?.toLowerCase() !== jobType) {
+        continue;
+      }
+
+      const logs = this.logs.get(jobId) || [];
+      for (const log of logs) {
+        // Filter by search term if specified
+        if (search && !log.message.toLowerCase().includes(search)) {
+          continue;
+        }
+
+        allLogs.push({
+          ...log,
+          jobId,
+          jobType: job.jobType,
+          jobStatus: job.status,
+        });
+      }
+    }
+
+    // Get logs from history jobs
+    for (const job of this.history) {
+      // Filter by job type if specified
+      if (jobType && job.jobType?.toLowerCase() !== jobType) {
+        continue;
+      }
+
+      const logs = this.logs.get(job.jobId) || [];
+      for (const log of logs) {
+        // Filter by search term if specified
+        if (search && !log.message.toLowerCase().includes(search)) {
+          continue;
+        }
+
+        allLogs.push({
+          ...log,
+          jobId: job.jobId,
+          jobType: job.jobType,
+          jobStatus: job.status,
+        });
+      }
+    }
+
+    // Sort by timestamp descending (newest first)
+    allLogs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    // Apply limit
+    return allLogs.slice(0, limit);
+  }
+
   private recordHistory(job: JobStatus): void {
     // store a shallow copy to preserve snapshot
     const snapshot: JobStatus = { ...job };

@@ -83,6 +83,12 @@ export interface JobLogEntry {
   message: string;
 }
 
+export interface CombinedLogEntry extends JobLogEntry {
+  jobId: string;
+  jobType?: string;
+  jobStatus?: string;
+}
+
 export interface TestConnectionResponse {
   success: boolean;
   message: string;

@@ -45,6 +45,29 @@ jobsRouter.get('/:jobId/logs', (req, res) => {
   }
 });
 
+// Get all logs from all jobs (combined view)
+jobsRouter.get('/logs/all', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 500;
+    const jobType = req.query.jobType as string | undefined;
+    const search = req.query.search as string | undefined;
+
+    const allLogs = jobManager.getAllLogs({ limit, jobType, search });
+    log.debug({ count: allLogs.length, limit, jobType, search }, 'Retrieved all logs');
+
+    res.json({
+      success: true,
+      data: allLogs,
+    } as ApiResponse<Array<JobLogEntry & { jobId: string; jobType?: string; jobStatus?: string }>>);
+  } catch (error) {
+    log.error({ err: error }, 'Failed to get all logs');
+    res.status(500).json({
+      success: false,
+      error: getErrorMessage(error, 'Failed to get all logs'),
+    } as ApiResponse);
+  }
+});
+
 // Get job history
 jobsRouter.get('/history/list', (_req, res) => {
   try {

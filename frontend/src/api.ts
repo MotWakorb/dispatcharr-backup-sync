@@ -9,6 +9,7 @@ import type {
   SavedConnection,
   SavedConnectionInput,
   JobLogEntry,
+  CombinedLogEntry,
   ImportOptions,
   PluginInfo,
   Schedule,
@@ -181,6 +182,22 @@ export async function getJobHistory(): Promise<JobStatus[]> {
 
 export async function clearJobHistory(): Promise<void> {
   await api.delete<ApiResponse>('/jobs/history');
+}
+
+export async function getAllLogs(options?: {
+  limit?: number;
+  jobType?: string;
+  search?: string;
+}): Promise<CombinedLogEntry[]> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.jobType) params.set('jobType', options.jobType);
+  if (options?.search) params.set('search', options.search);
+  const queryString = params.toString();
+  const response = await api.get<ApiResponse<CombinedLogEntry[]>>(
+    `/jobs/logs/all${queryString ? `?${queryString}` : ''}`
+  );
+  return response.data.data || [];
 }
 
 // Import APIs
