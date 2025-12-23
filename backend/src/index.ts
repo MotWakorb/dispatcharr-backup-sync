@@ -233,3 +233,19 @@ process.on('SIGINT', () => {
   }
   process.exit(0);
 });
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  log.error({ reason, promise: String(promise) }, 'Unhandled promise rejection');
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  log.error({ err: error }, 'Uncaught exception - shutting down');
+  schedulerService.shutdown();
+  jobManager.shutdown();
+  if (tempCleanupInterval) {
+    clearInterval(tempCleanupInterval);
+  }
+  process.exit(1);
+});
