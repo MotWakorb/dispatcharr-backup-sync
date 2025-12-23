@@ -25,6 +25,12 @@ class SchedulerService {
   private scheduledTasks: Map<string, cron.ScheduledTask> = new Map();
   private runningJobs: Map<string, string> = new Map(); // scheduleId -> jobId
   private currentTimezone: string = 'UTC';
+  private initialized: boolean = false;
+
+  // Check if scheduler is initialized
+  isInitialized(): boolean {
+    return this.initialized;
+  }
 
   // Initialize on startup
   async initialize(): Promise<void> {
@@ -40,6 +46,7 @@ class SchedulerService {
           await this.scheduleJob(schedule);
         }
       }
+      this.initialized = true;
       log.info({ count: this.scheduledTasks.size }, 'Scheduler initialized with active schedules');
     } catch (error) {
       log.error({ err: error }, 'Failed to initialize scheduler');

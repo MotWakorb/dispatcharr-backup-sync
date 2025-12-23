@@ -47,9 +47,101 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check with dependency status
+app.get('/health', async (req, res) => {
+  const startTime = Date.now();
+
+  // Check dependencies
+  const dependencies: Record<
+    string,
+    { status: 'healthy' | 'degraded' | 'unhealthy'; message?: string; latencyMs?: number }
+  > = {};
+
+  // Check jobManager
+  try {
+    await jobManager.ensureInitialized();
+    dependencies.jobManager = { status: 'healthy' };
+  } catch (error) {
+    dependencies.jobManager = {
+      status: 'unhealthy',
+      message: (error as Error).message,
+    };
+  }
+
+  // Check scheduler
+  try {
+    const schedulerHealthy = schedulerService.isInitialized();
+    dependencies.scheduler = {
+      status: schedulerHealthy ? 'healthy' : 'degraded',
+      message: schedulerHealthy ? undefined : 'Scheduler not initialized',
+    };
+  } catch (error) {
+    dependencies.scheduler = {
+      status: 'unhealthy',
+      message: (error as Error).message,
+    };
+  }
+
+  // Check data directory access
+  try {
+    const dataDir = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
+    await import('fs').then((fs) => fs.promises.access(dataDir));
+    dependencies.dataDirectory = { status: 'healthy' };
+  } catch (error) {
+    dependencies.dataDirectory = {
+      status: 'unhealthy',
+      message: 'Data directory not accessible',
+    };
+  }
+
+  // Overall status
+  const allHealthy = Object.values(dependencies).every((d) => d.status === 'healthy');
+  const anyUnhealthy = Object.values(dependencies).some((d) => d.status === 'unhealthy');
+  const overallStatus = allHealthy ? 'healthy' : anyUnhealthy ? 'unhealthy' : 'degraded';
+
+  const response = {
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    responseTimeMs: Date.now() - startTime,
+    dependencies,
+    version: process.env.APP_VERSION || 'unknown',
+    nodeVersion: process.version,
+    memoryUsage: {
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
+  };
+
+  // Return 503 if unhealthy, 200 otherwise
+  const statusCode = overallStatus === 'unhealthy' ? 503 : 200;
+  res.status(statusCode).json(response);
+});
+
+// Metrics endpoint
+app.get('/metrics', (req, res) => {
+  // Dynamic import to avoid circular dependencies
+  import('./utils/metrics.js')
+    .then(({ metrics }) => {
+      res.json(metrics.getMetrics());
+    })
+    .catch((err) => {
+      log.error({ err }, 'Failed to load metrics');
+      res.status(500).json({ error: 'Failed to load metrics' });
+    });
+});
+
+// Metrics summary endpoint
+app.get('/metrics/summary', (req, res) => {
+  import('./utils/metrics.js')
+    .then(({ metrics }) => {
+      res.json(metrics.getSummary());
+    })
+    .catch((err) => {
+      log.error({ err }, 'Failed to load metrics');
+      res.status(500).json({ error: 'Failed to load metrics' });
+    });
 });
 
 // API Routes

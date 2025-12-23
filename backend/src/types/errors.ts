@@ -1,6 +1,108 @@
 import { AxiosError } from 'axios';
 
 /**
+ * Structured error codes for API responses.
+ * These codes allow clients to programmatically handle specific error conditions.
+ */
+export const ErrorCodes = {
+  // Authentication/Authorization (1xxx)
+  AUTH_REQUIRED: 'E1001',
+  AUTH_INVALID_CREDENTIALS: 'E1002',
+  AUTH_TOKEN_EXPIRED: 'E1003',
+  AUTH_INSUFFICIENT_PERMISSIONS: 'E1004',
+
+  // Validation (2xxx)
+  VALIDATION_FAILED: 'E2001',
+  VALIDATION_MISSING_FIELD: 'E2002',
+  VALIDATION_INVALID_FORMAT: 'E2003',
+  VALIDATION_OUT_OF_RANGE: 'E2004',
+
+  // Resource (3xxx)
+  RESOURCE_NOT_FOUND: 'E3001',
+  RESOURCE_ALREADY_EXISTS: 'E3002',
+  RESOURCE_CONFLICT: 'E3003',
+
+  // Network/External (4xxx)
+  NETWORK_ERROR: 'E4001',
+  NETWORK_TIMEOUT: 'E4002',
+  EXTERNAL_API_ERROR: 'E4003',
+  CONNECTION_FAILED: 'E4004',
+
+  // Job/Operation (5xxx)
+  JOB_FAILED: 'E5001',
+  JOB_CANCELLED: 'E5002',
+  JOB_NOT_FOUND: 'E5003',
+  JOB_ALREADY_RUNNING: 'E5004',
+  OPERATION_IN_PROGRESS: 'E5005',
+
+  // System (9xxx)
+  INTERNAL_ERROR: 'E9001',
+  SERVICE_UNAVAILABLE: 'E9002',
+  RATE_LIMITED: 'E9003',
+} as const;
+
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
+/**
+ * Standardized API error response format
+ */
+export interface ApiErrorResponse {
+  success: false;
+  error: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
+  correlationId?: string;
+  timestamp: string;
+}
+
+/**
+ * Standardized API success response format
+ */
+export interface ApiSuccessResponse<T = unknown> {
+  success: true;
+  data: T;
+  correlationId?: string;
+  timestamp: string;
+}
+
+export type ApiResponse<T = unknown> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+/**
+ * Create a standardized success response
+ */
+export function createSuccessResponse<T>(data: T, correlationId?: string): ApiSuccessResponse<T> {
+  return {
+    success: true,
+    data,
+    correlationId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
+ * Create a standardized error response
+ */
+export function createErrorResponse(
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+  correlationId?: string
+): ApiErrorResponse {
+  return {
+    success: false,
+    error: {
+      code,
+      message,
+      details,
+    },
+    correlationId,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
  * Base application error with proper typing
  */
 export class AppError extends Error {
