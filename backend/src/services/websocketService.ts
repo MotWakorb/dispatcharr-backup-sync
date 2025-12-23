@@ -15,6 +15,9 @@ const log = createLogger('websocket');
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const CLIENT_TIMEOUT = 35000; // 35 seconds (slightly longer than heartbeat)
 
+// Maximum WebSocket message payload size (1MB) - prevents DoS via large messages
+const MAX_PAYLOAD_SIZE = 1 * 1024 * 1024;
+
 interface ExtendedWebSocket extends WebSocket {
   isAlive: boolean;
   clientId: string;
@@ -72,7 +75,11 @@ class WebSocketService {
    * Initialize WebSocket server
    */
   initialize(server: Server): void {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+    this.wss = new WebSocketServer({
+      server,
+      path: '/ws',
+      maxPayload: MAX_PAYLOAD_SIZE,
+    });
 
     this.wss.on('connection', (ws: WebSocket) => {
       this.handleConnection(ws as ExtendedWebSocket);
