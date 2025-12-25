@@ -5,6 +5,7 @@
   import Import from './components/Import.svelte';
   import Connections from './components/Connections.svelte';
   import Jobs from './components/Jobs.svelte';
+  import Logs from './components/Logs.svelte';
   import Schedules from './components/Schedules.svelte';
   import Notifications from './components/Notifications.svelte';
   import ToastContainer from './components/ToastContainer.svelte';
@@ -12,7 +13,7 @@
   import { getVersionInfo } from './api';
   import type { VersionInfo } from './types';
 
-  let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' | 'schedules' | 'notifications' = 'sync';
+  let activeTab: 'sync' | 'export' | 'import' | 'connections' | 'jobs' | 'logs' | 'schedules' | 'notifications' = 'sync';
 
   let versionInfo: VersionInfo | null = null;
   let bannerDismissed = false;
@@ -112,6 +113,13 @@
       >
         Jobs
       </button>
+      <button
+        class="tab"
+        class:active={activeTab === 'logs'}
+        on:click={() => activeTab = 'logs'}
+      >
+        Logs
+      </button>
     </div>
 
     <ErrorBoundary fallbackMessage="This section encountered an error">
@@ -129,6 +137,8 @@
         <Notifications />
       {:else if activeTab === 'jobs'}
         <Jobs />
+      {:else if activeTab === 'logs'}
+        <Logs />
       {/if}
     </ErrorBoundary>
   </div>

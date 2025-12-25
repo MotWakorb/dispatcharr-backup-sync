@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { syncService } from '../services/syncService.js';
 import { jobManager } from '../services/jobManager.js';
-import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { connectionPool } from '../services/connectionPool.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('sync-route');
 
@@ -25,11 +26,8 @@ syncRouter.post('/compare-plugins', async (req, res) => {
       });
     }
 
-    const sourceClient = new DispatcharrClient(source);
-    const destClient = new DispatcharrClient(destination);
-
-    await sourceClient.authenticate();
-    await destClient.authenticate();
+    const sourceClient = await connectionPool.getClient(source);
+    const destClient = await connectionPool.getClient(destination);
 
     const sourcePluginsResp = await sourceClient.get('/api/plugins/plugins/');
     const destPluginsResp = await destClient.get('/api/plugins/plugins/');
@@ -91,22 +89,20 @@ syncRouter.post('/', async (req, res) => {
       });
     }
 
-    // Validate connections
-    if (!request.source.url || !request.source.username || !request.source.password) {
+    // Validate connections using shared validation
+    const sourceValidation = validateConnection(request.source, 'source connection');
+    if (!sourceValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid source connection: url, username, and password are required',
+        error: sourceValidation.error,
       });
     }
 
-    if (
-      !request.destination.url ||
-      !request.destination.username ||
-      !request.destination.password
-    ) {
+    const destValidation = validateConnection(request.destination, 'destination connection');
+    if (!destValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid destination connection: url, username, and password are required',
+        error: destValidation.error,
       });
     }
 

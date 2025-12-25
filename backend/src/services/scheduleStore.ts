@@ -139,13 +139,19 @@ class ScheduleStore {
   }
 
   // History management
-  async recordRunStart(scheduleId: string, jobId: string): Promise<void> {
+  async recordRunStart(
+    scheduleId: string,
+    jobId: string,
+    isRetry: boolean = false,
+    retryAttempt?: number
+  ): Promise<void> {
     const history = await loadHistoryFile();
     const entry: ScheduleRunHistoryEntry = {
       scheduleId,
       jobId,
       startedAt: new Date().toISOString(),
       status: 'running',
+      ...(isRetry && { isRetry, retryAttempt }),
     };
     history.entries.push(entry);
 
@@ -194,6 +200,44 @@ class ScheduleStore {
   }
 
   /**
+   * Increment consecutive failure count for a schedule
+   */
+  async incrementConsecutiveFailures(scheduleId: string): Promise<number> {
+    const data = await loadSchedulesFile();
+    const idx = data.schedules.findIndex((s) => s.id === scheduleId);
+    if (idx === -1) return 0;
+
+    const current = data.schedules[idx].consecutiveFailures || 0;
+    data.schedules[idx].consecutiveFailures = current + 1;
+    data.schedules[idx].updatedAt = new Date().toISOString();
+    await saveSchedulesFile(data);
+    return data.schedules[idx].consecutiveFailures!;
+  }
+
+  /**
+   * Reset consecutive failure count for a schedule (on success)
+   */
+  async resetConsecutiveFailures(scheduleId: string): Promise<void> {
+    const data = await loadSchedulesFile();
+    const idx = data.schedules.findIndex((s) => s.id === scheduleId);
+    if (idx === -1) return;
+
+    if (data.schedules[idx].consecutiveFailures) {
+      data.schedules[idx].consecutiveFailures = 0;
+      data.schedules[idx].updatedAt = new Date().toISOString();
+      await saveSchedulesFile(data);
+    }
+  }
+
+  /**
+   * Get consecutive failure count for a schedule
+   */
+  async getConsecutiveFailures(scheduleId: string): Promise<number> {
+    const schedule = await this.getById(scheduleId);
+    return schedule?.consecutiveFailures || 0;
+  }
+
+  /**
    * Get all completed backup job IDs for a schedule (for retention cleanup)
    */
   async getCompletedBackupJobIds(scheduleId: string): Promise<string[]> {
@@ -212,6 +256,55 @@ class ScheduleStore {
     const jobIdSet = new Set(jobIds);
     history.entries = history.entries.filter((e) => !jobIdSet.has(e.jobId));
     await saveHistoryFile(history);
+  }
+
+  /**
+   * Find all runs that were interrupted (still in 'running' status)
+   * These are jobs that were running when the server was shut down
+   */
+  async getInterruptedRuns(): Promise<ScheduleRunHistoryEntry[]> {
+    const history = await loadHistoryFile();
+    return history.entries.filter((e) => e.status === 'running');
+  }
+
+  /**
+   * Mark interrupted runs as failed with an error message
+   */
+  async markInterruptedRuns(): Promise<ScheduleRunHistoryEntry[]> {
+    const history = await loadHistoryFile();
+    const interrupted = history.entries.filter((e) => e.status === 'running');
+
+    if (interrupted.length === 0) {
+      return [];
+    }
+
+    // Update each interrupted entry
+    for (const entry of interrupted) {
+      entry.status = 'failed';
+      entry.completedAt = new Date().toISOString();
+      entry.error = 'Job was interrupted by server restart';
+    }
+
+    await saveHistoryFile(history);
+    return interrupted;
+  }
+
+  /**
+   * Get schedule IDs for entries that should be re-queued after restart
+   * Only returns schedules that are still enabled
+   */
+  async getSchedulesToRequeue(interruptedEntries: ScheduleRunHistoryEntry[]): Promise<string[]> {
+    const scheduleIds = [...new Set(interruptedEntries.map((e) => e.scheduleId))];
+    const schedulesToRequeue: string[] = [];
+
+    for (const scheduleId of scheduleIds) {
+      const schedule = await this.getById(scheduleId);
+      if (schedule && schedule.enabled) {
+        schedulesToRequeue.push(scheduleId);
+      }
+    }
+
+    return schedulesToRequeue;
   }
 }
 

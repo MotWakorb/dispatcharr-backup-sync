@@ -11,6 +11,7 @@
     getTimezones,
   } from '../api';
   import type { SavedConnection, SavedConnectionInput, AppSettings, TimeFormat, Theme } from '../types';
+  import Skeleton from './Skeleton.svelte';
 
   let savedConnections: SavedConnection[] = [];
   let loadingList = false;
@@ -379,7 +380,23 @@
     {/if}
 
     {#if loadingList}
-      <div class="flex items-center gap-2"><span class="spinner"></span><span>Loading saved connections...</span></div>
+      <div class="table-wrapper">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Instance</th>
+              <th>Username</th>
+              <th>Updated</th>
+              <th class="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <Skeleton variant="table-row" columns={5} />
+            <Skeleton variant="table-row" columns={5} />
+          </tbody>
+        </table>
+      </div>
     {:else if savedConnections.length === 0}
       <div class="empty-state">
         <p class="text-gray">No saved connections yet.</p>

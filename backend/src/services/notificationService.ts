@@ -37,6 +37,13 @@ class NotificationService {
     if (event.type === 'job_completed_with_errors' && !settings.notifyOnCompleteWithErrors)
       return [];
     if (event.type === 'job_failed' && !settings.notifyOnFailure) return [];
+    if (event.type === 'job_failed_max_retries' && !settings.notifyOnFailure) return [];
+    // Retry notifications use the notifyOnRetry setting (default to notifyOnFailure if not set)
+    const notifyOnRetry = settings.notifyOnRetry ?? settings.notifyOnFailure;
+    if (event.type === 'job_retry_started' && !notifyOnRetry) return [];
+    if (event.type === 'job_retry_scheduled' && !notifyOnRetry) return [];
+    // Recovery notifications use retry settings (they indicate a job will be re-run)
+    if (event.type === 'job_recovered' && !notifyOnRetry) return [];
 
     const providers = await notificationStore.getEnabledProviders();
     if (providers.length === 0) return [];
@@ -247,6 +254,16 @@ class NotificationService {
         return '⚠️';
       case 'job_failed':
         return '❌';
+      case 'job_retry_started':
+        return '🔄';
+      case 'job_retry_scheduled':
+        return '⏰';
+      case 'job_failed_max_retries':
+        return '🛑';
+      case 'job_recovered':
+        return '🔧';
+      default:
+        return '📋';
     }
   }
 
@@ -260,6 +277,16 @@ class NotificationService {
         return 'Completed with Errors';
       case 'job_failed':
         return 'Failed';
+      case 'job_retry_started':
+        return 'Retry Started';
+      case 'job_retry_scheduled':
+        return 'Retry Scheduled';
+      case 'job_failed_max_retries':
+        return 'Failed (Max Retries Exceeded)';
+      case 'job_recovered':
+        return 'Recovered (Restarting)';
+      default:
+        return 'Unknown';
     }
   }
 
@@ -273,6 +300,16 @@ class NotificationService {
         return 0xf39c12; // Orange
       case 'job_failed':
         return 0xed4245; // Red
+      case 'job_retry_started':
+        return 0x9b59b6; // Purple
+      case 'job_retry_scheduled':
+        return 0xf39c12; // Orange
+      case 'job_failed_max_retries':
+        return 0x992d22; // Dark Red
+      case 'job_recovered':
+        return 0x3498db; // Blue (info)
+      default:
+        return 0x95a5a6; // Gray
     }
   }
 
@@ -349,6 +386,14 @@ class NotificationService {
           <tr>
             <td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Error</strong></td>
             <td style="padding: 8px; border-bottom: 1px solid #eee; color: #ed4245;">${event.error}</td>
+          </tr>`;
+    }
+
+    if (event.message) {
+      html += `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Details</strong></td>
+            <td style="padding: 8px; border-bottom: 1px solid #eee;">${this.escapeHtml(event.message)}</td>
           </tr>`;
     }
 
@@ -454,11 +499,14 @@ class NotificationService {
     const jobType = event.jobType.charAt(0).toUpperCase() + event.jobType.slice(1);
     const testPrefix = isTest ? '🧪 TEST: ' : '';
 
-    const colorMap = {
+    const colorMap: Record<string, string> = {
       job_started: '#3498db',
       job_completed: '#57f287',
       job_completed_with_errors: '#f39c12',
       job_failed: '#ed4245',
+      job_retry_started: '#9b59b6',
+      job_retry_scheduled: '#f39c12',
+      job_failed_max_retries: '#992d22',
     };
 
     const fields = [

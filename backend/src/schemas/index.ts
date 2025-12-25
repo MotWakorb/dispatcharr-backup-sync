@@ -252,3 +252,48 @@ export function validateRequest<T>(schema: z.ZodType<T>, data: unknown): Validat
     .join('; ');
   return { success: false, error: errorMessages };
 }
+
+/**
+ * Validates a Dispatcharr connection object.
+ * @param connection - The connection object to validate
+ * @param label - A label for error messages (e.g., "source", "destination")
+ * @returns A validation result with the connection data or error message
+ */
+export function validateConnection(
+  connection: unknown,
+  label: string = 'connection'
+): ValidationResult<z.infer<typeof DispatcharrConnectionSchema>> {
+  const result = DispatcharrConnectionSchema.safeParse(connection);
+  if (result.success) {
+    return { success: true, data: result.data };
+  }
+
+  // Build a user-friendly error message
+  const issues = result.error.issues;
+  const missing: string[] = [];
+
+  for (const issue of issues) {
+    if (issue.code === 'too_small' || issue.code === 'invalid_type') {
+      const field = issue.path[0];
+      if (field === 'url') missing.push('url');
+      else if (field === 'username') missing.push('username');
+      else if (field === 'password') missing.push('password');
+    }
+  }
+
+  if (missing.length > 0) {
+    return {
+      success: false,
+      error: `Invalid ${label}: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} required`,
+    };
+  }
+
+  // Fallback to Zod's error formatting
+  const errorMessages = issues
+    .map((e) => {
+      const path = e.path.length > 0 ? `${e.path.join('.')}: ` : '';
+      return `${path}${e.message}`;
+    })
+    .join('; ');
+  return { success: false, error: `Invalid ${label}: ${errorMessages}` };
+}

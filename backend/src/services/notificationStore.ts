@@ -16,6 +16,7 @@ const DEFAULT_GLOBAL_SETTINGS: NotificationGlobalSettings = {
   notifyOnComplete: true,
   notifyOnCompleteWithErrors: true,
   notifyOnFailure: true,
+  notifyOnRetry: true,
   includeLogsInEmail: false,
 };
 

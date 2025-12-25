@@ -3,10 +3,12 @@ import { exportService } from '../services/exportService.js';
 import { jobManager } from '../services/jobManager.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import path from 'path';
-import fs from 'fs';
+import { promises as fsp } from 'fs';
 import type { ExportRequest, ExportJobResult } from '../types/index.js';
 import type { ApiResponse } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
+import { validateConnection } from '../schemas/index.js';
+import { readChecksumFile, getChecksumPath } from '../utils/checksum.js';
 
 const log = createLogger('export-route');
 
@@ -25,11 +27,12 @@ exportRouter.post('/', async (req, res) => {
       });
     }
 
-    // Validate connection
-    if (!request.source.url || !request.source.username || !request.source.password) {
+    // Validate connection using shared validation
+    const sourceValidation = validateConnection(request.source, 'source connection');
+    if (!sourceValidation.success) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid source connection: url, username, and password are required',
+        error: sourceValidation.error,
       });
     }
 
@@ -133,7 +136,17 @@ exportRouter.get('/download/:jobId', async (req, res) => {
 
     const exportResult = status.result as ExportJobResult | undefined;
     const filePath = exportResult?.filePath;
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!filePath) {
+      return res.status(404).json({
+        success: false,
+        error: 'Export file not found',
+      });
+    }
+
+    // Check if file exists
+    try {
+      await fsp.access(filePath);
+    } catch {
       return res.status(404).json({
         success: false,
         error: 'Export file not found',
@@ -141,6 +154,12 @@ exportRouter.get('/download/:jobId', async (req, res) => {
     }
 
     const fileName = exportResult?.fileName || path.basename(filePath);
+
+    // Add checksum header if available
+    const checksum = await readChecksumFile(filePath);
+    if (checksum) {
+      res.setHeader('X-Checksum-SHA256', checksum);
+    }
 
     // Send file
     res.download(filePath, fileName, (err) => {
@@ -190,7 +209,17 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
 
     const exportResult = status.result as ExportJobResult | undefined;
     const filePath = exportResult?.logosFilePath;
-    if (!filePath || !fs.existsSync(filePath)) {
+    if (!filePath) {
+      return res.status(404).json({
+        success: false,
+        error: 'Logos archive not found',
+      } as ApiResponse);
+    }
+
+    // Check if file exists
+    try {
+      await fsp.access(filePath);
+    } catch {
       return res.status(404).json({
         success: false,
         error: 'Logos archive not found',
@@ -215,6 +244,122 @@ exportRouter.get('/download/:jobId/logos', async (req, res) => {
     res.status(500).json({
       success: false,
       error: getErrorMessage(error, 'Failed to download logos'),
+    } as ApiResponse);
+  }
+});
+
+// Download checksum file
+exportRouter.get('/download/:jobId/checksum', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      } as ApiResponse);
+    }
+
+    if (status.status !== 'completed' && status.status !== 'completed_with_warnings') {
+      return res.status(400).json({
+        success: false,
+        error: 'Export not completed yet',
+      } as ApiResponse);
+    }
+
+    const exportResult = status.result as ExportJobResult | undefined;
+    const backupFilePath = exportResult?.filePath;
+    if (!backupFilePath) {
+      return res.status(404).json({
+        success: false,
+        error: 'Export file not found',
+      } as ApiResponse);
+    }
+
+    const checksumPath = getChecksumPath(backupFilePath);
+
+    // Check if checksum file exists
+    try {
+      await fsp.access(checksumPath);
+    } catch {
+      return res.status(404).json({
+        success: false,
+        error: 'Checksum file not found',
+      } as ApiResponse);
+    }
+
+    const fileName = path.basename(checksumPath);
+    res.download(checksumPath, fileName, (err) => {
+      if (err) {
+        log.error({ err }, 'Error sending checksum file');
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to download checksum',
+          } as ApiResponse);
+        }
+      }
+    });
+  } catch (error) {
+    log.error({ err: error }, 'Error downloading checksum');
+    res.status(500).json({
+      success: false,
+      error: getErrorMessage(error, 'Failed to download checksum'),
+    } as ApiResponse);
+  }
+});
+
+// Get checksum value (JSON response)
+exportRouter.get('/checksum/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobManager.getJob(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Job not found',
+      } as ApiResponse);
+    }
+
+    if (status.status !== 'completed' && status.status !== 'completed_with_warnings') {
+      return res.status(400).json({
+        success: false,
+        error: 'Export not completed yet',
+      } as ApiResponse);
+    }
+
+    const exportResult = status.result as ExportJobResult | undefined;
+    const backupFilePath = exportResult?.filePath;
+    if (!backupFilePath) {
+      return res.status(404).json({
+        success: false,
+        error: 'Export file not found',
+      } as ApiResponse);
+    }
+
+    const checksum = await readChecksumFile(backupFilePath);
+    if (!checksum) {
+      return res.status(404).json({
+        success: false,
+        error: 'Checksum not available',
+      } as ApiResponse);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        algorithm: 'sha256',
+        checksum,
+        fileName: exportResult?.fileName || path.basename(backupFilePath),
+      },
+    } as ApiResponse);
+  } catch (error) {
+    log.error({ err: error }, 'Error getting checksum');
+    res.status(500).json({
+      success: false,
+      error: getErrorMessage(error, 'Failed to get checksum'),
     } as ApiResponse);
   }
 });

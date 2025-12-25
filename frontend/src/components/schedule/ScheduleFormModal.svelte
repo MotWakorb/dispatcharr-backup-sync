@@ -68,6 +68,8 @@
       cronExpression: undefined,
       enabled: true,
       retentionCount: undefined,
+      maxRetries: 0,
+      retryDelayMinutes: 5,
     };
   }
 
@@ -88,6 +90,8 @@
         cronExpression: editingSchedule.cronExpression,
         enabled: editingSchedule.enabled,
         retentionCount: editingSchedule.retentionCount,
+        maxRetries: editingSchedule.maxRetries ?? 0,
+        retryDelayMinutes: editingSchedule.retryDelayMinutes ?? 5,
       };
       // Parse existing cron expression
       const cronParts = parseCronExpression(editingSchedule.cronExpression);
@@ -306,6 +310,46 @@
             </div>
           </div>
         {/if}
+
+        <div class="form-section">
+          <h4>Failure Handling</h4>
+          <div class="grid grid-2 gap-3">
+            <div class="form-group">
+              <label class="form-label" for="max-retries">Max Retries</label>
+              <div class="retention-input-group">
+                <input
+                  id="max-retries"
+                  type="number"
+                  class="form-input retention-input"
+                  placeholder="0"
+                  min="0"
+                  max="10"
+                  bind:value={formData.maxRetries}
+                />
+                <span class="retention-hint">0 = no retries</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="retry-delay">Retry Delay (minutes)</label>
+              <div class="retention-input-group">
+                <input
+                  id="retry-delay"
+                  type="number"
+                  class="form-input retention-input"
+                  placeholder="5"
+                  min="1"
+                  max="60"
+                  bind:value={formData.retryDelayMinutes}
+                  disabled={!formData.maxRetries || formData.maxRetries === 0}
+                />
+                <span class="retention-hint">1-60 min</span>
+              </div>
+            </div>
+          </div>
+          <p class="text-sm text-gray mt-2">
+            If a job fails, it will automatically retry up to the max retries count with the specified delay between attempts.
+          </p>
+        </div>
 
         <div class="form-section">
           <h4>Schedule</h4>

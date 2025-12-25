@@ -18,6 +18,12 @@ import { CLEANUP_INTERVAL_MS } from './constants.js';
 import { validateAndLogEnvironment } from './utils/envValidation.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { migrateDataIfNeeded } from './utils/dataMigration.js';
+import {
+  generalRateLimiter,
+  authRateLimiter,
+  jobCreationRateLimiter,
+  uploadRateLimiter,
+} from './middleware/security.js';
 
 // Validate environment variables at startup
 validateAndLogEnvironment();
@@ -47,17 +53,117 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check with dependency status
+app.get('/health', async (req, res) => {
+  const startTime = Date.now();
+
+  // Check dependencies
+  const dependencies: Record<
+    string,
+    { status: 'healthy' | 'degraded' | 'unhealthy'; message?: string; latencyMs?: number }
+  > = {};
+
+  // Check jobManager
+  try {
+    await jobManager.ensureInitialized();
+    dependencies.jobManager = { status: 'healthy' };
+  } catch (error) {
+    dependencies.jobManager = {
+      status: 'unhealthy',
+      message: (error as Error).message,
+    };
+  }
+
+  // Check scheduler
+  try {
+    const schedulerHealthy = schedulerService.isInitialized();
+    dependencies.scheduler = {
+      status: schedulerHealthy ? 'healthy' : 'degraded',
+      message: schedulerHealthy ? undefined : 'Scheduler not initialized',
+    };
+  } catch (error) {
+    dependencies.scheduler = {
+      status: 'unhealthy',
+      message: (error as Error).message,
+    };
+  }
+
+  // Check data directory access
+  try {
+    const dataDir = process.env.DATA_DIR || '/tmp/dispatcharr-manager';
+    await import('fs').then((fs) => fs.promises.access(dataDir));
+    dependencies.dataDirectory = { status: 'healthy' };
+  } catch (error) {
+    dependencies.dataDirectory = {
+      status: 'unhealthy',
+      message: 'Data directory not accessible',
+    };
+  }
+
+  // Overall status
+  const allHealthy = Object.values(dependencies).every((d) => d.status === 'healthy');
+  const anyUnhealthy = Object.values(dependencies).some((d) => d.status === 'unhealthy');
+  const overallStatus = allHealthy ? 'healthy' : anyUnhealthy ? 'unhealthy' : 'degraded';
+
+  const response = {
+    status: overallStatus,
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    responseTimeMs: Date.now() - startTime,
+    dependencies,
+    version: process.env.APP_VERSION || 'unknown',
+    nodeVersion: process.version,
+    memoryUsage: {
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      rssMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    },
+  };
+
+  // Return 503 if unhealthy, 200 otherwise
+  const statusCode = overallStatus === 'unhealthy' ? 503 : 200;
+  res.status(statusCode).json(response);
 });
 
-// API Routes
-app.use('/api/sync', syncRouter);
-app.use('/api/export', exportRouter);
-app.use('/api/import', importRouter);
-app.use('/api/connections', connectionsRouter);
-app.use('/api/saved-connections', savedConnectionsRouter);
+// Metrics endpoint
+app.get('/metrics', (req, res) => {
+  // Dynamic import to avoid circular dependencies
+  import('./utils/metrics.js')
+    .then(({ metrics }) => {
+      res.json(metrics.getMetrics());
+    })
+    .catch((err) => {
+      log.error({ err }, 'Failed to load metrics');
+      res.status(500).json({ error: 'Failed to load metrics' });
+    });
+});
+
+// Metrics summary endpoint
+app.get('/metrics/summary', (req, res) => {
+  import('./utils/metrics.js')
+    .then(({ metrics }) => {
+      res.json(metrics.getSummary());
+    })
+    .catch((err) => {
+      log.error({ err }, 'Failed to load metrics');
+      res.status(500).json({ error: 'Failed to load metrics' });
+    });
+});
+
+// Apply general rate limiter to all API routes
+app.use('/api', generalRateLimiter);
+
+// API Routes with specific rate limiters
+// Job creation routes - stricter limits to prevent resource exhaustion
+app.use('/api/sync', jobCreationRateLimiter, syncRouter);
+app.use('/api/export', jobCreationRateLimiter, exportRouter);
+app.use('/api/import', uploadRateLimiter, importRouter);
+
+// Connection routes - auth rate limiter for test/info endpoints (brute force protection)
+app.use('/api/connections', authRateLimiter, connectionsRouter);
+app.use('/api/saved-connections', authRateLimiter, savedConnectionsRouter);
+
+// Standard routes with general rate limiting (already applied above)
 app.use('/api/jobs', jobsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/settings', settingsRouter);
@@ -88,6 +194,7 @@ app.use((req, res) => {
 
 // Temp file cleanup interval (runs every hour)
 let tempCleanupInterval: ReturnType<typeof setInterval> | null = null;
+let tempCleanupInProgress = false; // Lock to prevent overlapping cleanup runs
 
 app.listen(PORT, () => {
   log.info({ port: PORT }, 'Dispatcharr Manager API running');
@@ -98,23 +205,31 @@ app.listen(PORT, () => {
     log.error({ err: error }, 'Failed to initialize scheduler');
   });
 
-  // Cleanup stale temp files on startup
-  importService
-    .cleanupStaleTempFiles()
-    .then((result) => {
+  // Cleanup stale temp files on startup (with lock to prevent overlap)
+  const runTempCleanup = async (context: string) => {
+    if (tempCleanupInProgress) {
+      log.debug({ context }, 'Temp cleanup already in progress, skipping');
+      return;
+    }
+    tempCleanupInProgress = true;
+    try {
+      const result = await importService.cleanupStaleTempFiles();
       if (result.deleted.length > 0) {
-        log.info({ count: result.deleted.length }, 'Startup: Cleaned up stale temp files');
+        log.info({ count: result.deleted.length, context }, 'Cleaned up stale temp files');
       }
-    })
-    .catch((error) => {
-      log.error({ err: error }, 'Startup: Failed to cleanup temp files');
-    });
+    } catch (error) {
+      log.error({ err: error, context }, 'Temp cleanup failed');
+    } finally {
+      tempCleanupInProgress = false;
+    }
+  };
+
+  // Run startup cleanup
+  runTempCleanup('startup');
 
   // Start periodic temp file cleanup (every hour)
   tempCleanupInterval = setInterval(() => {
-    importService.cleanupStaleTempFiles().catch((error) => {
-      log.error({ err: error }, 'Periodic temp cleanup failed');
-    });
+    runTempCleanup('periodic');
   }, CLEANUP_INTERVAL_MS);
   if (tempCleanupInterval.unref) {
     tempCleanupInterval.unref(); // Don't prevent process exit
@@ -140,4 +255,20 @@ process.on('SIGINT', () => {
     clearInterval(tempCleanupInterval);
   }
   process.exit(0);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  log.error({ reason, promise: String(promise) }, 'Unhandled promise rejection');
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  log.error({ err: error }, 'Uncaught exception - shutting down');
+  schedulerService.shutdown();
+  jobManager.shutdown();
+  if (tempCleanupInterval) {
+    clearInterval(tempCleanupInterval);
+  }
+  process.exit(1);
 });

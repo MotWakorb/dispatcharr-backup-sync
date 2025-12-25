@@ -1,8 +1,11 @@
 import { Router } from 'express';
 import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { connectionPool } from '../services/connectionPool.js';
 import { createLogger } from '../services/logger.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
+import { withTimeoutAllSettled } from '../utils/retry.js';
 import type { DispatcharrConnection, ApiResponse, TestConnectionResponse } from '../types/index.js';
+import { validateConnection } from '../schemas/index.js';
 
 const log = createLogger('connections-route');
 
@@ -13,11 +16,12 @@ connectionsRouter.post('/test', async (req, res) => {
   try {
     const connection: DispatcharrConnection = req.body;
 
-    if (!connection.url || !connection.username || !connection.password) {
-      log.warn({ url: connection.url }, 'Connection test failed: missing required fields');
+    const validation = validateConnection(connection, 'connection');
+    if (!validation.success) {
+      log.warn({ url: connection?.url }, 'Connection test failed: missing required fields');
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: url, username, password',
+        error: validation.error,
       } as ApiResponse);
     }
 
@@ -51,16 +55,19 @@ connectionsRouter.post('/info', async (req, res) => {
     const connection: DispatcharrConnection = req.body;
 
     log.debug({ url: connection.url }, 'Fetching instance info');
-    const client = new DispatcharrClient(connection);
-    await client.authenticate();
+    const client = await connectionPool.getClient(connection);
 
-    // Fetch various counts
-    const [channels, groups, profiles, users] = await Promise.allSettled([
-      client.get('/api/channels/channels/').then((data: any) => data?.count || data?.length || 0),
-      client.get('/api/channels/groups/').then((data: any) => data?.count || data?.length || 0),
-      client.get('/api/channels/profiles/').then((data: any) => data?.count || data?.length || 0),
-      client.get('/api/accounts/users/').then((data: any) => data?.count || data?.length || 0),
-    ]);
+    // Fetch various counts (30 second timeout)
+    const [channels, groups, profiles, users] = await withTimeoutAllSettled(
+      [
+        client.get('/api/channels/channels/').then((data: any) => data?.count || data?.length || 0),
+        client.get('/api/channels/groups/').then((data: any) => data?.count || data?.length || 0),
+        client.get('/api/channels/profiles/').then((data: any) => data?.count || data?.length || 0),
+        client.get('/api/accounts/users/').then((data: any) => data?.count || data?.length || 0),
+      ],
+      30000,
+      'fetchInstanceInfo'
+    );
 
     const info = {
       channels: channels.status === 'fulfilled' ? channels.value : 0,

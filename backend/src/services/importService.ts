@@ -1,4 +1,5 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
+import { connectionPool } from './connectionPool.js';
 import { jobManager } from './jobManager.js';
 import yaml from 'js-yaml';
 import fs, { promises as fsp } from 'fs';
@@ -6,7 +7,6 @@ import path from 'path';
 import { promisify } from 'util';
 import FormData from 'form-data';
 import AdmZip from 'adm-zip';
-import tar from 'tar';
 import { v4 as uuidv4 } from 'uuid';
 import type {
   ImportOptions,
@@ -20,8 +20,11 @@ import type {
   LogoFileData,
   DeferredAutoSyncSettings,
   M3UImportResult,
+  PaginatedResponse,
+  DispatcharrEntity,
 } from '../types/index.js';
 import { simpleImportLogos } from './simpleLogoImport.js';
+import { CumulativeMemoryTracker } from '../utils/logoUtils.js';
 import { createLogger } from './logger.js';
 import {
   DEFAULT_PAGE_SIZE,
@@ -36,6 +39,7 @@ import {
   STREAM_POLL_INTERVAL_MS,
   M3U_REFRESH_WAIT_MS,
   POST_REFRESH_DELAY_MS,
+  MAX_PAGINATION_PAGES,
 } from '../constants.js';
 
 const log = createLogger('import');
@@ -110,8 +114,29 @@ export class ImportService {
   }
 
   /**
+   * Creates a cancellable delay that respects job cancellation.
+   * Polls for cancellation every 500ms during the delay.
+   * @param ms - The delay duration in milliseconds
+   * @param jobId - The job ID to check for cancellation
+   * @throws Error if the job is cancelled during the delay
+   */
+  private async cancellableDelay(ms: number, jobId: string): Promise<void> {
+    const pollInterval = 500;
+    let elapsed = 0;
+
+    while (elapsed < ms) {
+      this.throwIfCancelled(jobId);
+      const remaining = ms - elapsed;
+      const waitTime = Math.min(pollInterval, remaining);
+      await new Promise((resolve) => globalThis.setTimeout(resolve, waitTime));
+      elapsed += waitTime;
+    }
+  }
+
+  /**
    * Creates an error handler for API calls that logs the error and returns a default value.
    * Use with .catch() to prevent silent failures while still allowing graceful degradation.
+   * Warnings are tracked and will cause the job to complete with 'completed_with_warnings' status.
    */
   private warnOnFail<T>(endpoint: string, defaultValue: T, jobId?: string): (error: any) => T {
     return (error: any): T => {
@@ -119,40 +144,56 @@ export class ImportService {
       const message = error?.response?.data?.detail || error?.message || 'Unknown error';
       const warning = `API call to ${endpoint} failed${status ? ` (${status})` : ''}: ${message}`;
       if (jobId) {
-        jobManager.addLog(jobId, `WARNING: ${warning}`);
+        // Use addWarning to track warnings - this will cause completed_with_warnings status
+        jobManager.addWarning(jobId, warning);
       }
       log.warn({ endpoint, status, message }, 'API call failed');
       return defaultValue;
     };
   }
 
-  private normalizeKey(value: any): string | undefined {
+  private normalizeKey(value: unknown): string | undefined {
     return typeof value === 'string' ? value.trim().toLowerCase() : undefined;
   }
 
-  private async getAllPaginated(
+  private async getAllPaginated<T extends DispatcharrEntity>(
     client: DispatcharrClient,
     endpoint: string,
     pageSize = DEFAULT_PAGE_SIZE,
     jobId?: string
-  ): Promise<any[]> {
+  ): Promise<T[]> {
     let page = 1;
-    let all: any[] = [];
+    let all: T[] = [];
 
     while (true) {
       if (jobId) {
         this.throwIfCancelled(jobId);
       }
+
+      // Prevent infinite loops with max page limit
+      if (page > MAX_PAGINATION_PAGES) {
+        const warning = `Pagination limit reached for ${endpoint}: stopped at page ${page} with ${all.length} items`;
+        log.warn({ endpoint, page, itemCount: all.length }, warning);
+        if (jobId) {
+          jobManager.addWarning(jobId, warning);
+        }
+        break;
+      }
+
       // Use & if endpoint already has query params, otherwise use ?
       const separator = endpoint.includes('?') ? '&' : '?';
       const fullEndpoint = `${endpoint}${separator}page=${page}&page_size=${pageSize}`;
       const response = await client
-        .get(fullEndpoint)
-        .catch(this.warnOnFail(fullEndpoint, null, jobId));
+        .get<PaginatedResponse<T> | T[] | T | null>(fullEndpoint)
+        .catch(this.warnOnFail<PaginatedResponse<T> | T[] | T | null>(fullEndpoint, null, jobId));
       if (!response) {
         break;
       }
-      if (Array.isArray(response?.results)) {
+      if (
+        typeof response === 'object' &&
+        'results' in response &&
+        Array.isArray(response.results)
+      ) {
         all = all.concat(response.results);
         if (!response.next) break;
         page++;
@@ -162,19 +203,19 @@ export class ImportService {
         all = response;
         break;
       }
-      all.push(response);
+      all.push(response as T);
       break;
     }
 
     return all;
   }
 
-  private logJobError(jobId: string, section: string, label: any, error: any) {
+  private logJobError(jobId: string, section: string, label: unknown, error: unknown) {
     const details = this.formatErrorDetails(error);
     const labelText = label ? ` (${label})` : '';
     try {
       jobManager.addLog(jobId, `${section} failed${labelText}: ${JSON.stringify(details)}`);
-    } catch (e) {
+    } catch {
       // no-op if logging fails
     }
     log.error({ section, label, details }, 'Import section failed');
@@ -269,11 +310,9 @@ export class ImportService {
       // Ensure temp directory exists
       await mkdir(this.tempDir, { recursive: true });
 
-      const client = new DispatcharrClient(request.destination);
-
-      // Authenticate
+      // Get client from connection pool (handles authentication)
       jobManager.setProgress(jobId, 5, 'Authenticating...');
-      await client.authenticate();
+      const client = await connectionPool.getClient(request.destination);
 
       // Ensure the special "Custom" M3UAccount exists (required by Dispatcharr for custom streams)
       try {
@@ -339,9 +378,7 @@ export class ImportService {
         configFilePath = result.configPath;
         extractedDir = result.baseDir;
       } else if (ext === '.gz' || ext === '.tgz') {
-        const result = await this.extractTarGz(tempFilePath);
-        configFilePath = result.configPath;
-        extractedDir = result.baseDir;
+        throw new Error('TAR/GZIP archives are not supported. Please use ZIP format.');
       }
 
       // Read and parse config file
@@ -622,8 +659,8 @@ export class ImportService {
           await client.post('/api/m3u/refresh/').catch(() => {
             jobManager.addLog(jobId, 'M3U refresh after auto sync settings failed (non-critical)');
           });
-          // Wait for M3U refresh to complete
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+          // Wait for M3U refresh to complete (cancellable)
+          await this.cancellableDelay(5000, jobId);
           jobManager.addLog(
             jobId,
             'M3U refresh triggered after auto channel sync settings applied'
@@ -703,8 +740,8 @@ export class ImportService {
         try {
           await client.post('/api/m3u/refresh/');
           jobManager.addLog(jobId, 'Final M3U refresh triggered');
-          // Wait for M3U refresh to complete before EPG refresh
-          await new Promise((resolve) => globalThis.setTimeout(resolve, 5000));
+          // Wait for M3U refresh to complete before EPG refresh (cancellable)
+          await this.cancellableDelay(5000, jobId);
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           jobManager.addLog(jobId, `Warning: Final M3U refresh failed: ${message}`);
@@ -798,23 +835,6 @@ export class ImportService {
         await writeFile(targetPath, entry.getData());
       }
     }
-
-    const configPath = await this.findConfigFile(extractDir);
-    if (!configPath) {
-      throw new Error('No configuration file found in archive');
-    }
-
-    return { configPath, baseDir: extractDir };
-  }
-
-  private async extractTarGz(tarPath: string): Promise<ExtractResult> {
-    const extractDir = path.join(this.tempDir, 'extract-' + Date.now());
-    await mkdir(extractDir, { recursive: true });
-
-    await tar.extract({
-      file: tarPath,
-      cwd: extractDir,
-    });
 
     const configPath = await this.findConfigFile(extractDir);
     if (!configPath) {
@@ -928,7 +948,7 @@ export class ImportService {
         if (!meta) {
           missingMetadata++;
           if (jobId && missingMetadata <= 10) {
-            jobManager.addLog(jobId, `WARNING: No metadata found for file "${img.name}"`);
+            jobManager.addWarning(jobId, `No metadata found for file "${img.name}"`);
           }
         }
 
@@ -953,8 +973,9 @@ export class ImportService {
         });
       }
 
-      if (jobId && missingMetadata > 0) {
-        jobManager.addLog(jobId, `WARNING: ${missingMetadata} logo files had no metadata mapping`);
+      if (jobId && missingMetadata > 10) {
+        // Only add the summary warning if there were more than 10 (individual warnings were suppressed)
+        jobManager.addWarning(jobId, `${missingMetadata} total logo files had no metadata mapping`);
       }
 
       // Add URL-based logos from url-mappings.json
@@ -1008,9 +1029,7 @@ export class ImportService {
         configFilePath = result.configPath;
         extractedDir = result.baseDir;
       } else if (ext === '.gz' || ext === '.tgz') {
-        const result = await this.extractTarGz(tempFilePath);
-        configFilePath = result.configPath;
-        extractedDir = result.baseDir;
+        throw new Error('TAR/GZIP archives are not supported. Please use ZIP format.');
       } else {
         configFilePath = tempFilePath;
       }
@@ -1826,6 +1845,7 @@ export class ImportService {
     const waitForM3UReady = async (accountId: any) => {
       const maxAttempts = 40;
       for (let i = 0; i < maxAttempts; i++) {
+        this.throwIfCancelled(jobId);
         try {
           const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
           const status = acct?.status || acct?.data?.status;
@@ -1839,7 +1859,7 @@ export class ImportService {
         } catch {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, 2000));
+        await this.cancellableDelay(2000, jobId);
       }
       return undefined;
     };
@@ -1856,6 +1876,7 @@ export class ImportService {
       let pendingSetupCount = 0;
 
       for (let i = 0; i < maxAttempts; i++) {
+        this.throwIfCancelled(jobId);
         try {
           // Check account status
           const acct = await client.get(`/api/m3u/accounts/${accountId}/`);
@@ -1911,7 +1932,7 @@ export class ImportService {
         } catch (err) {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, 2000));
+        await this.cancellableDelay(2000, jobId);
       }
 
       jobManager.addLog(
@@ -2062,10 +2083,7 @@ export class ImportService {
             await client
               .patch(`/api/m3u/accounts/${accountId}/`, { is_active: false })
               .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (deactivate)`, null, jobId));
-            await new Promise((res) => {
-              const t = globalThis.setTimeout(res, 500);
-              return t;
-            });
+            await this.cancellableDelay(500, jobId);
             await client
               .patch(`/api/m3u/accounts/${accountId}/`, { is_active: true })
               .catch(this.warnOnFail(`/api/m3u/accounts/${accountId}/ (activate)`, null, jobId));
@@ -2183,8 +2201,8 @@ export class ImportService {
               );
             }
 
-            // Wait for Dispatcharr to process the group changes before triggering refresh
-            await new Promise((resolve) => globalThis.setTimeout(resolve, M3U_REFRESH_WAIT_MS));
+            // Wait for Dispatcharr to process the group changes before triggering refresh (cancellable)
+            await this.cancellableDelay(M3U_REFRESH_WAIT_MS, jobId);
 
             // Trigger refresh to pull streams for enabled groups
             let refreshResult = await client
@@ -2738,6 +2756,7 @@ export class ImportService {
     // - "name:abc" (original name lowercase) - fallback for legacy
     // - "file:abc" (filename lowercase) - fallback for sanitized names
     const logoMap: Record<string, number> = {};
+    const memoryTracker = new CumulativeMemoryTracker();
 
     if (!Array.isArray(logos)) {
       if (jobId) {
@@ -2942,6 +2961,10 @@ export class ImportService {
           }
         } else {
           // File-based logo: decode base64 data
+          // Check cumulative memory before decoding to prevent memory exhaustion
+          const estimatedSize = estimateBase64DecodedSize(base64);
+          memoryTracker.checkAndAdd(estimatedSize, `Logo import batch at "${uploadName}"`);
+
           // Convert base64 to Buffer for file upload (with size validation)
           const buffer = safeBase64Decode(base64, MAX_LOGO_FILE_SIZE, `Logo "${uploadName}"`);
 
@@ -3401,7 +3424,7 @@ export class ImportService {
 
             // Toggle off
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: false });
-            await new Promise((resolve) => globalThis.setTimeout(resolve, POST_REFRESH_DELAY_MS));
+            await this.cancellableDelay(POST_REFRESH_DELAY_MS, jobId);
 
             // Toggle back on
             await client.patch(`/api/epg/sources/${source.id}/`, { is_active: true });
@@ -3517,7 +3540,7 @@ export class ImportService {
         } catch (error) {
           // ignore and retry
         }
-        await new Promise((res) => setTimeout(res, intervalMs));
+        await this.cancellableDelay(intervalMs, jobId);
       }
 
       // If still 0 after waiting, warn and proceed
@@ -3576,7 +3599,7 @@ export class ImportService {
       } catch (error) {
         // ignore and retry
       }
-      await new Promise((res) => setTimeout(res, intervalMs));
+      await this.cancellableDelay(intervalMs, jobId);
     }
 
     jobManager.addLog(
@@ -3608,7 +3631,7 @@ export class ImportService {
       } catch {
         // ignore and retry
       }
-      await new Promise((res) => setTimeout(res, intervalMs));
+      await this.cancellableDelay(intervalMs, jobId);
     }
     jobManager.addLog(
       jobId,
@@ -3640,10 +3663,16 @@ export class ImportService {
     const errors: string[] = [];
     const now = Date.now();
 
+    // Upload directory for multer disk storage
+    const uploadDir = process.env.DATA_DIR
+      ? path.join(process.env.DATA_DIR, 'uploads')
+      : path.join(process.cwd(), 'temp', 'uploads');
+
     try {
       // Ensure directories exist
       await mkdir(this.tempDir, { recursive: true });
       await mkdir(this.cacheDir, { recursive: true });
+      await mkdir(uploadDir, { recursive: true });
 
       // Cleanup upload cache
       const cacheFiles = await fsp.readdir(this.cacheDir);
@@ -3660,10 +3689,29 @@ export class ImportService {
         }
       }
 
+      // Cleanup multer upload directory (stale uploaded files)
+      try {
+        const uploadFiles = await fsp.readdir(uploadDir);
+        for (const file of uploadFiles) {
+          const filePath = path.join(uploadDir, file);
+          try {
+            const stat = await fsp.stat(filePath);
+            if (now - stat.mtimeMs > maxAgeMs) {
+              await unlink(filePath);
+              deleted.push(filePath);
+            }
+          } catch (err) {
+            errors.push(`${filePath}: ${err}`);
+          }
+        }
+      } catch {
+        // Upload dir may not exist yet, that's fine
+      }
+
       // Cleanup extraction directories (zip-*, extract-*)
       const tempFiles = await fsp.readdir(this.tempDir);
       for (const file of tempFiles) {
-        if (file === 'upload-cache') continue; // Skip cache dir itself
+        if (file === 'upload-cache' || file === 'uploads') continue; // Skip subdirs
         const filePath = path.join(this.tempDir, file);
         try {
           const stat = await fsp.stat(filePath);

@@ -9,6 +9,7 @@ import type {
   SavedConnection,
   SavedConnectionInput,
   JobLogEntry,
+  CombinedLogEntry,
   ImportOptions,
   PluginInfo,
   Schedule,
@@ -19,6 +20,7 @@ import type {
   NotificationProviderInput,
   NotificationGlobalSettings,
   VersionInfo,
+  ChecksumResponse,
 } from './types';
 
 const api = axios.create({
@@ -151,6 +153,15 @@ export function getExportLogosDownloadUrl(jobId: string): string {
   return `/api/export/download/${jobId}/logos`;
 }
 
+export function getExportChecksumDownloadUrl(jobId: string): string {
+  return `/api/export/download/${jobId}/checksum`;
+}
+
+export async function getExportChecksum(jobId: string): Promise<ChecksumResponse> {
+  const response = await api.get<ApiResponse<ChecksumResponse>>(`/export/checksum/${jobId}`);
+  return response.data.data!;
+}
+
 export async function cancelExport(jobId: string): Promise<void> {
   await api.post<ApiResponse>(`/export/cancel/${jobId}`);
 }
@@ -181,6 +192,22 @@ export async function getJobHistory(): Promise<JobStatus[]> {
 
 export async function clearJobHistory(): Promise<void> {
   await api.delete<ApiResponse>('/jobs/history');
+}
+
+export async function getAllLogs(options?: {
+  limit?: number;
+  jobType?: string;
+  search?: string;
+}): Promise<CombinedLogEntry[]> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.jobType) params.set('jobType', options.jobType);
+  if (options?.search) params.set('search', options.search);
+  const queryString = params.toString();
+  const response = await api.get<ApiResponse<CombinedLogEntry[]>>(
+    `/jobs/logs/all${queryString ? `?${queryString}` : ''}`
+  );
+  return response.data.data || [];
 }
 
 // Import APIs

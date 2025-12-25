@@ -21,10 +21,21 @@ const PRESET_CRONS: Record<SchedulePreset, string> = {
   custom: '', // User-defined
 };
 
+// Default retry settings
+const DEFAULT_RETRY_DELAY_MINUTES = 5;
+const MAX_RETRY_DELAY_MINUTES = 60;
+
 class SchedulerService {
   private scheduledTasks: Map<string, cron.ScheduledTask> = new Map();
   private runningJobs: Map<string, string> = new Map(); // scheduleId -> jobId
+  private pendingRetries: Map<string, NodeJS.Timeout> = new Map(); // scheduleId -> retry timeout
   private currentTimezone: string = 'UTC';
+  private initialized: boolean = false;
+
+  // Check if scheduler is initialized
+  isInitialized(): boolean {
+    return this.initialized;
+  }
 
   // Initialize on startup
   async initialize(): Promise<void> {
@@ -34,15 +45,82 @@ class SchedulerService {
       this.currentTimezone = await settingsStore.getTimezone();
       log.info({ timezone: this.currentTimezone }, 'Scheduler using timezone');
 
+      // Handle interrupted jobs from previous run
+      await this.recoverInterruptedJobs();
+
       const schedules = await scheduleStore.getAll();
       for (const schedule of schedules) {
         if (schedule.enabled) {
           await this.scheduleJob(schedule);
         }
       }
+      this.initialized = true;
       log.info({ count: this.scheduledTasks.size }, 'Scheduler initialized with active schedules');
     } catch (error) {
       log.error({ err: error }, 'Failed to initialize scheduler');
+    }
+  }
+
+  // Recover jobs that were interrupted by server restart
+  private async recoverInterruptedJobs(): Promise<void> {
+    try {
+      // Find and mark interrupted runs
+      const interrupted = await scheduleStore.markInterruptedRuns();
+
+      if (interrupted.length === 0) {
+        log.debug('No interrupted jobs to recover');
+        return;
+      }
+
+      log.info(
+        { count: interrupted.length, jobIds: interrupted.map((e) => e.jobId) },
+        'Found interrupted scheduled jobs from previous run'
+      );
+
+      // Get schedules that should be re-queued (still enabled)
+      const schedulesToRequeue = await scheduleStore.getSchedulesToRequeue(interrupted);
+
+      if (schedulesToRequeue.length === 0) {
+        log.info('No enabled schedules to requeue after recovery');
+        return;
+      }
+
+      log.info(
+        { count: schedulesToRequeue.length, scheduleIds: schedulesToRequeue },
+        'Re-queuing interrupted schedules'
+      );
+
+      // Schedule re-runs after a brief delay (30 seconds) to allow full startup
+      const RECOVERY_DELAY_MS = 30 * 1000;
+
+      for (const scheduleId of schedulesToRequeue) {
+        const schedule = await scheduleStore.getById(scheduleId);
+        if (!schedule) continue;
+
+        // Send notification about recovery
+        notificationService
+          .notify({
+            type: 'job_recovered',
+            scheduleName: schedule.name,
+            jobType: schedule.jobType,
+            timestamp: new Date().toISOString(),
+            message: `Schedule "${schedule.name}" was interrupted by server restart and will be re-run in 30 seconds`,
+          })
+          .catch((err) => log.error({ err }, 'Failed to send recovery notification'));
+
+        // Queue the recovery run
+        const timeout = setTimeout(async () => {
+          log.info({ scheduleId, scheduleName: schedule.name }, 'Executing recovery run');
+          await this.executeSchedule(scheduleId, false, 0);
+        }, RECOVERY_DELAY_MS);
+
+        // Don't prevent process exit
+        if (timeout.unref) {
+          timeout.unref();
+        }
+      }
+    } catch (error) {
+      log.error({ err: error }, 'Failed to recover interrupted jobs');
     }
   }
 
@@ -127,17 +205,26 @@ class SchedulerService {
     }
   }
 
-  // Execute the scheduled job
-  async executeSchedule(scheduleId: string): Promise<string | undefined> {
+  // Execute the scheduled job with optional retry tracking
+  async executeSchedule(
+    scheduleId: string,
+    isRetry: boolean = false,
+    retryAttempt: number = 0
+  ): Promise<string | undefined> {
     // Prevent concurrent runs of the same schedule
     if (this.runningJobs.has(scheduleId)) {
       log.debug({ scheduleId }, 'Schedule is already running, skipping this execution');
       return undefined;
     }
 
+    // Cancel any pending retry for this schedule (we're running now)
+    this.cancelPendingRetry(scheduleId);
+
     let jobId: string | undefined;
     let schedule: Schedule | undefined;
     let startTime: number = Date.now();
+    let jobFailed = false;
+    let failureError: string | undefined;
 
     try {
       schedule = await scheduleStore.getById(scheduleId);
@@ -160,20 +247,27 @@ class SchedulerService {
       jobId = jobManager.createJob(schedule.jobType);
       this.runningJobs.set(scheduleId, jobId);
 
-      // Record run start
-      await scheduleStore.recordRunStart(scheduleId, jobId);
+      // Record run start (with retry info if applicable)
+      await scheduleStore.recordRunStart(scheduleId, jobId, isRetry, retryAttempt || undefined);
       startTime = Date.now();
 
-      log.info({ scheduleName: schedule.name, scheduleId, jobId }, 'Executing schedule');
+      const logContext = {
+        scheduleName: schedule.name,
+        scheduleId,
+        jobId,
+        ...(isRetry && { isRetry, retryAttempt }),
+      };
+      log.info(logContext, isRetry ? 'Retrying schedule' : 'Executing schedule');
 
       // Send start notification (async, don't wait)
       notificationService
         .notify({
-          type: 'job_started',
+          type: isRetry ? 'job_retry_started' : 'job_started',
           scheduleName: schedule.name,
           jobType: schedule.jobType,
           jobId,
           timestamp: new Date().toISOString(),
+          ...(isRetry && { retryAttempt }),
         })
         .catch((err) => log.error({ err }, 'Failed to send start notification'));
 
@@ -221,8 +315,9 @@ class SchedulerService {
         );
       }
 
-      // Record success
+      // Record success and reset failure counter
       await scheduleStore.recordRunComplete(scheduleId, jobId, 'completed');
+      await scheduleStore.resetConsecutiveFailures(scheduleId);
       log.info({ scheduleName: schedule.name, scheduleId }, 'Schedule completed successfully');
 
       // Check if job completed with errors
@@ -253,22 +348,57 @@ class SchedulerService {
         })
         .catch((err) => log.error({ err }, 'Failed to send completion notification'));
     } catch (error: any) {
-      log.error({ err: error, scheduleId }, 'Schedule failed');
-      // Record failure
+      jobFailed = true;
+      failureError = error.message;
+      log.error({ err: error, scheduleId, isRetry, retryAttempt }, 'Schedule failed');
+
+      // Record failure and increment failure counter
       if (jobId) {
         await scheduleStore.recordRunComplete(scheduleId, jobId, 'failed', error.message);
+      }
+      const consecutiveFailures = await scheduleStore.incrementConsecutiveFailures(scheduleId);
 
-        // Send failure notification (async, don't wait)
-        if (schedule) {
+      // Determine if we should retry
+      if (schedule) {
+        const maxRetries = schedule.maxRetries || 0;
+        const shouldRetry = maxRetries > 0 && consecutiveFailures <= maxRetries;
+
+        if (shouldRetry) {
+          // Schedule retry
+          const retryDelayMinutes = Math.min(
+            schedule.retryDelayMinutes || DEFAULT_RETRY_DELAY_MINUTES,
+            MAX_RETRY_DELAY_MINUTES
+          );
+          this.scheduleRetry(scheduleId, consecutiveFailures, retryDelayMinutes);
+
+          // Send retry scheduled notification
           notificationService
             .notify({
-              type: 'job_failed',
+              type: 'job_retry_scheduled',
               scheduleName: schedule.name,
               jobType: schedule.jobType,
               jobId,
               timestamp: new Date().toISOString(),
               error: error.message,
               duration: Date.now() - startTime,
+              retryAttempt: consecutiveFailures,
+              maxRetries,
+              retryDelayMinutes,
+            })
+            .catch((err) => log.error({ err }, 'Failed to send retry scheduled notification'));
+        } else {
+          // Max retries exhausted or no retries configured
+          const notificationType = maxRetries > 0 ? 'job_failed_max_retries' : 'job_failed';
+          notificationService
+            .notify({
+              type: notificationType,
+              scheduleName: schedule.name,
+              jobType: schedule.jobType,
+              jobId,
+              timestamp: new Date().toISOString(),
+              error: error.message,
+              duration: Date.now() - startTime,
+              ...(maxRetries > 0 && { consecutiveFailures, maxRetries }),
             })
             .catch((err) => log.error({ err }, 'Failed to send failure notification'));
         }
@@ -285,6 +415,49 @@ class SchedulerService {
     }
 
     return jobId;
+  }
+
+  // Schedule a retry for a failed job
+  private scheduleRetry(scheduleId: string, retryAttempt: number, delayMinutes: number): void {
+    // Cancel any existing pending retry
+    this.cancelPendingRetry(scheduleId);
+
+    const delayMs = delayMinutes * 60 * 1000;
+    log.info(
+      { scheduleId, retryAttempt, delayMinutes },
+      `Scheduling retry #${retryAttempt} in ${delayMinutes} minutes`
+    );
+
+    const timeout = setTimeout(async () => {
+      this.pendingRetries.delete(scheduleId);
+
+      // Re-fetch schedule to check if it's still enabled
+      const schedule = await scheduleStore.getById(scheduleId);
+      if (!schedule || !schedule.enabled) {
+        log.info({ scheduleId }, 'Schedule disabled or deleted, skipping retry');
+        return;
+      }
+
+      // Execute the retry
+      await this.executeSchedule(scheduleId, true, retryAttempt);
+    }, delayMs);
+
+    // Don't prevent process exit
+    if (timeout.unref) {
+      timeout.unref();
+    }
+
+    this.pendingRetries.set(scheduleId, timeout);
+  }
+
+  // Cancel a pending retry
+  private cancelPendingRetry(scheduleId: string): void {
+    const timeout = this.pendingRetries.get(scheduleId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.pendingRetries.delete(scheduleId);
+      log.debug({ scheduleId }, 'Cancelled pending retry');
+    }
   }
 
   // Calculate next run time from cron expression
@@ -394,10 +567,19 @@ class SchedulerService {
   // Shutdown gracefully
   shutdown(): void {
     log.info('Shutting down scheduler service');
+
+    // Stop all scheduled tasks
     for (const [id, task] of this.scheduledTasks) {
       task.stop();
     }
     this.scheduledTasks.clear();
+
+    // Cancel all pending retries
+    for (const [id, timeout] of this.pendingRetries) {
+      clearTimeout(timeout);
+    }
+    this.pendingRetries.clear();
+
     log.info('Scheduler service shut down');
   }
 }
