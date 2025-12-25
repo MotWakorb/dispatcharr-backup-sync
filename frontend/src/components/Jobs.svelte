@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, cancelExport, cancelSync, cancelImport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
-  import type { JobStatus, JobLogEntry, ExportJobResult } from '../types';
+  import { listJobs, getExportDownloadUrl, getExportLogosDownloadUrl, getExportChecksumDownloadUrl, getExportChecksum, cancelExport, cancelSync, cancelImport, getJobHistory, getJobLogs, clearJobHistory } from '../api';
+  import type { JobStatus, JobLogEntry, ExportJobResult, ChecksumResponse } from '../types';
   import { ERRORS, LABELS, STATUS, CONFIRM, getErrorMessage, JOB_POLL_INTERVAL_MS } from '../constants';
   import { toastStore } from '../stores/toastStore';
   import Skeleton from './Skeleton.svelte';
@@ -27,6 +27,13 @@
 
   // Job completion tracking
   let previousJobStatuses: Map<string, string> = new Map();
+
+  // Checksum modal state
+  let showChecksumModal = false;
+  let checksumModalJob: JobStatus | null = null;
+  let checksumData: ChecksumResponse | null = null;
+  let checksumLoading = false;
+  let checksumError: string | null = null;
 
   onMount(() => {
     loadJobs(true);
@@ -121,6 +128,45 @@
     if (job.jobType === 'backup' && isSuccess && result?.logosFileName) {
       const url = getExportLogosDownloadUrl(job.jobId);
       window.location.href = url;
+    }
+  }
+
+  function downloadChecksum(job: JobStatus) {
+    const isSuccess = job.status === 'completed' || job.status === 'completed_with_warnings';
+    const result = job.result as ExportJobResult | undefined;
+    if (job.jobType === 'backup' && isSuccess && result?.checksumPath) {
+      const url = getExportChecksumDownloadUrl(job.jobId);
+      window.location.href = url;
+    }
+  }
+
+  async function viewChecksum(job: JobStatus) {
+    checksumModalJob = job;
+    showChecksumModal = true;
+    checksumLoading = true;
+    checksumError = null;
+    checksumData = null;
+
+    try {
+      checksumData = await getExportChecksum(job.jobId);
+    } catch (err: unknown) {
+      checksumError = getErrorMessage(err, 'Failed to load checksum');
+    } finally {
+      checksumLoading = false;
+    }
+  }
+
+  function closeChecksumModal() {
+    showChecksumModal = false;
+    checksumModalJob = null;
+    checksumData = null;
+    checksumError = null;
+  }
+
+  function copyChecksum() {
+    if (checksumData?.checksum) {
+      navigator.clipboard.writeText(checksumData.checksum);
+      toastStore.success('Checksum copied to clipboard');
     }
   }
 
@@ -414,6 +460,11 @@
                         Logos
                       </button>
                     {/if}
+                    {#if getExportResult(job)?.checksumPath}
+                      <button class="btn btn-secondary btn-sm" on:click={() => viewChecksum(job)} title="View SHA-256 checksum">
+                        SHA256
+                      </button>
+                    {/if}
                   {/if}
                   <button class="btn btn-secondary btn-sm" on:click={() => viewLogs(job)}>
                     Logs
@@ -464,6 +515,59 @@
               <span class="log-msg">{log.message}</span>
             </div>
           {/each}
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Checksum Modal -->
+{#if showChecksumModal}
+  <div class="modal-overlay" role="presentation">
+    <div class="checksum-modal" role="dialog" aria-modal="true" aria-labelledby="checksum-modal-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="checksum-modal-title">Backup Checksum</h3>
+          <p class="text-sm text-gray">{checksumModalJob?.jobId}</p>
+        </div>
+        <button class="close-btn" type="button" on:click={closeChecksumModal} aria-label="Close">
+          &times;
+        </button>
+      </div>
+      {#if checksumError}
+        <div class="alert alert-error mb-2">{checksumError}</div>
+      {/if}
+      <div class="checksum-body">
+        {#if checksumLoading}
+          <div class="flex items-center gap-2"><span class="spinner"></span><span>{STATUS.LOADING}</span></div>
+        {:else if checksumData}
+          <div class="checksum-info">
+            <div class="checksum-row">
+              <span class="checksum-label">File:</span>
+              <span class="checksum-value">{checksumData.fileName}</span>
+            </div>
+            <div class="checksum-row">
+              <span class="checksum-label">Algorithm:</span>
+              <span class="checksum-value">{checksumData.algorithm.toUpperCase()}</span>
+            </div>
+            <div class="checksum-row checksum-hash-row">
+              <span class="checksum-label">Checksum:</span>
+              <code class="checksum-hash">{checksumData.checksum}</code>
+            </div>
+          </div>
+          <div class="checksum-actions">
+            <button class="btn btn-primary btn-sm" on:click={copyChecksum}>
+              Copy Checksum
+            </button>
+            <button class="btn btn-secondary btn-sm" on:click={() => checksumModalJob && downloadChecksum(checksumModalJob)}>
+              Download .sha256
+            </button>
+          </div>
+          <p class="checksum-hint text-sm text-gray">
+            Verify with: <code>sha256sum -c {checksumData.fileName}.sha256</code>
+          </p>
+        {:else}
+          <p class="text-sm text-gray">No checksum available</p>
         {/if}
       </div>
     </div>
@@ -713,5 +817,78 @@
   .job-row:focus {
     outline: 2px solid var(--primary);
     outline-offset: -2px;
+  }
+
+  /* Checksum modal styles */
+  .checksum-modal {
+    width: min(500px, 95%);
+    background: var(--bg-card);
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .checksum-body {
+    padding: 1.25rem;
+  }
+
+  .checksum-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .checksum-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+  }
+
+  .checksum-label {
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 5rem;
+    flex-shrink: 0;
+  }
+
+  .checksum-value {
+    color: var(--text-primary);
+  }
+
+  .checksum-hash-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .checksum-hash {
+    font-family: Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    background: var(--bg-hover);
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    word-break: break-all;
+    display: block;
+    user-select: all;
+  }
+
+  .checksum-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .checksum-hint {
+    margin: 0;
+  }
+
+  .checksum-hint code {
+    font-family: Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8rem;
+    background: var(--bg-hover);
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
   }
 </style>

@@ -45,6 +45,16 @@ export interface ExportJobResult {
   fileName?: string;
   logosFilePath?: string;
   logosFileName?: string;
+  checksumPath?: string;
+}
+
+/**
+ * Checksum response from API
+ */
+export interface ChecksumResponse {
+  algorithm: string;
+  checksum: string;
+  fileName: string;
 }
 
 /**
@@ -126,6 +136,8 @@ export interface ScheduleInput {
   cronExpression?: string;
   enabled: boolean;
   retentionCount?: number; // Number of backups to keep (only for backup jobs)
+  maxRetries?: number; // Maximum number of retry attempts on failure (0 = no retries)
+  retryDelayMinutes?: number; // Delay between retry attempts in minutes (default: 5)
 }
 
 export interface Schedule extends ScheduleInput {
@@ -138,6 +150,7 @@ export interface Schedule extends ScheduleInput {
   nextRunAt?: string;
   isRunning?: boolean;
   runningJobId?: string;
+  consecutiveFailures?: number; // Count of consecutive failures for retry logic
 }
 
 export interface ScheduleRunHistoryEntry {
@@ -147,6 +160,8 @@ export interface ScheduleRunHistoryEntry {
   completedAt?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   error?: string;
+  isRetry?: boolean; // True if this run was a retry attempt
+  retryAttempt?: number; // Which retry attempt this was (1, 2, 3, etc.)
 }
 
 // App settings
@@ -209,6 +224,7 @@ export interface NotificationGlobalSettings {
   notifyOnComplete: boolean;
   notifyOnCompleteWithErrors: boolean;
   notifyOnFailure: boolean;
+  notifyOnRetry: boolean;
   includeLogsInEmail: boolean;
 }
 

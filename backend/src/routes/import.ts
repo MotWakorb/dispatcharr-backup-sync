@@ -1,7 +1,7 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { importService } from '../services/importService.js';
 import { jobManager } from '../services/jobManager.js';
-import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { connectionPool } from '../services/connectionPool.js';
 import { getErrorMessage, getErrorStatus } from '../utils/errorUtils.js';
 import multer from 'multer';
 import FormData from 'form-data';
@@ -10,6 +10,7 @@ import path from 'path';
 import type { ImportRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
 import { validateConnection } from '../schemas/index.js';
+import { checkDiskSpaceForUpload } from '../utils/diskSpace.js';
 
 const log = createLogger('import-route');
 
@@ -25,6 +26,8 @@ fs.mkdir(UPLOAD_DIR, { recursive: true }).catch((err) => {
   log.error({ err }, 'Failed to create upload directory');
 });
 
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024; // 10GB
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => {
@@ -36,9 +39,43 @@ const upload = multer({
     },
   }),
   limits: {
-    fileSize: 10 * 1024 * 1024 * 1024, // 10GB
+    fileSize: MAX_UPLOAD_SIZE,
   },
 });
+
+/**
+ * Middleware to check disk space before accepting uploads.
+ * Uses Content-Length header to estimate required space.
+ * Prevents DoS by filling disk with large uploads.
+ */
+const checkDiskSpaceMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  // Get expected content length from header
+  const contentLength = parseInt(req.headers['content-length'] || '0', 10);
+
+  // If no content-length or it's 0, use a reasonable default check
+  // (check for at least 100MB free space)
+  const expectedSize = contentLength > 0 ? contentLength : 100 * 1024 * 1024;
+
+  const spaceCheck = await checkDiskSpaceForUpload(UPLOAD_DIR, expectedSize);
+
+  if (!spaceCheck.ok) {
+    log.warn(
+      { contentLength, expectedSize, available: spaceCheck.available },
+      'Upload rejected due to insufficient disk space'
+    );
+    res.status(507).json({
+      success: false,
+      error: spaceCheck.error || 'Insufficient disk space for upload',
+    });
+    return;
+  }
+
+  next();
+};
 
 /**
  * Helper to read uploaded file from disk and clean up after.
@@ -68,7 +105,7 @@ async function cleanupUploadedFile(filePath: string | undefined): Promise<void> 
 }
 
 // Inspect an uploaded backup file
-importRouter.post('/inspect', upload.single('file'), async (req, res) => {
+importRouter.post('/inspect', checkDiskSpaceMiddleware, upload.single('file'), async (req, res) => {
   const uploadedFilePath = req.file?.path;
   try {
     log.debug(
@@ -106,7 +143,7 @@ importRouter.post('/inspect', upload.single('file'), async (req, res) => {
 });
 
 // Start a new import job
-importRouter.post('/', upload.single('file'), async (req, res) => {
+importRouter.post('/', checkDiskSpaceMiddleware, upload.single('file'), async (req, res) => {
   const uploadedFilePath = req.file?.path;
   try {
     // Handle both multipart/form-data and JSON requests
@@ -230,116 +267,120 @@ importRouter.get('/status/:jobId', (req, res) => {
 });
 
 // Upload plugin files to destination instance
-importRouter.post('/plugins', upload.array('plugins', 20), async (req, res) => {
-  const files = req.files as Express.Multer.File[];
-  const uploadedFilePaths = files?.map((f) => f.path).filter(Boolean) || [];
+importRouter.post(
+  '/plugins',
+  checkDiskSpaceMiddleware,
+  upload.array('plugins', 20),
+  async (req, res) => {
+    const files = req.files as Express.Multer.File[];
+    const uploadedFilePaths = files?.map((f) => f.path).filter(Boolean) || [];
 
-  // Helper to clean up all uploaded plugin files
-  const cleanupAllFiles = async () => {
-    for (const filePath of uploadedFilePaths) {
-      await cleanupUploadedFile(filePath);
-    }
-  };
-
-  try {
-    if (!files || files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'At least one plugin file is required',
-      });
-    }
-
-    let connection: DispatcharrConnection;
-    try {
-      connection = JSON.parse(req.body.connection || '{}');
-    } catch {
-      await cleanupAllFiles();
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid connection data',
-      });
-    }
-
-    const connValidation = validateConnection(connection, 'connection');
-    if (!connValidation.success) {
-      await cleanupAllFiles();
-      return res.status(400).json({
-        success: false,
-        error: connValidation.error,
-      });
-    }
-
-    const client = new DispatcharrClient(connection);
-    await client.authenticate();
-
-    const results: { uploaded: number; skipped: string[]; errors: string[] } = {
-      uploaded: 0,
-      skipped: [],
-      errors: [],
+    // Helper to clean up all uploaded plugin files
+    const cleanupAllFiles = async () => {
+      for (const filePath of uploadedFilePaths) {
+        await cleanupUploadedFile(filePath);
+      }
     };
 
-    for (const file of files) {
-      try {
-        // Read file from disk
-        const fileBuffer = await fs.readFile(file.path);
-
-        // Create form data for plugin import
-        const formData = new FormData();
-        formData.append('file', fileBuffer, {
-          filename: file.originalname,
-          contentType: file.mimetype || 'application/zip',
+    try {
+      if (!files || files.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'At least one plugin file is required',
         });
-
-        // Upload plugin to the destination instance
-        await client.post('/api/plugins/plugins/import/', formData, {
-          headers: {
-            ...formData.getHeaders(),
-          },
-        });
-
-        results.uploaded++;
-        log.info({ plugin: file.originalname }, 'Successfully uploaded plugin');
-      } catch (error) {
-        const errorMsg = getErrorMessage(error, 'Unknown error');
-        const statusCode = getErrorStatus(error);
-        const errorLower = errorMsg.toLowerCase();
-
-        log.debug({ plugin: file.originalname, statusCode, errorMsg }, 'Plugin upload error');
-
-        // Check if this is an "already exists" error - treat as skipped, not error
-        // Must be a 409 Conflict OR specifically mention plugin/version already exists
-        const isAlreadyExists =
-          statusCode === 409 ||
-          errorLower.includes('plugin already exists') ||
-          errorLower.includes('already installed') ||
-          (errorLower.includes('already exists') && errorLower.includes('plugin'));
-
-        if (isAlreadyExists) {
-          results.skipped.push(file.originalname);
-          log.info({ plugin: file.originalname }, 'Plugin already installed');
-        } else {
-          results.errors.push(`${file.originalname}: ${errorMsg}`);
-          log.error({ plugin: file.originalname, errorMsg }, 'Failed to upload plugin');
-        }
-      } finally {
-        // Clean up this plugin file after processing
-        await cleanupUploadedFile(file.path);
       }
-    }
 
-    res.json({
-      success: true,
-      data: results,
-    });
-  } catch (error) {
-    await cleanupAllFiles();
-    log.error({ err: error }, 'Error uploading plugins');
-    res.status(500).json({
-      success: false,
-      error: getErrorMessage(error, 'Failed to upload plugins'),
-    });
+      let connection: DispatcharrConnection;
+      try {
+        connection = JSON.parse(req.body.connection || '{}');
+      } catch {
+        await cleanupAllFiles();
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid connection data',
+        });
+      }
+
+      const connValidation = validateConnection(connection, 'connection');
+      if (!connValidation.success) {
+        await cleanupAllFiles();
+        return res.status(400).json({
+          success: false,
+          error: connValidation.error,
+        });
+      }
+
+      const client = await connectionPool.getClient(connection);
+
+      const results: { uploaded: number; skipped: string[]; errors: string[] } = {
+        uploaded: 0,
+        skipped: [],
+        errors: [],
+      };
+
+      for (const file of files) {
+        try {
+          // Read file from disk
+          const fileBuffer = await fs.readFile(file.path);
+
+          // Create form data for plugin import
+          const formData = new FormData();
+          formData.append('file', fileBuffer, {
+            filename: file.originalname,
+            contentType: file.mimetype || 'application/zip',
+          });
+
+          // Upload plugin to the destination instance
+          await client.post('/api/plugins/plugins/import/', formData, {
+            headers: {
+              ...formData.getHeaders(),
+            },
+          });
+
+          results.uploaded++;
+          log.info({ plugin: file.originalname }, 'Successfully uploaded plugin');
+        } catch (error) {
+          const errorMsg = getErrorMessage(error, 'Unknown error');
+          const statusCode = getErrorStatus(error);
+          const errorLower = errorMsg.toLowerCase();
+
+          log.debug({ plugin: file.originalname, statusCode, errorMsg }, 'Plugin upload error');
+
+          // Check if this is an "already exists" error - treat as skipped, not error
+          // Must be a 409 Conflict OR specifically mention plugin/version already exists
+          const isAlreadyExists =
+            statusCode === 409 ||
+            errorLower.includes('plugin already exists') ||
+            errorLower.includes('already installed') ||
+            (errorLower.includes('already exists') && errorLower.includes('plugin'));
+
+          if (isAlreadyExists) {
+            results.skipped.push(file.originalname);
+            log.info({ plugin: file.originalname }, 'Plugin already installed');
+          } else {
+            results.errors.push(`${file.originalname}: ${errorMsg}`);
+            log.error({ plugin: file.originalname, errorMsg }, 'Failed to upload plugin');
+          }
+        } finally {
+          // Clean up this plugin file after processing
+          await cleanupUploadedFile(file.path);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: results,
+      });
+    } catch (error) {
+      await cleanupAllFiles();
+      log.error({ err: error }, 'Error uploading plugins');
+      res.status(500).json({
+        success: false,
+        error: getErrorMessage(error, 'Failed to upload plugins'),
+      });
+    }
   }
-});
+);
 
 // Cancel import job
 importRouter.post('/cancel/:jobId', (req, res) => {

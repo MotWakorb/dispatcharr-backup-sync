@@ -1,4 +1,5 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
+import { connectionPool } from './connectionPool.js';
 import { jobManager } from './jobManager.js';
 import yaml from 'js-yaml';
 import fs, { promises as fsp } from 'fs';
@@ -309,11 +310,9 @@ export class ImportService {
       // Ensure temp directory exists
       await mkdir(this.tempDir, { recursive: true });
 
-      const client = new DispatcharrClient(request.destination);
-
-      // Authenticate
+      // Get client from connection pool (handles authentication)
       jobManager.setProgress(jobId, 5, 'Authenticating...');
-      await client.authenticate();
+      const client = await connectionPool.getClient(request.destination);
 
       // Ensure the special "Custom" M3UAccount exists (required by Dispatcharr for custom streams)
       try {

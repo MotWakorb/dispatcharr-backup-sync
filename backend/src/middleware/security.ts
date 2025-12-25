@@ -40,11 +40,6 @@ export const corsMiddleware = cors({
       return callback(null, true);
     }
 
-    // In production, be strict. In development, allow all for convenience
-    if (process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-
     log.warn({ origin }, 'CORS request blocked from unauthorized origin');
     callback(new Error(`Origin ${origin} not allowed by CORS policy`));
   },
@@ -55,8 +50,23 @@ export const corsMiddleware = cors({
 });
 
 // ============ Rate Limiting ============
+//
+// Rate Limit Headers (automatically added via standardHeaders: true):
+// - RateLimit-Limit: Maximum requests allowed in the window
+// - RateLimit-Remaining: Remaining requests in the current window
+// - RateLimit-Reset: Unix timestamp when the rate limit resets
+//
+// Rate Limit Tiers:
+// 1. General API: 500 requests per 15 minutes (most endpoints)
+// 2. Authentication: 50 requests per 15 minutes (connection testing)
+// 3. Job Creation: 10 requests per 1 minute (export/import/sync)
+// 4. File Uploads: 5 requests per 1 minute
 
-// General API rate limit
+/**
+ * General API rate limiter.
+ * Applies to most endpoints.
+ * Limit: 500 requests per 15 minutes per IP.
+ */
 export const generalRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 500, // Limit each IP to 500 requests per windowMs
@@ -76,7 +86,12 @@ export const generalRateLimiter = rateLimit({
   },
 });
 
-// Stricter rate limit for authentication/connection testing
+/**
+ * Authentication rate limiter.
+ * Applies to connection testing and authentication endpoints.
+ * Limit: 50 requests per 15 minutes per IP.
+ * Stricter to prevent brute force attacks.
+ */
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // Limit each IP to 50 auth attempts per windowMs
@@ -95,7 +110,12 @@ export const authRateLimiter = rateLimit({
   },
 });
 
-// Rate limit for job creation (export, import, sync)
+/**
+ * Job creation rate limiter.
+ * Applies to export, import, and sync endpoints.
+ * Limit: 10 requests per 1 minute per IP.
+ * Prevents resource exhaustion from too many concurrent jobs.
+ */
 export const jobCreationRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // Limit each IP to 10 job creations per minute
@@ -111,7 +131,12 @@ export const jobCreationRateLimiter = rateLimit({
   },
 });
 
-// Rate limit for file uploads
+/**
+ * File upload rate limiter.
+ * Applies to import file upload endpoints.
+ * Limit: 5 requests per 1 minute per IP.
+ * Prevents storage exhaustion from excessive uploads.
+ */
 export const uploadRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5, // Limit each IP to 5 uploads per minute

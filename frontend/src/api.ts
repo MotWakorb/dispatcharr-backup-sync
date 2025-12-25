@@ -20,6 +20,7 @@ import type {
   NotificationProviderInput,
   NotificationGlobalSettings,
   VersionInfo,
+  ChecksumResponse,
 } from './types';
 
 const api = axios.create({
@@ -150,6 +151,15 @@ export function getExportDownloadUrl(jobId: string): string {
 
 export function getExportLogosDownloadUrl(jobId: string): string {
   return `/api/export/download/${jobId}/logos`;
+}
+
+export function getExportChecksumDownloadUrl(jobId: string): string {
+  return `/api/export/download/${jobId}/checksum`;
+}
+
+export async function getExportChecksum(jobId: string): Promise<ChecksumResponse> {
+  const response = await api.get<ApiResponse<ChecksumResponse>>(`/export/checksum/${jobId}`);
+  return response.data.data!;
 }
 
 export async function cancelExport(jobId: string): Promise<void> {

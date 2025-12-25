@@ -50,7 +50,9 @@ jobsRouter.get('/logs/all', (req, res) => {
   try {
     const limit = parseInt(req.query.limit as string) || 500;
     const jobType = req.query.jobType as string | undefined;
-    const search = req.query.search as string | undefined;
+    // Limit search parameter length to prevent expensive string operations
+    const rawSearch = req.query.search as string | undefined;
+    const search = rawSearch && rawSearch.length <= 200 ? rawSearch : undefined;
 
     const allLogs = jobManager.getAllLogs({ limit, jobType, search });
     log.debug({ count: allLogs.length, limit, jobType, search }, 'Retrieved all logs');

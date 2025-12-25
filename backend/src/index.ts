@@ -18,6 +18,12 @@ import { CLEANUP_INTERVAL_MS } from './constants.js';
 import { validateAndLogEnvironment } from './utils/envValidation.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { migrateDataIfNeeded } from './utils/dataMigration.js';
+import {
+  generalRateLimiter,
+  authRateLimiter,
+  jobCreationRateLimiter,
+  uploadRateLimiter,
+} from './middleware/security.js';
 
 // Validate environment variables at startup
 validateAndLogEnvironment();
@@ -144,12 +150,20 @@ app.get('/metrics/summary', (req, res) => {
     });
 });
 
-// API Routes
-app.use('/api/sync', syncRouter);
-app.use('/api/export', exportRouter);
-app.use('/api/import', importRouter);
-app.use('/api/connections', connectionsRouter);
-app.use('/api/saved-connections', savedConnectionsRouter);
+// Apply general rate limiter to all API routes
+app.use('/api', generalRateLimiter);
+
+// API Routes with specific rate limiters
+// Job creation routes - stricter limits to prevent resource exhaustion
+app.use('/api/sync', jobCreationRateLimiter, syncRouter);
+app.use('/api/export', jobCreationRateLimiter, exportRouter);
+app.use('/api/import', uploadRateLimiter, importRouter);
+
+// Connection routes - auth rate limiter for test/info endpoints (brute force protection)
+app.use('/api/connections', authRateLimiter, connectionsRouter);
+app.use('/api/saved-connections', authRateLimiter, savedConnectionsRouter);
+
+// Standard routes with general rate limiting (already applied above)
 app.use('/api/jobs', jobsRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/settings', settingsRouter);
@@ -180,6 +194,7 @@ app.use((req, res) => {
 
 // Temp file cleanup interval (runs every hour)
 let tempCleanupInterval: ReturnType<typeof setInterval> | null = null;
+let tempCleanupInProgress = false; // Lock to prevent overlapping cleanup runs
 
 app.listen(PORT, () => {
   log.info({ port: PORT }, 'Dispatcharr Manager API running');
@@ -190,23 +205,31 @@ app.listen(PORT, () => {
     log.error({ err: error }, 'Failed to initialize scheduler');
   });
 
-  // Cleanup stale temp files on startup
-  importService
-    .cleanupStaleTempFiles()
-    .then((result) => {
+  // Cleanup stale temp files on startup (with lock to prevent overlap)
+  const runTempCleanup = async (context: string) => {
+    if (tempCleanupInProgress) {
+      log.debug({ context }, 'Temp cleanup already in progress, skipping');
+      return;
+    }
+    tempCleanupInProgress = true;
+    try {
+      const result = await importService.cleanupStaleTempFiles();
       if (result.deleted.length > 0) {
-        log.info({ count: result.deleted.length }, 'Startup: Cleaned up stale temp files');
+        log.info({ count: result.deleted.length, context }, 'Cleaned up stale temp files');
       }
-    })
-    .catch((error) => {
-      log.error({ err: error }, 'Startup: Failed to cleanup temp files');
-    });
+    } catch (error) {
+      log.error({ err: error, context }, 'Temp cleanup failed');
+    } finally {
+      tempCleanupInProgress = false;
+    }
+  };
+
+  // Run startup cleanup
+  runTempCleanup('startup');
 
   // Start periodic temp file cleanup (every hour)
   tempCleanupInterval = setInterval(() => {
-    importService.cleanupStaleTempFiles().catch((error) => {
-      log.error({ err: error }, 'Periodic temp cleanup failed');
-    });
+    runTempCleanup('periodic');
   }, CLEANUP_INTERVAL_MS);
   if (tempCleanupInterval.unref) {
     tempCleanupInterval.unref(); // Don't prevent process exit

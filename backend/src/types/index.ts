@@ -107,6 +107,8 @@ export interface ScheduleInput {
   cronExpression?: string;
   enabled: boolean;
   retentionCount?: number; // Number of backups to keep (only for backup jobs)
+  maxRetries?: number; // Maximum number of retry attempts on failure (0 = no retries)
+  retryDelayMinutes?: number; // Delay between retry attempts in minutes (default: 5)
 }
 
 export interface Schedule extends ScheduleInput {
@@ -117,6 +119,7 @@ export interface Schedule extends ScheduleInput {
   lastRunJobId?: string;
   lastRunStatus?: 'completed' | 'failed' | 'cancelled';
   nextRunAt?: string;
+  consecutiveFailures?: number; // Count of consecutive failures for retry logic
 }
 
 export interface ScheduleRunHistoryEntry {
@@ -126,6 +129,8 @@ export interface ScheduleRunHistoryEntry {
   completedAt?: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   error?: string;
+  isRetry?: boolean; // True if this run was a retry attempt
+  retryAttempt?: number; // Which retry attempt this was (1, 2, 3, etc.)
 }
 
 // ============================================
@@ -282,6 +287,7 @@ export interface ExportJobResult {
   fileName?: string;
   logosFilePath?: string;
   logosFileName?: string;
+  checksumPath?: string; // Path to SHA-256 checksum file for integrity verification
 }
 
 /**

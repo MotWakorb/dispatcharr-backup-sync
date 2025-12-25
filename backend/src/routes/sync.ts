@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { syncService } from '../services/syncService.js';
 import { jobManager } from '../services/jobManager.js';
-import { DispatcharrClient } from '../services/dispatcharrClient.js';
+import { connectionPool } from '../services/connectionPool.js';
 import { getErrorMessage } from '../utils/errorUtils.js';
 import type { SyncRequest, DispatcharrConnection } from '../types/index.js';
 import { createLogger } from '../services/logger.js';
@@ -26,11 +26,8 @@ syncRouter.post('/compare-plugins', async (req, res) => {
       });
     }
 
-    const sourceClient = new DispatcharrClient(source);
-    const destClient = new DispatcharrClient(destination);
-
-    await sourceClient.authenticate();
-    await destClient.authenticate();
+    const sourceClient = await connectionPool.getClient(source);
+    const destClient = await connectionPool.getClient(destination);
 
     const sourcePluginsResp = await sourceClient.get('/api/plugins/plugins/');
     const destPluginsResp = await destClient.get('/api/plugins/plugins/');

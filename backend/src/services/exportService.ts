@@ -1,4 +1,5 @@
 import { DispatcharrClient } from './dispatcharrClient.js';
+import { connectionPool } from './connectionPool.js';
 import { jobManager } from './jobManager.js';
 import { createLogger } from './logger.js';
 import fs from 'fs';
@@ -17,6 +18,7 @@ import type {
 import { DEFAULT_PAGE_SIZE, LOGO_TIMEOUT_MS, MAX_PAGINATION_PAGES } from '../constants.js';
 import { compressDirectory } from '../utils/compression.js';
 import { isExternalUrl, getLogoExtension, calculateLogoChecksum } from '../utils/logoUtils.js';
+import { createChecksumFile } from '../utils/checksum.js';
 
 const log = createLogger('export');
 
@@ -116,11 +118,9 @@ export class ExportService {
       // Ensure backup directory exists
       await mkdir(this.backupDir, { recursive: true });
 
-      const client = new DispatcharrClient(request.source);
-
-      // Authenticate
+      // Get client from connection pool (handles authentication)
       jobManager.setProgress(jobId, 5, 'Authenticating...');
-      await client.authenticate();
+      const client = await connectionPool.getClient(request.source);
       jobManager.addLog(jobId, 'Authenticated to source instance');
 
       // Calculate step-based progress
@@ -716,12 +716,18 @@ export class ExportService {
 
       await writeFile(jsonPath, this.formatExportContent(configData), 'utf-8');
 
-      jobManager.setProgress(jobId, 98, 'Compressing...');
+      jobManager.setProgress(jobId, 96, 'Compressing...');
       const finalFilePath = await this.compressDirectoryToZip(workDir, jobId);
+
+      // Create checksum file for integrity verification
+      jobManager.setProgress(jobId, 99, 'Creating checksum...');
+      const checksumPath = await createChecksumFile(finalFilePath);
+      jobManager.addLog(jobId, `Created checksum file: ${path.basename(checksumPath)}`);
 
       jobManager.completeJob(jobId, {
         filePath: finalFilePath,
         fileName: path.basename(finalFilePath),
+        checksumPath,
         summary: this.generateSummary(exportData),
       });
 

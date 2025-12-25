@@ -213,3 +213,121 @@ export function retryable<TArgs extends unknown[], TResult>(
 ): (...args: TArgs) => Promise<TResult> {
   return (...args: TArgs) => withRetry(() => fn(...args), options);
 }
+
+/**
+ * Error thrown when an operation times out
+ */
+export class TimeoutError extends Error {
+  constructor(
+    message: string,
+    public readonly timeoutMs: number
+  ) {
+    super(message);
+    this.name = 'TimeoutError';
+  }
+}
+
+/**
+ * Wrap a promise with a timeout. If the promise doesn't resolve within
+ * the specified time, a TimeoutError is thrown.
+ *
+ * @param promise - The promise to wrap
+ * @param timeoutMs - Timeout in milliseconds
+ * @param operationName - Optional name for error messages
+ * @returns The result of the promise
+ * @throws TimeoutError if the timeout is exceeded
+ *
+ * @example
+ * ```typescript
+ * const result = await withTimeout(
+ *   fetchData(url),
+ *   5000,
+ *   'fetchData'
+ * );
+ * ```
+ */
+export async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operationName = 'operation'
+): Promise<T> {
+  let timeoutId: NodeJS.Timeout | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new TimeoutError(`${operationName} timed out after ${timeoutMs}ms`, timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+/**
+ * Wrap Promise.all with a timeout. If all promises don't resolve within
+ * the specified time, a TimeoutError is thrown.
+ *
+ * @param promises - Array of promises to execute
+ * @param timeoutMs - Timeout in milliseconds
+ * @param operationName - Optional name for error messages
+ * @returns Array of results from all promises
+ * @throws TimeoutError if the timeout is exceeded
+ *
+ * @example
+ * ```typescript
+ * const [a, b, c] = await withTimeoutAll(
+ *   [fetchA(), fetchB(), fetchC()],
+ *   10000,
+ *   'fetchAllData'
+ * );
+ * ```
+ */
+export async function withTimeoutAll<T extends readonly unknown[] | []>(
+  promises: T,
+  timeoutMs: number,
+  operationName = 'Promise.all'
+): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
+  return withTimeout(
+    Promise.all(promises) as Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }>,
+    timeoutMs,
+    operationName
+  );
+}
+
+/**
+ * Wrap Promise.allSettled with a timeout. If all promises don't settle within
+ * the specified time, a TimeoutError is thrown.
+ *
+ * @param promises - Array of promises to execute
+ * @param timeoutMs - Timeout in milliseconds
+ * @param operationName - Optional name for error messages
+ * @returns Array of PromiseSettledResult from all promises
+ * @throws TimeoutError if the timeout is exceeded
+ *
+ * @example
+ * ```typescript
+ * const results = await withTimeoutAllSettled(
+ *   [fetchA(), fetchB(), fetchC()],
+ *   10000,
+ *   'fetchAllData'
+ * );
+ * ```
+ */
+export async function withTimeoutAllSettled<T extends readonly unknown[] | []>(
+  promises: T,
+  timeoutMs: number,
+  operationName = 'Promise.allSettled'
+): Promise<{ -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>> }> {
+  return withTimeout(
+    Promise.allSettled(promises) as Promise<{
+      -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>>;
+    }>,
+    timeoutMs,
+    operationName
+  );
+}

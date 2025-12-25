@@ -1,5 +1,6 @@
 import WebSocket, { WebSocketServer } from 'ws';
 import type { Server } from 'http';
+import { randomUUID } from 'crypto';
 import { createLogger } from './logger.js';
 import {
   progressEmitter,
@@ -10,6 +11,38 @@ import {
 import { jobManager } from './jobManager.js';
 
 const log = createLogger('websocket');
+
+// ============ WebSocket Protocol Documentation ============
+//
+// Connection:
+//   URL: ws://<host>/ws
+//   Max payload size: 1MB
+//
+// Heartbeat:
+//   Server sends 'heartbeat' every 30 seconds
+//   Server pings every 30 seconds, expects pong within 35 seconds
+//   Unresponsive clients are terminated automatically
+//
+// Message Format (JSON):
+//   { "type": "<message-type>", "payload": { ... } }
+//
+// Client -> Server Messages:
+//   - subscribe:job    { jobId: string }     Subscribe to job updates
+//   - unsubscribe:job  { jobId: string }     Unsubscribe from job updates
+//   - ping             {}                     Manual ping (server responds with pong)
+//
+// Server -> Client Messages:
+//   - connected        { clientId, timestamp }    Sent on connection
+//   - heartbeat        { timestamp }              Periodic heartbeat
+//   - pong             { timestamp }              Response to ping
+//   - job:status       { jobId, status, progress, message? }  Job status update
+//   - job:progress     { jobId, phase, message, progress, ... }  Progress event
+//   - job:phaseStart   { jobId, phase, message, ... }  Phase started
+//   - job:phaseComplete { jobId, phase, duration, ... }  Phase completed
+//
+// Job Status Values: pending, running, completed, completed_with_warnings, failed, cancelled
+//
+// ============================================================
 
 // Heartbeat interval in ms
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
@@ -25,7 +58,8 @@ interface ExtendedWebSocket extends WebSocket {
 }
 
 /**
- * WebSocket message types for client-server communication
+ * WebSocket message format for client-server communication.
+ * All messages are JSON with a type field and optional payload.
  */
 interface WsMessage {
   type: string;
@@ -97,7 +131,7 @@ class WebSocketService {
   private handleConnection(ws: ExtendedWebSocket): void {
     this.clientCount++;
     ws.isAlive = true;
-    ws.clientId = `client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    ws.clientId = randomUUID();
     ws.subscribedJobs = new Set();
 
     log.debug(
