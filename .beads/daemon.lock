@@ -1,7 +1,7 @@
 {
-  "pid": 41846,
-  "parent_pid": 41825,
+  "pid": 59965,
+  "parent_pid": 59944,
   "database": "/Users/lecaptainc/Code/dispatcharr-backup-sync/.beads/beads.db",
   "version": "0.30.7",
-  "started_at": "2025-12-20T15:19:14.317183Z"
+  "started_at": "2025-12-23T21:04:35.115858Z"
 }
