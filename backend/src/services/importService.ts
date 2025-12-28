@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import FormData from 'form-data';
 import AdmZip from 'adm-zip';
 import { v4 as uuidv4 } from 'uuid';
+import { sanitizeFilename } from '../utils/pathSecurity.js';
 import type {
   ImportOptions,
   ImportRequest,
@@ -362,7 +363,9 @@ export class ImportService {
 
       // Decode and save uploaded file
       jobManager.setProgress(jobId, 10, 'Processing uploaded file...');
-      const tempFilePath = path.join(this.tempDir, request.fileName);
+      // Sanitize filename to prevent path traversal attacks
+      const safeFileName = sanitizeFilename(request.fileName);
+      const tempFilePath = path.join(this.tempDir, safeFileName);
       const fileBuffer = Buffer.isBuffer(request.fileData)
         ? request.fileData
         : safeBase64Decode(request.fileData, MAX_BACKUP_FILE_SIZE, 'Backup file');
@@ -371,7 +374,7 @@ export class ImportService {
       // Extract if compressed
       let configFilePath = tempFilePath;
       let extractedDir: string | null = null;
-      const ext = path.extname(request.fileName).toLowerCase();
+      const ext = path.extname(safeFileName).toLowerCase();
 
       if (ext === '.zip') {
         const result = await this.extractZip(tempFilePath);
@@ -1017,13 +1020,15 @@ export class ImportService {
       await mkdir(this.tempDir, { recursive: true });
       await mkdir(this.cacheDir, { recursive: true });
 
-      tempFilePath = path.join(this.tempDir, request.fileName);
+      // Sanitize filename to prevent path traversal attacks
+      const safeFileName = sanitizeFilename(request.fileName);
+      tempFilePath = path.join(this.tempDir, safeFileName);
       const fileBuffer = Buffer.isBuffer(request.fileData)
         ? request.fileData
         : safeBase64Decode(request.fileData, MAX_BACKUP_FILE_SIZE, 'Backup file');
       await writeFile(tempFilePath, fileBuffer);
 
-      const ext = path.extname(request.fileName).toLowerCase();
+      const ext = path.extname(safeFileName).toLowerCase();
       if (ext === '.zip') {
         const result = await this.extractZip(tempFilePath);
         configFilePath = result.configPath;
@@ -1066,7 +1071,8 @@ export class ImportService {
       const uploadId = uuidv4();
       const cacheFile = path.join(this.cacheDir, `${uploadId}`);
       await writeFile(cacheFile, fileBuffer);
-      await writeFile(`${cacheFile}.meta`, JSON.stringify({ fileName: request.fileName }));
+      // Store sanitized filename in metadata
+      await writeFile(`${cacheFile}.meta`, JSON.stringify({ fileName: safeFileName }));
 
       return { sections, uploadId, plugins }; // uploadId is used by the client to skip re-upload
     } finally {
