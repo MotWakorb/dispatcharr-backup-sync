@@ -1,9 +1,36 @@
 import { promises as fs } from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import path from 'path';
 import { createLogger } from '../services/logger.js';
 
 const log = createLogger('disk-space');
+
+/**
+ * Validate and sanitize a path to prevent command injection.
+ * Only allows alphanumeric, slashes, dots, hyphens, underscores, and spaces.
+ */
+function sanitizePath(inputPath: string): string {
+  // Resolve to absolute path to normalize
+  const resolved = path.resolve(inputPath);
+
+  // Check for dangerous patterns
+  if (
+    resolved.includes('\0') || // Null bytes
+    resolved.includes('`') || // Backticks
+    resolved.includes('$') || // Variable expansion
+    resolved.includes(';') || // Command separator
+    resolved.includes('|') || // Pipe
+    resolved.includes('&') || // Background/AND
+    resolved.includes('>') || // Redirect
+    resolved.includes('<') || // Redirect
+    resolved.includes('\n') || // Newlines
+    resolved.includes('\r')
+  ) {
+    throw new Error('Invalid characters in path');
+  }
+
+  return resolved;
+}
 
 export interface DiskSpaceInfo {
   available: number; // bytes
@@ -27,9 +54,12 @@ export async function getDiskSpace(targetPath: string): Promise<DiskSpaceInfo> {
   }
 
   try {
-    // Use df command to get disk space (works on macOS and Linux)
+    // Sanitize the path to prevent command injection
+    const safePath = sanitizePath(checkPath);
+
+    // Use execFileSync instead of execSync to avoid shell interpretation
     // -k for kilobytes, -P for POSIX format (consistent output)
-    const output = execSync(`df -kP "${checkPath}"`, { encoding: 'utf8' });
+    const output = execFileSync('df', ['-kP', safePath], { encoding: 'utf8' });
     const lines = output.trim().split('\n');
 
     if (lines.length < 2) {

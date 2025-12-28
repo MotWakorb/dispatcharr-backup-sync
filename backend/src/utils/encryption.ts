@@ -83,7 +83,9 @@ export async function decrypt(encryptedData: string): Promise<string> {
   // Derive the key using the same salt
   const derivedKey = crypto.pbkdf2Sync(key, salt, 100000, 32, 'sha256');
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, derivedKey, iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, derivedKey, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
   decipher.setAuthTag(authTag);
 
   let decrypted = decipher.update(ciphertext.toString('base64'), 'base64', 'utf8');
@@ -198,7 +200,9 @@ export async function decryptBuffer(encryptedData: Buffer, passphrase?: string):
   const authTag = encryptedData.subarray(5 + IV_LENGTH, 5 + IV_LENGTH + AUTH_TAG_LENGTH);
   const ciphertext = encryptedData.subarray(5 + IV_LENGTH + AUTH_TAG_LENGTH);
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv, {
+    authTagLength: AUTH_TAG_LENGTH,
+  });
   decipher.setAuthTag(authTag);
 
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
