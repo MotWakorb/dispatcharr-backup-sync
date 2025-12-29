@@ -117,13 +117,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lint backend Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: docker/backend.Dockerfile
           failure-threshold: warning
 
       - name: Lint frontend Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: docker/frontend.Dockerfile
           failure-threshold: warning
