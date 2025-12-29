@@ -65,7 +65,7 @@ class ConnectionPool {
     const existing = this.pool.get(key);
     if (existing && !this.isExpired(existing)) {
       existing.lastUsed = Date.now();
-      log.debug({ connectionKey: key }, 'Reusing pooled connection');
+      log.info({ connectionKey: key, url: connection.url }, 'Reusing pooled connection');
       return existing.client;
     }
 
@@ -81,7 +81,7 @@ class ConnectionPool {
     }
 
     // Create new client and authenticate
-    log.debug({ connectionKey: key }, 'Creating new pooled connection');
+    log.info({ connectionKey: key, url: connection.url }, 'Creating new pooled connection');
     const client = new DispatcharrClient(connection);
     await client.authenticate();
 
@@ -93,7 +93,7 @@ class ConnectionPool {
       connectionKey: key,
     });
 
-    log.debug({ connectionKey: key, poolSize: this.pool.size }, 'Connection added to pool');
+    log.info({ connectionKey: key, poolSize: this.pool.size, url: connection.url }, 'Connection added to pool');
     return client;
   }
 

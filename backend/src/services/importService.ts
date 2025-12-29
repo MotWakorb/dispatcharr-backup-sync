@@ -307,6 +307,8 @@ export class ImportService {
   async import(request: ImportRequest, jobId: string): Promise<void> {
     try {
       jobManager.startJob(jobId, 'Initializing import...');
+      log.info({ destinationUrl: request.destination.url }, 'Starting import to destination');
+      jobManager.addLog(jobId, `Destination URL: ${request.destination.url}`);
 
       // Ensure temp directory exists
       await mkdir(this.tempDir, { recursive: true });

@@ -328,6 +328,11 @@
       const job = await getImportStatus(jobId);
       currentJob = job;
 
+      // Update overlay message from job's current status message
+      if (job.message) {
+        overlayMessage = job.message;
+      }
+
       if (job.status === 'running' || job.status === 'pending') {
         pollInterval = window.setTimeout(() => pollJobStatus(jobId), STATUS_POLL_INTERVAL_MS);
       } else {

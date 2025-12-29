@@ -31,13 +31,16 @@ COPY --from=builder /app/dist ./dist
 # Copy VERSION file for version info endpoint
 COPY VERSION ./VERSION
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
+# Install su-exec for dropping privileges and create non-root user
+RUN apk add --no-cache su-exec && \
+    addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 -G nodejs && \
-    chown -R nodejs:nodejs /app
+    mkdir -p /data && \
+    chown -R nodejs:nodejs /app /data
 
-# Switch to non-root user
-USER nodejs
+# Copy entrypoint script
+COPY docker/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Expose port
 EXPOSE 6002
@@ -46,5 +49,6 @@ EXPOSE 6002
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "require('http').get('http://localhost:6002/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
-# Start server
+# Use entrypoint to fix permissions then drop to nodejs user
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["npm", "start"]

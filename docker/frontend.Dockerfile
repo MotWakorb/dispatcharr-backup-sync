@@ -25,8 +25,12 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
 # nginx:alpine already runs as non-root user 'nginx' (uid 101)
-# Just ensure correct ownership of content
-RUN chown -R nginx:nginx /usr/share/nginx/html
+# Ensure correct ownership of content and cache directories
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/log/nginx && \
+    touch /var/run/nginx.pid && \
+    chown nginx:nginx /var/run/nginx.pid
 
 # Switch to non-root user
 USER nginx
