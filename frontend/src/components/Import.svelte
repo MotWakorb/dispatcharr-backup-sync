@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import ConnectionForm from './ConnectionForm.svelte';
   import JobProgress from './JobProgress.svelte';
-  import { startImport, getImportStatus, listSavedConnections, inspectImportFile, getJobLogs, uploadPluginFiles } from '../api';
+  import { startImport, getImportStatus, listSavedConnections, inspectImportFile, getJobLogs, uploadPluginFiles, cancelImport } from '../api';
   import type { DispatcharrConnection, ImportOptions, JobStatus, SavedConnection, JobLogEntry, PluginInfo } from '../types';
   import { ERRORS, STATUS, LABELS, VALIDATION, getErrorMessage, STATUS_POLL_INTERVAL_MS, LOG_POLL_INTERVAL_MS } from '../constants';
 
@@ -359,6 +359,25 @@
     }
   }
 
+  async function handleCancel() {
+    if (!currentJob?.jobId) return;
+    overlayMessage = 'Cancelling restore...';
+    if (pollInterval) {
+      clearTimeout(pollInterval);
+      pollInterval = null;
+    }
+    stopLogPolling();
+    try {
+      await cancelImport(currentJob.jobId);
+      currentJob = { ...currentJob, status: 'cancelled', message: 'Cancelled by user' };
+      overlayMessage = STATUS.RESTORE_CANCELLED;
+      await loadLogs(currentJob.jobId);
+    } catch (err: unknown) {
+      error = getErrorMessage(err, ERRORS.CANCEL_JOB);
+    }
+    importing = false;
+  }
+
   function handleImportComplete() {
     importing = false;
     currentJob = null;
@@ -609,6 +628,9 @@
             {#if currentJob?.status === 'running' || currentJob?.status === 'pending'}
               <button class="btn btn-secondary btn-sm" on:click={() => { showOverlay = false; }}>
                 Run in background
+              </button>
+              <button class="btn btn-secondary btn-sm" on:click={handleCancel} disabled={!currentJob}>
+                Cancel
               </button>
             {:else}
               <button class="btn btn-secondary btn-sm" on:click={handleImportComplete}>

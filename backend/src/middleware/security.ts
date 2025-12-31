@@ -78,7 +78,10 @@ export const generalRateLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => {
     // Skip rate limiting for health checks
-    return req.path === '/health';
+    if (req.path === '/health') return true;
+    // Skip rate limiting for job status polling (high-frequency during imports/exports)
+    if (req.path.startsWith('/api/jobs/') && req.method === 'GET') return true;
+    return false;
   },
   handler: (req, res, _next, options) => {
     log.warn({ ip: req.ip, path: req.path, method: req.method }, 'General rate limit exceeded');

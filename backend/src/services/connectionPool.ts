@@ -34,9 +34,10 @@ interface PooledConnection {
  * Does not include password for security (key is used in logs).
  */
 function getConnectionKey(connection: DispatcharrConnection): string {
-  // Simple hash to identify the connection without exposing credentials
-  const urlHash = Buffer.from(connection.url).toString('base64').slice(0, 16);
-  const userHash = Buffer.from(connection.username).toString('base64').slice(0, 8);
+  // Use full URL and username to ensure unique keys for different connections
+  // Previously used truncated base64 which caused collisions for similar URLs
+  const urlHash = Buffer.from(connection.url).toString('base64');
+  const userHash = Buffer.from(connection.username).toString('base64');
   return `${urlHash}:${userHash}`;
 }
 
@@ -93,7 +94,10 @@ class ConnectionPool {
       connectionKey: key,
     });
 
-    log.info({ connectionKey: key, poolSize: this.pool.size, url: connection.url }, 'Connection added to pool');
+    log.info(
+      { connectionKey: key, poolSize: this.pool.size, url: connection.url },
+      'Connection added to pool'
+    );
     return client;
   }
 
