@@ -116,12 +116,12 @@ export const authRateLimiter = rateLimit({
 /**
  * Job creation rate limiter.
  * Applies to export, import, and sync endpoints.
- * Limit: 10 requests per 1 minute per IP.
+ * Limit: 30 requests per 1 minute per IP.
  * Prevents resource exhaustion from too many concurrent jobs.
  */
 export const jobCreationRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 10, // Limit each IP to 10 job creations per minute
+  max: 30, // Limit each IP to 30 job creations per minute
   message: {
     success: false,
     error: 'Too many job requests, please wait before starting new jobs',

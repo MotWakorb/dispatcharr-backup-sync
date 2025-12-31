@@ -154,9 +154,12 @@ app.get('/metrics/summary', (req, res) => {
 app.use('/api', generalRateLimiter);
 
 // API Routes with specific rate limiters
-// Job creation routes - stricter limits to prevent resource exhaustion
-app.use('/api/sync', jobCreationRateLimiter, syncRouter);
-app.use('/api/export', jobCreationRateLimiter, exportRouter);
+// Job creation routes - apply stricter limits only to POST requests that create jobs
+// GET requests (status polling, downloads) use general rate limiting
+app.post('/api/sync', jobCreationRateLimiter);
+app.post('/api/export', jobCreationRateLimiter);
+app.use('/api/sync', syncRouter);
+app.use('/api/export', exportRouter);
 app.use('/api/import', uploadRateLimiter, importRouter);
 
 // Connection routes - auth rate limiter for test/info endpoints (brute force protection)
