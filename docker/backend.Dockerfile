@@ -32,7 +32,7 @@ COPY --from=builder /app/dist ./dist
 COPY VERSION ./VERSION
 
 # Install su-exec for dropping privileges and create non-root user
-RUN apk add --no-cache su-exec && \
+RUN apk add --no-cache su-exec=0.3-r0 && \
     addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 -G nodejs && \
     mkdir -p /data && \
