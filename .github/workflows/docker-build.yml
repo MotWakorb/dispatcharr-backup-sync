@@ -78,7 +78,7 @@ jobs:
 
       - name: Build and push Backend (AMD64)
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/backend.Dockerfile
@@ -122,7 +122,7 @@ jobs:
 
       - name: Build and push Backend (ARM64)
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/backend.Dockerfile
@@ -208,7 +208,7 @@ jobs:
 
       - name: Build and push Frontend (AMD64)
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/frontend.Dockerfile
@@ -252,7 +252,7 @@ jobs:
 
       - name: Build and push Frontend (ARM64)
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/frontend.Dockerfile
